@@ -1,0 +1,109 @@
+# ============================================================
+# AMS · Git 忽略规则
+# ============================================================
+
+# ---- 工作区元数据（本地 AI 助手工作记忆，不应进入仓库）----
+.workbuddy/
+
+# ---- 仓颉 SDK / 标准库（体积大、与版本强绑定，绝不入库）----
+# 本机 SDK 装在 E:/Cangjie（仓库外）；stdx 装在 E:/CangjieLibs（仓库外）。
+# 以下规则用于防止有人把 SDK 复制进仓库后误提交。
+tools/cangjie/
+tools/cangjie-libs/
+tools/cangjie-stdlib/
+CangjieLibs/
+**/cangjie-sdk/
+**/cangjie_sdk/
+**/cangjie_stdlib/
+
+# ---- 构建产物 ----
+# 仓颉
+target/
+*/target/
+*.cjo
+*.bc
+*.a
+*.o
+*.obj
+*.lib
+# C / C++
+build/
+cmake-build-*/
+out/
+*.exe
+*.dll
+*.so
+*.dylib
+*.pdb
+*.ilk
+# 前端
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+# Java
+*.jar
+*.war
+
+# ---- 环境与密钥（严禁入库）----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+keystore/
+secrets/
+**/ams-keys/
+config/application.local.toml
+config/secret.toml
+
+# ---- IDE / 编辑器 ----
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.template.json
+*.iml
+*.ipr
+*.iws
+.swp
+.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---- 日志与临时文件 ----
+*.log
+logs/
+tmp/
+temp/
+coverage/
+lcov.info
+lint-report/
+*.prof
+*.cpuprofile
+
+# ---- 数据库本地数据 ----
+*.sqlite
+*.sqlite3
+*.db
+data/
+!data/.gitkeep
+
+# ---- 归档与打包 ----
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar
+dist-packages/
+
+# ---- 工具缓存 ----
+.cjpm/
+.cache/
+.pytest_cache/
+__pycache__/
+*.pyc
