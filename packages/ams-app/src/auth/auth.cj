@@ -24,12 +24,14 @@ package ams.app.auth
 
 import std.collection.*
 
+import ams.app.audit.*
 import ams.crypto.provider.*
 import ams.data.repo.*
 import ams.kernel.error.*
 import ams.kernel.id.*
 import ams.kernel.log.*
 import ams.kernel.time.*
+import ams.security.audit.*
 import ams.security.authn.*
 
 /**
@@ -92,19 +94,65 @@ public class AuthService {
     private let hasher: PasswordHasher
     private let tokenService: TokenService
     private let config: AuthConfig
+    /** 口令策略校验器（FR-AUTH-004 / FR-AUTH-001 注册复用） */
+    private let passwordValidator: PasswordValidator
+    /**
+     * 审计记录器（FR-AUD-001）。
+     *
+     * 可选：未装配时**不影响**认证功能（便于单元测试与工具场景）。
+     */
+    private let recorder: ?AuditRecorder
 
     public init(
         userRepo: UserRepo,
         roleRepo: RoleRepo,
         hasher: PasswordHasher,
         tokenService: TokenService,
-        config: AuthConfig
+        config: AuthConfig,
+        passwordValidator: PasswordValidator,
+        recorder!: ?AuditRecorder = None
     ) {
         this.userRepo = userRepo
         this.roleRepo = roleRepo
         this.hasher = hasher
         this.tokenService = tokenService
         this.config = config
+        this.passwordValidator = passwordValidator
+        this.recorder = recorder
+    }
+
+    /**
+     * 记录一条审计（未装配记录器时静默跳过）。
+     */
+    private func audit(
+        actorId: String,
+        action: AuditAction,
+        targetType: String,
+        targetId: String,
+        result: AuditResult,
+        errorCode: String,
+        ip: String,
+        userAgent: String
+    ): Unit {
+        match (this.recorder) {
+            case Some(r) =>
+                r.record(
+                    actorId,
+                    ActorType.User,
+                    action,
+                    targetType,
+                    targetId,
+                    "",
+                    0,
+                    result,
+                    errorCode,
+                    ip,
+                    userAgent,
+                    "",
+                    Array<(String, String)>()
+                )
+            case None => ()
+        }
     }
 
     /**
@@ -156,6 +204,9 @@ public class AuthService {
         // 3) 失败路径：计数 + 渐进延迟
         if (!ok) {
             this.onLoginFailed(userId, username)
+            // FR-AUD-001：登录失败必须留痕
+            this.audit("${userId}", AuditAction.LoginFailed, "user", username,
+                       AuditResult.Failure, "AUTH_FAILED", ip, userAgent)
             throw unauthorized(message: "用户名或口令错误")
         }
 
@@ -174,6 +225,10 @@ public class AuthService {
         for (p in permCodes.iterator()) {
             perms.add(p)
         }
+
+        // FR-AUD-001：登录成功留痕
+        this.audit("${u.id}", AuditAction.Login, "user", username,
+                   AuditResult.Success, "", ip, userAgent)
 
         // 6) 签发令牌
         let issued = this.tokenService.issue(
@@ -284,5 +339,97 @@ public class AuthService {
         let n = this.tokenService.logoutAll(uid)
         Log.get().info("auth.logout.all", None, [("uid", uid), ("count", "${n}")])
         return n
+    }
+
+    /**
+     * 用户自助注册（FR-AUTH-001）。
+     *
+     * 安全约束：
+     *  - 邮箱 / 手机号二选一（均做非空 + 唯一性校验）；
+     *  - 口令须通过策略校验（复用 `PasswordValidator`，FR-AUTH-004）；
+     *  - 重复用户名 / 邮箱 / 手机号返回 409 冲突（而非被 `toDbError` 统一映射的 503）；
+     *  - 口令盐与哈希生成失败一律按内部错误抛出，不泄露细节。
+     *
+     * @return 新用户 ID
+     * @throws AppError（ValidationFailed / Conflict）
+     */
+    public func register(
+        username: String,
+        password: String,
+        email: String,
+        phone: String,
+        nickname: String
+    ): Int64 {
+        if (username.isEmpty() || password.isEmpty()) {
+            throw validationError("username", "用户名与口令不能为空")
+        }
+        // 邮箱 / 手机号二选一
+        if (email.isEmpty() && phone.isEmpty()) {
+            throw validationError("contact", "邮箱与手机号至少填写一项")
+        }
+        // 口令策略校验（FR-AUTH-004）
+        match (this.passwordValidator.check(password, username)) {
+            case PasswordCheck.Ok => ()
+            case PasswordCheck.TooShort(min) =>
+                throw validationError("password", "口令长度至少 ${min} 位")
+            case PasswordCheck.TooFewCharClasses(n) =>
+                throw validationError("password", "口令至少包含 ${n} 类字符（大小写/数字/符号）")
+            case PasswordCheck.InWeakDictionary =>
+                throw validationError("password", "口令过于常见，请更换")
+            case PasswordCheck.ContainsUsername =>
+                throw validationError("password", "口令不得包含用户名")
+            case PasswordCheck.RepeatedChars =>
+                throw validationError("password", "口令不得包含连续重复字符")
+        }
+        // 唯一性校验（任何一项冲突即 409，而非 503）
+        match (this.userRepo.findByUsername(username)) {
+            case Some(_) => throw conflict("用户名已被占用")
+            case None => ()
+        }
+        if (!email.isEmpty()) {
+            match (this.userRepo.findByEmail(email)) {
+                case Some(_) => throw conflict("邮箱已被占用")
+                case None => ()
+            }
+        }
+        if (!phone.isEmpty()) {
+            match (this.userRepo.findByPhone(phone)) {
+                case Some(_) => throw conflict("手机号已被占用")
+                case None => ()
+            }
+        }
+        // 生成盐与哈希（与 createUser 一致）
+        var salt: Array<Byte> = Array<Byte>(16, repeat: 0u8)
+        match (this.hasher.generateSalt()) {
+            case CryptoResult.Ok(b) => salt = b
+            case CryptoResult.Err(_) => throw AppError(AppErrorKind.Internal, "口令哈希生成失败")
+        }
+        var hash = ""
+        match (this.hasher.hash(password, salt)) {
+            case CryptoResult.Ok(h) => hash = h
+            case CryptoResult.Err(_) => throw AppError(AppErrorKind.Internal, "口令哈希生成失败")
+        }
+        // 空串 → NULL，避免撞 email/phone 唯一部分索引
+        var emailOpt: Option<String> = None
+        if (!email.isEmpty()) {
+            emailOpt = Some(email)
+        }
+        var phoneOpt: Option<String> = None
+        if (!phone.isEmpty()) {
+            phoneOpt = Some(phone)
+        }
+        var nickOpt: Option<String> = None
+        if (!nickname.isEmpty()) {
+            nickOpt = Some(nickname)
+        }
+        return this.userRepo.create(
+            username,
+            emailOpt,
+            phoneOpt,
+            nickOpt,
+            hash,
+            this.config.kdfIterations,
+            0 // 自助注册无操作员，operatorId 记为 0
+        )
     }
 }

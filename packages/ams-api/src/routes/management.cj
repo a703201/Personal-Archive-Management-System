@@ -60,6 +60,16 @@ public class ManagementRoutes {
     private let notifyRepo: NotifyRepo
     private let configRepo: ConfigRepo
     private let hasher: PasswordHasher
+    /**
+     * 口令策略校验器（FR-AUTH-004）。
+     *
+     * ⚠️ 此前本类**从不调用**校验器 —— 策略规则虽已实现且有单测，
+     *    但实际未生效（弱口令、过短口令都能建账号）。
+     *    现已在 createUser / resetPassword 两处强制执行。
+     */
+    private let passwordValidator: PasswordValidator
+    /** 口令策略（用于取最小修改间隔） */
+    private let passwordPolicy: PasswordPolicy
 
     public init(
         userRepo: UserRepo,
@@ -67,7 +77,9 @@ public class ManagementRoutes {
         tagRepo: TagRepo,
         notifyRepo: NotifyRepo,
         configRepo: ConfigRepo,
-        hasher: PasswordHasher
+        hasher: PasswordHasher,
+        passwordValidator!: PasswordValidator,
+        passwordPolicy!: PasswordPolicy = PasswordPolicy()
     ) {
         this.userRepo = userRepo
         this.roleRepo = roleRepo
@@ -75,6 +87,8 @@ public class ManagementRoutes {
         this.notifyRepo = notifyRepo
         this.configRepo = configRepo
         this.hasher = hasher
+        this.passwordValidator = passwordValidator
+        this.passwordPolicy = passwordPolicy
     }
 
     /**
@@ -94,6 +108,21 @@ public class ManagementRoutes {
         router.get("/api/roles", { req: ApiRequest => this.listRoles(req) }, requiredPerm: "acl:manage")
         router.get("/api/perms", { req: ApiRequest => this.listPerms(req) }, requiredPerm: "acl:manage")
         router.post("/api/roles/:code/perms", { req: ApiRequest => this.assignPerms(req) }, requiredPerm: "acl:manage")
+
+        // ---- 角色管理闭环（FR-ACL-002）----
+        router.post("/api/roles", { req: ApiRequest => this.createRole(req) }, requiredPerm: "acl:manage")
+        router.put("/api/roles/:code", { req: ApiRequest => this.updateRole(req) }, requiredPerm: "acl:manage")
+        router.delete("/api/roles/:code", { req: ApiRequest => this.deleteRole(req) }, requiredPerm: "acl:manage")
+
+        // ---- 用户-角色分配（FR-ACL-004）----
+        router.get("/api/users/:id/roles", { req: ApiRequest => this.listUserRoles(req) }, requiredPerm: "user:manage")
+        router.post("/api/users/:id/roles", { req: ApiRequest => this.assignUserRole(req) }, requiredPerm: "user:manage")
+        router.delete("/api/users/:id/roles/:roleCode", { req: ApiRequest => this.revokeUserRole(req) }, requiredPerm: "user:manage")
+
+        // ---- 显式授权（FR-ACL-008）----
+        router.post("/api/grants", { req: ApiRequest => this.createGrant(req) }, requiredPerm: "acl:grant:own")
+        router.delete("/api/grants/:id", { req: ApiRequest => this.revokeGrant(req) }, requiredPerm: "acl:revoke:own")
+        router.get("/api/grants", { req: ApiRequest => this.listGrants(req) }, requiredPerm: "acl:read:own")
 
         // ---- 标签 ----
         router.get("/api/tags", { req: ApiRequest => this.listTags(req) }, requiredPerm: "tag:read:own")
@@ -150,6 +179,8 @@ public class ManagementRoutes {
         if (username.isEmpty() || password.isEmpty()) {
             throw validationError("username", "用户名与口令不能为空")
         }
+        // ---- 口令策略校验（FR-AUTH-004）----
+        this.checkPasswordPolicy(password, username)
         // 生成盐与哈希
         var salt: Array<Byte> = Array<Byte>(16, repeat: 0u8)
         match (this.hasher.generateSalt()) {
@@ -176,6 +207,12 @@ public class ManagementRoutes {
         if (password.isEmpty()) {
             throw validationError("password", "新口令不能为空")
         }
+        // ---- 口令策略校验（FR-AUTH-004）----
+        // 重置他人口令时，用**目标用户名**做「口令不得包含用户名」检查
+        let targetName = this.userRepo.findById(id).map { u => u.username } ?? ""
+        this.checkPasswordPolicy(password, targetName)
+        // ---- 两次修改间隔检查（FR-AUTH-004）----
+        this.checkPasswordChangeInterval(id)
         var salt: Array<Byte> = Array<Byte>(16, repeat: 0u8)
         match (this.hasher.generateSalt()) {
             case CryptoResult.Ok(b) => salt = b
@@ -191,6 +228,49 @@ public class ManagementRoutes {
             throw notFound("用户")
         }
         return ApiResponse.ok("{\"updated\":true}", req.requestId)
+    }
+
+    /**
+     * 校验口令是否符合策略（FR-AUTH-004）。
+     *
+     * 校验项：长度、字符类别数、弱口令字典、含用户名、连续重复字符。
+     * 失败一律返回 400（校验类错误），不泄露具体是哪一项弱 ——
+     * 但给出可读提示，让用户知道怎么改。
+     */
+    private func checkPasswordPolicy(password: String, username: String): Unit {
+        let result = this.passwordValidator.check(password, username)
+        match (result) {
+            case PasswordCheck.Ok => return
+            case PasswordCheck.TooShort(min) =>
+                throw validationError("password", "口令长度至少 ${min} 位")
+            case PasswordCheck.TooFewCharClasses(min) =>
+                throw validationError("password", "口令需包含至少 ${min} 类字符（小写/大写/数字/符号）")
+            case PasswordCheck.InWeakDictionary =>
+                throw validationError("password", "该口令过于常见，请换一个")
+            case PasswordCheck.ContainsUsername =>
+                throw validationError("password", "口令不得包含用户名")
+            case PasswordCheck.RepeatedChars =>
+                throw validationError("password", "口令不得包含连续重复字符")
+        }
+    }
+
+    /**
+     * 校验两次口令修改的最小间隔（FR-AUTH-004，默认 ≥ 24 小时）。
+     *
+     * 管理员**重置**他人口令时同样受此约束 —— 防止绕过策略
+     * （例如用户自己想改却受限，管理员却能随时重置）。
+     * 从未设置过口令的账号不受限制。
+     */
+    private func checkPasswordChangeInterval(userId: Int64): Unit {
+        let elapsed = this.userRepo.millisSincePasswordUpdate(userId)
+        if (elapsed <= 0) {
+            return
+        }
+        let minMs = this.passwordPolicy.minChangeIntervalHours * 3600 * 1000
+        if (elapsed < minMs) {
+            let hours = (minMs - elapsed) / 3600000 + 1
+            throw validationError("password", "距上次修改口令不足 ${hours} 小时，请稍后再试")
+        }
     }
 
     private func setUserStatus(req: ApiRequest): ApiResponse {
@@ -419,6 +499,178 @@ public class ManagementRoutes {
             ManagementRoutes.operatorId(req)
         )
         return ApiResponse.ok("{\"id\":${id}}", req.requestId)
+    }
+
+    // ==================== 角色管理闭环（FR-ACL-002） ====================
+
+    private func createRole(req: ApiRequest): ApiResponse {
+        let json = ManagementRoutes.body(req)
+        let code = json.get("code") ?? ""
+        let name = json.get("name") ?? ""
+        if (code.isEmpty() || name.isEmpty()) {
+            throw validationError("code", "角色编码与名称不能为空")
+        }
+        let parentId: Int64 = match (ManagementRoutes.longOpt(json, "parentRoleId")) {
+            case Some(v) => v
+            case None => 0
+        }
+        let id = this.roleRepo.createRole(
+            code,
+            name,
+            json.get("description") ?? "",
+            ManagementRoutes.intFrom(json, "maxDataLevel", 1),
+            parentId,
+            ManagementRoutes.operatorId(req)
+        )
+        return ApiResponse.ok("{\"id\":${id}}", req.requestId)
+    }
+
+    private func updateRole(req: ApiRequest): ApiResponse {
+        let code = match (req.pathParam("code")) {
+            case Some(c) => c
+            case None => throw validationError("code", "缺少角色编码")
+        }
+        let json = ManagementRoutes.body(req)
+        let name = json.get("name") ?? ""
+        if (name.isEmpty()) {
+            throw validationError("name", "角色名称不能为空")
+        }
+        let parentId: Int64 = match (ManagementRoutes.longOpt(json, "parentRoleId")) {
+            case Some(v) => v
+            case None => 0
+        }
+        let ok = this.roleRepo.updateRole(
+            code,
+            name,
+            json.get("description") ?? "",
+            ManagementRoutes.intFrom(json, "maxDataLevel", 1),
+            parentId,
+            ManagementRoutes.operatorId(req)
+        )
+        if (!ok) {
+            throw notFound("角色")
+        }
+        return ApiResponse.ok("{\"updated\":true}", req.requestId)
+    }
+
+    private func deleteRole(req: ApiRequest): ApiResponse {
+        let code = match (req.pathParam("code")) {
+            case Some(c) => c
+            case None => throw validationError("code", "缺少角色编码")
+        }
+        let ok = this.roleRepo.deleteRole(code, ManagementRoutes.operatorId(req))
+        if (!ok) {
+            throw notFound("角色")
+        }
+        return ApiResponse.ok("{\"deleted\":true}", req.requestId)
+    }
+
+    // ==================== 用户-角色分配（FR-ACL-004） ====================
+
+    private func listUserRoles(req: ApiRequest): ApiResponse {
+        let userId = ManagementRoutes.pathId(req, "id")
+        let rows = this.roleRepo.listUserRoles(userId)
+        return ApiResponse.ok(ManagementRoutes.rowsToJson(rows, "total", "${rows.size()}"), req.requestId)
+    }
+
+    private func assignUserRole(req: ApiRequest): ApiResponse {
+        let userId = ManagementRoutes.pathId(req, "id")
+        let json = ManagementRoutes.body(req)
+        let roleCode = json.get("roleCode") ?? ""
+        if (roleCode.isEmpty()) {
+            throw validationError("roleCode", "缺少角色编码")
+        }
+        let subjectId: Int64 = match (ManagementRoutes.longOpt(json, "subjectId")) {
+            case Some(v) => v
+            case None => 0
+        }
+        let id = this.roleRepo.assignUserRole(
+            userId,
+            roleCode,
+            subjectId,
+            ManagementRoutes.intFrom(json, "category", 0),
+            ManagementRoutes.operatorId(req)
+        )
+        return ApiResponse.ok("{\"id\":${id}}", req.requestId)
+    }
+
+    private func revokeUserRole(req: ApiRequest): ApiResponse {
+        let userId = ManagementRoutes.pathId(req, "id")
+        let roleCode = match (req.pathParam("roleCode")) {
+            case Some(c) => c
+            case None => throw validationError("roleCode", "缺少角色编码")
+        }
+        let subjectId = match (req.queryParam("subjectId")) {
+            case Some(v) => ManagementRoutes.parseInt(v)
+            case None => 0
+        }
+        let ok = this.roleRepo.revokeUserRole(userId, roleCode, subjectId)
+        if (!ok) {
+            throw notFound("角色分配")
+        }
+        return ApiResponse.ok("{\"revoked\":true}", req.requestId)
+    }
+
+    // ==================== 显式授权（FR-ACL-008） ====================
+
+    private func createGrant(req: ApiRequest): ApiResponse {
+        let json = ManagementRoutes.body(req)
+        let subjectId: Int64 = match (ManagementRoutes.longOpt(json, "subjectId")) {
+            case Some(v) => v
+            case None => 0
+        }
+        let granteeId: Int64 = match (ManagementRoutes.longOpt(json, "granteeId")) {
+            case Some(v) => v
+            case None => 0
+        }
+        let codes = ManagementRoutes.stringArray(json, "permCodes")
+        if (subjectId <= 0) {
+            throw validationError("subjectId", "缺少授权主体")
+        }
+        if (granteeId <= 0) {
+            throw validationError("granteeId", "缺少被授权人")
+        }
+        if (codes.isEmpty()) {
+            throw validationError("permCodes", "至少选择一个权限")
+        }
+        // 授权人必须能访问该主体（防越权授权，FR-ACL-008 安全约束）
+        if (!this.userRepo.listAccessibleSubjectIds(ManagementRoutes.operatorId(req)).contains("${subjectId}")) {
+            throw AppError(AppErrorKind.Forbidden, "无权对该主体授权")
+        }
+        let sb = StringBuilder()
+        var first = true
+        for (c in codes.iterator()) {
+            if (!first) {
+                sb.append(",")
+            } else {
+                first = false
+            }
+            sb.append(c)
+        }
+        let id = this.roleRepo.createGrant(
+            subjectId,
+            match (ManagementRoutes.longOpt(json, "itemId")) { case Some(v) => v; case None => 0 },
+            ManagementRoutes.intFrom(json, "category", 0),
+            granteeId,
+            sb.toString(),
+            ManagementRoutes.operatorId(req),
+            match (ManagementRoutes.longOpt(json, "expiresAt")) { case Some(v) => v; case None => 0 }
+        )
+        return ApiResponse.ok("{\"id\":${id}}", req.requestId)
+    }
+
+    private func revokeGrant(req: ApiRequest): ApiResponse {
+        let id = ManagementRoutes.pathId(req, "id")
+        let ok = this.roleRepo.revokeGrant(id, ManagementRoutes.operatorId(req))
+        if (!ok) {
+            throw notFound("授权")
+        }
+        return ApiResponse.ok("{\"revoked\":true}", req.requestId)
+    }
+
+    private func listGrants(req: ApiRequest): ApiResponse {
+        let rows = this.roleRepo.listGrantsByGrantee(ManagementRoutes.subjectId(req))
+        return ApiResponse.ok(ManagementRoutes.rowsToJson(rows, "total", "${rows.size()}"), req.requestId)
     }
 
     // ==================== 工具方法 ====================

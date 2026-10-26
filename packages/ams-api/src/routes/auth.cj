@@ -25,7 +25,7 @@ import ams.kernel.log.*
 /**
  * 极简 JSON 解析。
  *
- * 只解析登录接口需要的扁平整���对象：
+ * 只解析登录接口需要的扁平对象：
  *   {"username":"alice","password":"secret"}
  *
  * 说明：不引入完整 JSON 库（stdx.encoding.json 存在但对
@@ -112,6 +112,8 @@ public class AuthRoutes {
         router.post("/api/auth/refresh", { req: ApiRequest => this.refresh(req) }, isPublic: true)
         router.post("/api/auth/logout", { req: ApiRequest => this.logout(req) })
         router.post("/api/auth/logout-all", { req: ApiRequest => this.logoutAll(req) })
+        // 自助注册（FR-AUTH-001）：公开接口，不要求令牌；captcha 为 P1 暂未接入
+        router.post("/api/auth/register", { req: ApiRequest => this.register(req) }, isPublic: true)
     }
 
     /**
@@ -183,5 +185,26 @@ public class AuthRoutes {
         }
         let n = this.authService.logoutAll(req.subjectId)
         return ApiResponse.ok("{\"revokedSessions\":${n}}", req.requestId)
+    }
+
+    /**
+     * POST /api/auth/register（FR-AUTH-001）
+     *
+     * 请求体：{"username","password","email?","phone?","nickname?"}
+     * 邮箱 / 手机号二选一；口令策略与唯一性校验由 AuthService 负责。
+     */
+    private func register(req: ApiRequest): ApiResponse {
+        let body = req.bodyText()
+        let json = match (SimpleJson.parse(body)) {
+            case Some(j) => j
+            case None => throw validationError("body", "请求体不是合法的 JSON 对象")
+        }
+        let username = json.get("username") ?? ""
+        let password = json.get("password") ?? ""
+        let email = json.get("email") ?? ""
+        let phone = json.get("phone") ?? ""
+        let nickname = json.get("nickname") ?? ""
+        let id = this.authService.register(username, password, email, phone, nickname)
+        return ApiResponse.ok("{\"id\":${id}}", req.requestId)
     }
 }

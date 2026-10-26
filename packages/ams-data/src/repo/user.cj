@@ -95,15 +95,38 @@ public class RowData {
     }
 
     /**
+     * 查找列下标（**大小写不敏感回退**）。
+     *
+     * 为什么需要：PostgreSQL/openGauss 会把未加引号的别名转成小写，
+     * 而驱动返回的列名形态不保证一致（可能保留数据库原始大小写）。
+     * 实测踩坑：`encode(prev_hash,'hex') AS prev_hash_hex` 取不到值，
+     * 导致哈希链校验误判「链断裂」。
+     *
+     * 策略：先精确匹配（快路径），未命中再忽略大小写匹配。
+     */
+    private func findIndex(name: String): Int64 {
+        for (i in 0..this.cols.size) {
+            if (this.cols[i] == name) {
+                return i
+            }
+        }
+        for (i in 0..this.cols.size) {
+            if (this.cols[i].toAsciiLower() == name.toAsciiLower()) {
+                return i
+            }
+        }
+        return -1
+    }
+
+    /**
      * 取可空字符串。
      */
     public func getOpt(name: String): Option<String> {
-        for (i in 0..this.cols.size) {
-            if (this.cols[i] == name) {
-                return this.vals[i]
-            }
+        let idx = this.findIndex(name)
+        if (idx < 0) {
+            return None
         }
-        return None
+        return this.vals[idx]
     }
 
     /**
@@ -326,6 +349,46 @@ public class UserRepo {
             let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, username)
+            let rs = readRows(st.query())
+            match (rs.first()) {
+                case Some(r) => return Some(UserRecord.fromRow(r))
+                case None => return None
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 按邮箱查用户（注册唯一性校验用，不返回口令哈希）。
+     */
+    public func findByEmail(email: String): Option<UserRecord> {
+        let sql = "SELECT ${UserRepo.AUTH_COLUMNS} FROM sys_users " +
+                  "WHERE email = ? AND deleted_at IS NULL"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, email)
+            let rs = readRows(st.query())
+            match (rs.first()) {
+                case Some(r) => return Some(UserRecord.fromRow(r))
+                case None => return None
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 按手机号查用户（注册唯一性校验用，不返回口令哈希）。
+     */
+    public func findByPhone(phone: String): Option<UserRecord> {
+        let sql = "SELECT ${UserRepo.AUTH_COLUMNS} FROM sys_users " +
+                  "WHERE phone = ? AND deleted_at IS NULL"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, phone)
             let rs = readRows(st.query())
             match (rs.first()) {
                 case Some(r) => return Some(UserRecord.fromRow(r))
@@ -581,6 +644,133 @@ public class UserRepo {
             throw toDbError(e)
         }
     }
+
+    /**
+     * 列出该用户可访问的主体 ID。
+     *
+     * 可访问范围 = 本人拥有的主体 + 本人被授权的主体（代管）。
+     *
+     * 依据（FR-ACL-006 数据归属校验）：
+     *   所有档案查询强制附加 subject_id 归属条件，
+     *   禁止由前端传参决定归属 —— 故此列表必须**由服务端**算出。
+     */
+    public func listAccessibleSubjectIds(userId: Int64): ArrayList<String> {
+        let out = ArrayList<String>()
+        let sql = "SELECT DISTINCT id FROM arc_subjects " +
+                  "WHERE deleted_at IS NULL AND (" +
+                  "  owner_id = ?" +
+                  "  OR ? = ANY(custodian_ids)" +
+                  ") ORDER BY id"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, userId)
+            st.set(1, userId)
+            let rows = readRows(st.query())
+            for (r in rows.all().iterator()) {
+                out.add("${r.i64("id")}")
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+        return out
+    }
+
+    /**
+     * 列出该用户**本人拥有**的主体 ID（不含代管）。
+     *
+     * 用途（FR-ACL-007 敏感度分级）：所有者对自己名下的一切天然可见，
+     * 代管人则需显式授权 —— 故必须区分「拥有」与「可访问」。
+     */
+    public func listOwnedSubjectIds(userId: Int64): ArrayList<String> {
+        let out = ArrayList<String>()
+        let sql = "SELECT id FROM arc_subjects WHERE deleted_at IS NULL AND owner_id = ? ORDER BY id"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, userId)
+            let rows = readRows(st.query())
+            for (r in rows.all().iterator()) {
+                out.add("${r.i64("id")}")
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+        return out
+    }
+
+    /**
+     * 该用户的数据可见上限（取所有角色的最大值）。
+     *
+     * 角色本身的数据可见上限由 sys_roles.max_data_level 定义；
+     * 多角色取最大值（更宽松者生效）。
+     */
+    public func maxDataLevel(userId: Int64): Int64 {
+        let sql = "SELECT COALESCE(MAX(r.max_data_level), 0) FROM sys_user_roles ur " +
+                  "JOIN sys_roles r ON r.id = ur.role_id " +
+                  "WHERE ur.user_id = ? AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP)"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, userId)
+            let rows = readRows(st.query())
+            if (rows.isEmpty()) {
+                return 0
+            }
+            return rows.at(0).i64("coalesce")
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 列出该用户收到的全部临时授权。
+     *
+     * 包含已撤销与已过期的 —— 有效期判定在判定时进行
+     * （FR-ACL-009：到期自动失效由**服务端校验**，不依赖定时任务）。
+     */
+    public func listGrantsForUser(userId: Int64): RowSet {
+        // 时间戳**由数据库换算为 epoch 毫秒** —— 不在应用层解析 TIMESTAMPTZ
+        // 字符串（会踩时区与格式的坑）。
+        let sql = "SELECT id, subject_id, item_id, category, grantee_id, perm_codes, " +
+                  "granted_by, " +
+                  "CAST(COALESCE(EXTRACT(EPOCH FROM expires_at) * 1000, 0) AS BIGINT) AS expires_ms, " +
+                  "CAST(COALESCE(EXTRACT(EPOCH FROM revoked_at) * 1000, 0) AS BIGINT) AS revoked_ms " +
+                  "FROM acl_grants WHERE grantee_id = ? ORDER BY granted_at DESC"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, userId)
+            return readRows(st.query())
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 查询距上次修改口令已过的毫秒数（从未改过返回 0）。
+     *
+     * 用于 FR-AUTH-004 的「两次修改间隔 ≥ N 小时」校验。
+     *
+     * 实现说明：时间差**由数据库计算**（EXTRACT(EPOCH FROM ...)），
+     * 不在应用层解析 TIMESTAMPTZ 字符串 —— 后者会踩时区与格式的坑。
+     */
+    public func millisSincePasswordUpdate(userId: Int64): Int64 {
+        let sql = "SELECT CAST(COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - password_updated_at)) * 1000, 0) AS BIGINT) " +
+                  "AS elapsed_ms FROM sys_users WHERE id = ? AND deleted_at IS NULL"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, userId)
+            let rows = readRows(st.query())
+            if (rows.isEmpty()) {
+                return 0
+            }
+            return rows.at(0).i64("elapsed_ms")
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
 }
 
 /**
@@ -592,6 +782,7 @@ public class RoleRepo {
     public init(db: Database) {
         this.db = db
     }
+
 
     /**
      * 列出全部权限点。
@@ -715,6 +906,244 @@ public class RoleRepo {
                 ins.update()
             }
             return true
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    // ==================== RBAC 管理闭环（FR-ACL-002 / FR-ACL-004 / FR-ACL-008） ====================
+
+    /**
+     * 创建自定义角色（FR-ACL-002）。
+     * 内置角色（is_builtin）不可覆盖；uk_sys_roles_code 唯一约束防重复。
+     */
+    public func createRole(
+        code: String, name: String, description: String,
+        maxDataLevel: Int64, parentRoleId: Int64, operatorId: Int64
+    ): Int64 {
+        let id = Ids.next()
+        let sql = "INSERT INTO sys_roles (id, code, name, is_builtin, description, " +
+                  "max_data_level, parent_role_id, created_at, created_by, updated_at, updated_by) " +
+                  "VALUES (?, ?, ?, FALSE, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?)"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, id)
+            st.set(1, code)
+            st.set(2, name)
+            if (description.isEmpty()) {
+                st.setNull(3)
+            } else {
+                st.set(3, description)
+            }
+            st.set(4, maxDataLevel)
+            if (parentRoleId <= 0) {
+                st.setNull(5)
+            } else {
+                st.set(5, parentRoleId)
+            }
+            st.set(6, operatorId)
+            st.set(7, operatorId)
+            st.update()
+            return id
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 更新自定义角色（FR-ACL-002）。内置角色不可改。
+     */
+    public func updateRole(
+        code: String, name: String, description: String,
+        maxDataLevel: Int64, parentRoleId: Int64, operatorId: Int64
+    ): Bool {
+        let sql = "UPDATE sys_roles SET name = ?, description = ?, max_data_level = ?, " +
+                  "parent_role_id = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
+                  "WHERE code = ? AND deleted_at IS NULL AND is_builtin = FALSE"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, name)
+            if (description.isEmpty()) {
+                st.setNull(1)
+            } else {
+                st.set(1, description)
+            }
+            st.set(2, maxDataLevel)
+            if (parentRoleId <= 0) {
+                st.setNull(3)
+            } else {
+                st.set(3, parentRoleId)
+            }
+            st.set(4, operatorId)
+            st.set(5, code)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 软删除自定义角色（FR-ACL-002）。内置角色不可删。
+     */
+    public func deleteRole(code: String, operatorId: Int64): Bool {
+        let sql = "UPDATE sys_roles SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, " +
+                  "updated_by = ?, version = version + 1 " +
+                  "WHERE code = ? AND deleted_at IS NULL AND is_builtin = FALSE"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, operatorId)
+            st.set(1, code)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 为用户分配角色（FR-ACL-004）。
+     * 支持按主体（subject_id）与分类（category）限定授权范围。
+     * uk_sys_user_roles(user_id, role_id, COALESCE(subject_id,0)) 防重复分配。
+     */
+    public func assignUserRole(
+        userId: Int64, roleCode: String, subjectId: Int64,
+        category: Int64, grantedBy: Int64
+    ): Int64 {
+        let id = Ids.next()
+        let sql = "INSERT INTO sys_user_roles (id, user_id, role_id, subject_id, category, granted_by) " +
+                  "SELECT ?, ?, r.id, ?, ?, ? FROM sys_roles r " +
+                  "WHERE r.code = ? AND r.deleted_at IS NULL"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, id)
+            st.set(1, userId)
+            if (subjectId <= 0) {
+                st.setNull(2)
+            } else {
+                st.set(2, subjectId)
+            }
+            st.set(3, if (category < 0) { 0 } else { category })
+            st.set(4, grantedBy)
+            st.set(5, roleCode)
+            st.update()
+            return id
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 撤销用户角色（FR-ACL-004）。
+     */
+    public func revokeUserRole(userId: Int64, roleCode: String, subjectId: Int64): Bool {
+        let sql = "DELETE FROM sys_user_roles " +
+                  "WHERE role_id = (SELECT id FROM sys_roles WHERE code = ? AND deleted_at IS NULL) " +
+                  "AND user_id = ? AND COALESCE(subject_id, 0) = COALESCE(?, 0)"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, roleCode)
+            st.set(1, userId)
+            if (subjectId <= 0) {
+                st.setNull(2)
+            } else {
+                st.set(2, subjectId)
+            }
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 列出某用户的角色分配（FR-ACL-004）。含主体与分类限定。
+     */
+    public func listUserRoles(userId: Int64): RowSet {
+        let sql = "SELECT r.code, r.name, ur.subject_id, ur.category, " +
+                  "CAST(COALESCE(EXTRACT(EPOCH FROM ur.expires_at) * 1000, 0) AS BIGINT) AS expires_ms " +
+                  "FROM sys_user_roles ur JOIN sys_roles r ON r.id = ur.role_id " +
+                  "WHERE ur.user_id = ? AND r.deleted_at IS NULL ORDER BY r.code"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, userId)
+            return readRows(st.query())
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    // ==================== 显式授权 Grant（FR-ACL-008） ====================
+
+    /**
+     * 创建一条临时授权（FR-ACL-008）。perm_codes 以逗号拼接存入 VARCHAR(512)。
+     */
+    public func createGrant(
+        subjectId: Int64, itemId: Int64, category: Int64,
+        granteeId: Int64, permCodes: String, grantedBy: Int64, expiresAt: Int64
+    ): Int64 {
+        let id = Ids.next()
+        let sql = "INSERT INTO acl_grants (id, subject_id, item_id, category, grantee_id, " +
+                  "perm_codes, granted_by, expires_at) " +
+                  "VALUES (?, ?, ?, ?, ?, ?, ?, to_timestamp(?))"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, id)
+            st.set(1, subjectId)
+            if (itemId <= 0) {
+                st.setNull(2)
+            } else {
+                st.set(2, itemId)
+            }
+            st.set(3, if (category < 0) { 0 } else { category })
+            st.set(4, granteeId)
+            st.set(5, permCodes)
+            st.set(6, grantedBy)
+            if (expiresAt <= 0) {
+                st.setNull(7)
+            } else {
+                st.set(7, expiresAt / 1000)
+            }
+            st.update()
+            return id
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 撤销授权（FR-ACL-008 / FR-ACL-009）。仅置 revoked_at，保留记录用于审计。
+     */
+    public func revokeGrant(grantId: Int64, operatorId: Int64): Bool {
+        let sql = "UPDATE acl_grants SET revoked_at = CURRENT_TIMESTAMP, revoke_reason = 'manual' " +
+                  "WHERE id = ? AND revoked_at IS NULL"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, grantId)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
+    /**
+     * 列出某用户收到的全部授权（FR-ACL-008）。含已撤销/已过期（由判定方过滤）。
+     */
+    public func listGrantsByGrantee(granteeId: Int64): RowSet {
+        let sql = "SELECT id, subject_id, item_id, category, perm_codes, granted_by, " +
+                  "CAST(COALESCE(EXTRACT(EPOCH FROM expires_at) * 1000, 0) AS BIGINT) AS expires_ms, " +
+                  "CAST(COALESCE(EXTRACT(EPOCH FROM revoked_at) * 1000, 0) AS BIGINT) AS revoked_ms " +
+                  "FROM acl_grants WHERE grantee_id = ? ORDER BY granted_at DESC"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, granteeId)
+            return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
         }
