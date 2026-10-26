@@ -1,0 +1,91 @@
+# ============================================================
+# AMS · 持续集成
+#
+# 触发：push 到 develop/main、PR、workflow_dispatch
+#
+# 流程：准备工具链 → 构建 → 单元测试 → 集成测试 → 打包校验
+#
+# 关于 runner：
+#   默认用 **self-hosted Windows runner**（已装好仓颉 SDK 1.2.0 的机器）。
+#   原因：SDK 压缩包 250 MB，每次 CI 都下载既慢又易失败；
+#         且 SDK 的 Windows 包缺少 MinGW 运行库，需额外补齐。
+#   若用 GitHub 托管 runner，需在仓库变量里配置 CANGJIE_SDK_URL。
+# ============================================================
+name: CI
+
+on:
+  push:
+    branches: [develop, main, master]
+  pull_request:
+    branches: [develop, main, master]
+  workflow_dispatch:
+
+# 取消同分支的旧运行
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    # GitHub 托管 runner。工具链来源见 scripts/ci/setup-toolchain.sh：
+    #   ① 仓库变量 CANGJIE_TOOLCHAIN_TAG 指定的 GitHub Release 工具链资产（推荐）
+    #   ② 仓库变量 CANGJIE_SDK_URL 指定的 SDK 直链
+    #   ③ 本机已有 SDK（自托管 runner）
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # 需要 tag 信息
+
+      - name: 缓存工具链
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ams-toolchain
+            ~/.cache/ams-stdx
+          key: ams-toolchain-${{ runner.os }}-1.2.0
+          restore-keys: |
+            ams-toolchain-${{ runner.os }}-
+
+      - name: 准备工具链（SDK / stdx / 驱动）
+        shell: bash
+        run: bash scripts/ci/setup-toolchain.sh
+
+      - name: 打印版本信息
+        shell: bash
+        run: |
+          echo "### 工具链" >> "$GITHUB_STEP_SUMMARY"
+          echo "- CANGJIE_HOME: $CANGJIE_HOME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- CANGJIE_STDX: $CANGJIE_STDX" >> "$GITHUB_STEP_SUMMARY"
+          "$CANGJIE_HOME/bin/cjc.exe" -v 2>&1 | head -3 || true
+
+      - name: 构建
+        shell: bash
+        run: bash scripts/build.sh
+
+      - name: 单元测试
+        shell: bash
+        run: bash scripts/test.sh
+
+      - name: 集成测试（需要 openGauss）
+        shell: bash
+        env:
+          AMS_DB_PASSWORD: ${{ secrets.AMS_DB_PASSWORD }}
+        run: |
+          # 集成测试连不上数据库时会整体跳过（不算失败），
+          # 故此步仅在配置了数据库口令时才跑。
+          if [ -n "$AMS_DB_PASSWORD" ]; then
+            bash scripts/test.sh ams-data
+          else
+            echo "未配置 AMS_DB_PASSWORD，跳过集成测试"
+          fi
+
+      - name: 打包校验（确保发布物可独立运行）
+        shell: bash
+        run: bash scripts/package.sh --skip-build --version 0.0.0-ci
+
+      - name: 校验发布包可独立运行
+        shell: bash
+        run: bash scripts/ci/verify-package.sh dist/ams-release-0.0.0-ci-windows-x86_64 18099

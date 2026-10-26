@@ -14,8 +14,8 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="${1:-1.0.5.1}"
-SDK_VERSION="1.0.5"                 # 与本项目 SDK 基线一致
+VERSION="${1:-1.2.0.1}"
+SDK_VERSION="1.2.0"                 # 与本项目 SDK 基线一致
 PLATFORM_TAG="windows-x64"          # 平台标识（下载脚本用）
 STDX_ROOT="${STDX_ROOT:-E:/CangjieLibs}"
 TARGET_DIR="${STDX_ROOT}/windows_x86_64_cjnative"
@@ -28,8 +28,23 @@ echo "  来源: ${URL}"
 echo "  目标: ${TARGET_DIR}"
 echo ""
 
+# ---- 0. 路径转换工具（自包含，不依赖 envsetup.sh）----
+# 注意：envsetup.sh 里定义的是 _msys_to_win / _win_to_msys，
+#       但本脚本可能被独立执行（source envsetup.sh 前就跑），故自带一份。
+_win_path() {
+    [ -z "$1" ] && { echo ""; return; }
+    local p="$1"
+    if [[ "$p" =~ ^[a-zA-Z]:/ ]]; then
+        echo "$p"                       # 已是 Windows 风格
+    elif [[ "$p" =~ ^/([a-zA-Z])/(.*)$ ]]; then
+        echo "$(echo "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]'):/${BASH_REMATCH[2]}"
+    else
+        echo "$p"
+    fi
+}
+
 # ---- 1. 探测 SDK 版本，确认匹配 ----
-SDK_HOME="${CANGJIE_HOME:-E:/Program Files (x86)/Cangjie}"
+SDK_HOME="$(_win_path "${CANGJIE_HOME:-E:/Cangjie}")"
 if [ -x "${SDK_HOME}/bin/cjc.exe" ] || [ -x "${SDK_HOME}/bin/cjc" ]; then
     SDK_VER_RAW=$("${SDK_HOME}/bin/cjc" --version 2>/dev/null | head -1 || echo "")
     SDK_VER=$(echo "$SDK_VER_RAW" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
@@ -80,7 +95,11 @@ fi
 echo "[4/5] 安装到 ${TARGET_DIR}"
 mkdir -p "$TARGET_DIR"
 cp -r "$SRC_DIR/"* "$TARGET_DIR/"
-rm -rf "$TMP"
+# 注意：不用 rm -rf（safe-bin 会拦截路径含盘符前缀的删除），
+#       改用 mv 移到构建目录下的 .trash，由用户自行清理。
+TRASH_DIR="${STDX_ROOT}/.trash"
+mkdir -p "$TRASH_DIR"
+mv "$TMP" "${TRASH_DIR}/stdx-extract-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
 
 # ---- 6. 校验国密符号存在 ----
 echo "[5/5] 校验国密符号..."

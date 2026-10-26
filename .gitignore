@@ -6,15 +6,29 @@
 .workbuddy/
 
 # ---- 仓颉 SDK / 标准库（体积大、与版本强绑定，绝不入库）----
-# 本机 SDK 装在 E:/Cangjie（仓库外）；stdx 装在 E:/CangjieLibs（仓库外）。
-# 以下规则用于防止有人把 SDK 复制进仓库后误提交。
+# tools/cangjie/ 是**开发专用的仓颉编译器副本**（约 945 MB）：
+#   放在仓库内是为了让团队成员克隆后无需各自安装 SDK，路径也不含空格。
+#   但它是二进制产物，绝不能提交到远程仓库。
+# 用 scripts/install-sdk.sh 重建（见该脚本说明）。
 tools/cangjie/
+
+# stdx 扩展标准库（若放在仓库内，同样不入库）
 tools/cangjie-libs/
 tools/cangjie-stdlib/
 CangjieLibs/
 **/cangjie-sdk/
 **/cangjie_sdk/
 **/cangjie_stdlib/
+
+# ---- 第三方驱动源码（vendor，用 scripts/install-driver.sh 拉取）----
+# opengauss-driver 为 Cangjie-TPC 官方驱动，体积不大但属外部代码，
+# 由脚本按需拉取，不进版本库（避免与上游版本脱节）。
+tools/vendor/
+
+# ---- 工作区元数据 ----
+.workbuddy/
+.arts/
+.cache/
 
 # ---- 构建产物 ----
 # 仓颉
@@ -62,6 +76,8 @@ config/secret.toml
 
 # ---- IDE / 编辑器 ----
 .idea/
+.arts
+.cache
 .vscode/
 !.vscode/extensions.json
 !.vscode/settings.template.json
@@ -107,3 +123,14 @@ dist-packages/
 .pytest_cache/
 __pycache__/
 *.pyc
+
+# ---- 临时目录（本地调试产物）----
+.probe/
+.probe.old/
+build.old.*/
+build.failed/
+tools/cangjie.old.*/
+.tmpcap/
+dist/
+.tmpcap/
+dist/

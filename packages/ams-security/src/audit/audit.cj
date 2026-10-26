@@ -1,0 +1,424 @@
+// ============================================================
+// ams.security.audit · 审计记录与哈希链
+//
+// 需求：
+//   FR-AUD-001 敏感操作审计（覆盖登录/登出/口令修改/授权撤销/导出/删除等）
+//   FR-AUD-002 审计记录结构化（actor/action/target/result/ip/ua/trace_id/
+//                              prev_hash/record_hash/timestamp）
+//   FR-AUD-003 哈希链防篡改（record_hash = SM3(prev_hash + 规范化记录)）
+//   FR-AUD-004 审计查询（多维过滤 + 分页 + 详情）
+//   FR-AUD-006 不可篡改存储（表仅 INSERT，DB 层回收 UPDATE/DELETE 权限）
+//
+// [设计要点]
+//   1. 哈希链：每条记录含 prev_hash 与 record_hash，
+//      record_hash = SM3(prev_hash || 规范化记录)。
+//      任何一条被改动，其后所有链的哈希都会对不上 → 篡改可检出。
+//   2. 规范化：字段顺序固定、分隔符明确，避免"同一内容不同哈希"。
+//   3. 链头锚定：每日把链头写到 aud_chain_anchors 并推到主库之外，
+//      防「整链重写」攻击（只改链尾一段 + 重算整链）。
+//   4. 敏感信息：detail 中的敏感字段必须已脱敏（由调用方保证）。
+//
+// [依赖说明]
+//   本包不依赖 ams-kernel 的时间包（避免同包兄弟子包的 import 限制），
+//   时间戳由调用方传入。
+// ============================================================
+package ams.security.audit
+
+import std.collection.*
+import std.sort.*
+import stdx.encoding.hex.*
+
+import ams.crypto.provider.*
+import ams.kernel.error.*
+
+/**
+ * 操作者类型。
+ */
+public enum ActorType {
+    | User      // 0 用户
+    | System    // 1 系统
+    | Anonymous // 2 匿名
+    | Service   // 3 服务账号
+
+    public func toCode(): Int64 {
+        match (this) {
+            case ActorType.User => return 0
+            case ActorType.System => return 1
+            case ActorType.Anonymous => return 2
+            case ActorType.Service => return 3
+        }
+    }
+}
+
+/**
+ * 操作结果。
+ */
+public enum AuditResult {
+    | Success // 0 成功
+    | Failure // 1 失败
+    | Denied  // 2 拒绝
+
+    public func toCode(): Int64 {
+        match (this) {
+            case AuditResult.Success => return 0
+            case AuditResult.Failure => return 1
+            case AuditResult.Denied => return 2
+        }
+    }
+}
+
+/**
+ * 审计动作码（FR-AUD-001 要求的覆盖范围）。
+ */
+public enum AuditAction {
+    | Login            // 登录
+    | LoginFailed      // 登录失败
+    | Logout           // 登出
+    | LogoutAll        // 全局登出
+    | PasswordChange   // 口令修改
+    | RoleAssign       // 角色分配
+    | RoleRevoke       // 授权撤销
+    | GrantCreate      // 创建授权
+    | GrantRevoke      // 撤销授权
+    | ShareCreate      // 创建分享链接
+    | ShareAccess      // 访问分享链接
+    | DataExport       // 导出
+    | ItemDelete       // 删除条目
+    | ItemRestore      // 恢复条目
+    | KeyRotate        // 密钥轮换
+    | PermChange       // 权限变更
+    | ConfigChange     // 配置变更
+    | BatchOperation   // 数据批量操作
+    | FieldReveal      // 展开敏感字段
+
+    /**
+     * 动作码（写入 aud_logs.action）。
+     */
+    public func code(): String {
+        match (this) {
+            case AuditAction.Login => return "auth.login"
+            case AuditAction.LoginFailed => return "auth.login_failed"
+            case AuditAction.Logout => return "auth.logout"
+            case AuditAction.LogoutAll => return "auth.logout_all"
+            case AuditAction.PasswordChange => return "auth.password_change"
+            case AuditAction.RoleAssign => return "acl.role_assign"
+            case AuditAction.RoleRevoke => return "acl.role_revoke"
+            case AuditAction.GrantCreate => return "acl.grant_create"
+            case AuditAction.GrantRevoke => return "acl.grant_revoke"
+            case AuditAction.ShareCreate => return "acl.share_create"
+            case AuditAction.ShareAccess => return "acl.share_access"
+            case AuditAction.DataExport => return "archive.export"
+            case AuditAction.ItemDelete => return "archive.item_delete"
+            case AuditAction.ItemRestore => return "archive.item_restore"
+            case AuditAction.KeyRotate => return "crypto.key_rotate"
+            case AuditAction.PermChange => return "acl.perm_change"
+            case AuditAction.ConfigChange => return "cfg.change"
+            case AuditAction.BatchOperation => return "archive.batch_operation"
+            case AuditAction.FieldReveal => return "archive.field_reveal"
+        }
+    }
+}
+
+/**
+ * 一条审计记录（写入前）。
+ */
+public class AuditEntry {
+    /** 链序号（由 DB 分配，保证全局有序） */
+    public let chainSeq: Int64
+    /** 操作者 ID（系统动作为空） */
+    public let actorId: String
+    /** 操作者类型 */
+    public let actorType: ActorType
+    /** 动作 */
+    public let action: AuditAction
+    /** 动作描述 */
+    public let actionDesc: String
+    /** 目标类型（item/subject/attachment/role/user...） */
+    public let targetType: String
+    /** 目标 ID */
+    public let targetId: String
+    /** 相关主体 ID */
+    public let subjectId: String
+    /** 分类码 */
+    public let category: Int64
+    /** 结果 */
+    public let result: AuditResult
+    /** 错误码 */
+    public let errorCode: String
+    /** 客户端 IP */
+    public let clientIp: String
+    /** User-Agent */
+    public let userAgent: String
+    /** 链路 ID */
+    public let traceId: String
+    /** 上下文（**必须已脱敏**） */
+    public let detail: Array<(String, String)>
+    /** 事件时间（Unix 毫秒） */
+    public let occurredAt: Int64
+
+    public init(
+        chainSeq: Int64,
+        actorId: String,
+        actorType: ActorType,
+        action: AuditAction,
+        actionDesc: String,
+        targetType: String,
+        targetId: String,
+        subjectId: String,
+        category: Int64,
+        result: AuditResult,
+        errorCode: String,
+        clientIp: String,
+        userAgent: String,
+        traceId: String,
+        detail: Array<(String, String)>,
+        occurredAt: Int64
+    ) {
+        this.chainSeq = chainSeq
+        this.actorId = actorId
+        this.actorType = actorType
+        this.action = action
+        this.actionDesc = actionDesc
+        this.targetType = targetType
+        this.targetId = targetId
+        this.subjectId = subjectId
+        this.category = category
+        this.result = result
+        this.errorCode = errorCode
+        this.clientIp = clientIp
+        this.userAgent = userAgent
+        this.traceId = traceId
+        this.detail = detail
+        this.occurredAt = occurredAt
+    }
+}
+
+/**
+ * 一条已落库的审计记录（含哈希）。
+ */
+public class AuditRecord {
+    public let entry: AuditEntry
+    /** 前一条记录哈希（创世记录为 32 个 0） */
+    public let prevHash: Array<Byte>
+    /** 本条记录哈希 */
+    public let recordHash: Array<Byte>
+
+    public init(entry: AuditEntry, prevHash: Array<Byte>, recordHash: Array<Byte>) {
+        this.entry = entry
+        this.prevHash = prevHash
+        this.recordHash = recordHash
+    }
+}
+
+/**
+ * 链完整性校验结果。
+ */
+public enum ChainVerifyResult {
+    | Ok
+    /** 序号处断裂：第 seq 条的 prev_hash 与第 seq-1 条的 record_hash 不匹配 */
+    | Broken(Int64)
+    /** 记录自身的哈希重算不符（内容被改动） */
+    | Tampered(Int64)
+    /** 记录数不足（中间有记录被删除） */
+    | Missing(Int64)
+}
+
+/**
+ * 审计服务：负责计算哈希链与校验链完整性。
+ */
+public class AuditService {
+    private let provider: CryptoProvider
+
+    public init(provider: CryptoProvider) {
+        this.provider = provider
+    }
+
+    /**
+     * 创世记录的 prev_hash（全 0）。
+     */
+    public static func genesisHash(): Array<Byte> {
+        return Array<Byte>(32, repeat: 0u8)
+    }
+
+    /**
+     * 计算一条记录的哈希。
+     *
+     * record_hash = SM3(prev_hash || 规范化记录)
+     *
+     * 规范化规则（必须稳定，否则历史链会失效）：
+     *   字段顺序固定，用 '|' 分隔，字段内 '|' 与 '\' 转义；
+     *   detail 按 key 字典序排列。
+     */
+    public func computeHash(entry: AuditEntry, prevHash: Array<Byte>): CryptoResult<Array<Byte>> {
+        let canonical = AuditService.canonicalize(entry, prevHash)
+        // record_hash = SM3(prev_hash || 规范化记录)
+        // 注意：用 digest（纯 SM3 摘要）而非 hmac —— 规范里定义的就是摘要
+        return this.provider.digest(canonical, DigestAlgorithm.Sm3)
+    }
+
+    /**
+     * 规范化记录内容（用于哈希）。
+     *
+     * 字段顺序：chainSeq|actorId|actorType|action|targetType|targetId|
+     *          subjectId|category|result|errorCode|clientIp|userAgent|
+     *          traceId|occurredAt|detail(prevHash 单独前置)
+     */
+    public static func canonicalize(entry: AuditEntry, prevHash: Array<Byte>): Array<Byte> {
+        var sb = StringBuilder()
+        sb.append(toHexString(prevHash))
+        sb.append("|")
+        sb.append(entry.chainSeq.toString())
+        sb.append("|")
+        sb.append(entry.actorId)
+        sb.append("|")
+        sb.append(entry.actorType.toCode().toString())
+        sb.append("|")
+        sb.append(entry.action.code())
+        sb.append("|")
+        sb.append(entry.targetType)
+        sb.append("|")
+        sb.append(entry.targetId)
+        sb.append("|")
+        sb.append(entry.subjectId)
+        sb.append("|")
+        sb.append(entry.category.toString())
+        sb.append("|")
+        sb.append(entry.result.toCode().toString())
+        sb.append("|")
+        sb.append(entry.errorCode)
+        sb.append("|")
+        sb.append(entry.clientIp)
+        sb.append("|")
+        sb.append(entry.userAgent)
+        sb.append("|")
+        sb.append(entry.traceId)
+        sb.append("|")
+        sb.append(entry.occurredAt.toString())
+        sb.append("|")
+        // detail 按 key 排序后拼接
+        sb.append(AuditService.canonicalDetail(entry.detail))
+        return sb.toString().toArray()
+    }
+
+    /**
+     * detail 的规范化：按 key 字典序，k=v 用 & 连接。
+     */
+    private static func canonicalDetail(detail: Array<(String, String)>): String {
+        if (detail.isEmpty()) {
+            return ""
+        }
+        // 排序（按 key）
+        let keys = ArrayList<String>()
+        for (i in 0..detail.size) {
+            let (k, _) = detail[i]
+            keys.add(k)
+        }
+        let sorted = keys.toArray()
+        sort(sorted)
+
+        var sb = StringBuilder()
+        var first = true
+        for (k in sorted) {
+            var value = ""
+            for (i in 0..detail.size) {
+                let (k2, v2) = detail[i]
+                if (k2 == k) {
+                    value = v2
+                    break
+                }
+            }
+            if (!first) {
+                sb.append("&")
+            }
+            sb.append(k)
+            sb.append("=")
+            sb.append(value)
+            first = false
+        }
+        return sb.toString()
+    }
+
+    /**
+     * 构造一条完整的审计记录（含 prev_hash 与 record_hash）。
+     */
+    public func buildRecord(entry: AuditEntry, prevHash: Array<Byte>): CryptoResult<AuditRecord> {
+        let h = this.computeHash(entry, prevHash)
+        match (h) {
+            case CryptoResult.Ok(recordHash) => return CryptoResult.Ok(AuditRecord(entry, prevHash, recordHash))
+            case CryptoResult.Err(e) => return CryptoResult.Err(e)
+        }
+    }
+
+    /**
+     * 校验链完整性。
+     *
+     * @param records 按 chainSeq 升序排列的记录
+     * @return 校验结论
+     */
+    public func verifyChain(records: Array<AuditRecord>): ChainVerifyResult {
+        var expectedPrev = AuditService.genesisHash()
+        for (r in records) {
+            // ① 序号连续性
+            if (r.entry.chainSeq != expectedSeq(records, r)) {
+                return ChainVerifyResult.Missing(r.entry.chainSeq)
+            }
+            // ② 链式衔接
+            if (!this.provider.constantTimeEquals(r.prevHash, expectedPrev)) {
+                return ChainVerifyResult.Broken(r.entry.chainSeq)
+            }
+            // ③ 内容未被改动（重算哈希）
+            // 注意：仓颉的 match 分支只能是单个表达式，故把判定抽成方法，
+            //       这里用「单表达式 match」来传播失败结果。
+            let contentResult = this.checkContent(r)
+            match (contentResult) {
+                case ChainVerifyResult.Ok => ()
+                case _ => return contentResult
+            }
+            expectedPrev = r.recordHash
+        }
+        return ChainVerifyResult.Ok
+    }
+
+    /**
+     * 校验单条记录的内容未被改动（重算哈希并比对）。
+     */
+    private func checkContent(r: AuditRecord): ChainVerifyResult {
+        let recomputed = this.computeHash(r.entry, r.prevHash)
+        match (recomputed) {
+            case CryptoResult.Ok(h) => return this.compareHash(r, h)
+            case CryptoResult.Err(_) => return ChainVerifyResult.Tampered(r.entry.chainSeq)
+        }
+    }
+
+    /**
+     * 比对重算哈希与落库哈希。
+     */
+    private func compareHash(r: AuditRecord, recomputed: Array<Byte>): ChainVerifyResult {
+        if (this.provider.constantTimeEquals(recomputed, r.recordHash)) {
+            return ChainVerifyResult.Ok
+        }
+        return ChainVerifyResult.Tampered(r.entry.chainSeq)
+    }
+
+    /**
+     * 期望的链序号（从 1 开始连续）。
+     */
+    private static func expectedSeq(records: Array<AuditRecord>, current: AuditRecord): Int64 {
+        for (i in 0..records.size) {
+            if (records[i].entry.chainSeq == current.entry.chainSeq) {
+                return Int64(i + 1)
+            }
+        }
+        return current.entry.chainSeq
+    }
+
+    /**
+     * 取链头哈希（最后一条记录的哈希）。
+     */
+    public static func chainHead(records: Array<AuditRecord>): Array<Byte> {
+        if (records.isEmpty()) {
+            return AuditService.genesisHash()
+        }
+        return records[records.size - 1].recordHash
+    }
+}
