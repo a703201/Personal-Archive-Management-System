@@ -40,6 +40,7 @@ public enum SortField {
     | Title
     | ExpiresAt
     | Issuer
+    | AttachmentCount   // FR-SRC-003：按附件数排序
 }
 
 /**
