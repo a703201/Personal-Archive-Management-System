@@ -28,9 +28,12 @@ import ams.app.auth.*
 import ams.app.audit.*
 import ams.app.authz.*
 import ams.app.export.*
+import ams.app.attachment.*
 import ams.app.item.*
 import ams.app.scheduler.*
+import ams.app.search.*
 import ams.crypto.impl.*
+import ams.crypto.key.*
 import ams.crypto.provider.*
 import ams.data.db.*
 import ams.data.repo.*
@@ -41,6 +44,7 @@ import ams.kernel.time.*
 import ams.security.authn.*
 import ams.security.authz.*
 import ams.security.ratelimit.*
+import ams.storage.*
 
 /**
  * 应用配置。
@@ -227,6 +231,37 @@ main(): Int64 {
     // 配额由共享 rateLimiter 计量；导出审计经 auditRecorder 落库
     let exportService = ExportService(itemRepo, rateLimiter, recorder: auditRecorder)
     ExportRoutes(userRepo, exportService).register(router)
+
+    // ---- 检索执行层（FR-SRC-001~006）----
+    // SearchService 复用条目与扩展字段仓库来构建索引；
+    // 敏感字段展开（reveal）经 auditRecorder 留痕。
+    let searchService = SearchService(
+        SearchRepo(db),
+        itemRepo,
+        ItemFieldRepo(db),
+        recorder: auditRecorder
+    )
+    SearchRoutes(searchService, userRepo).register(router)
+
+    // ---- 个人中心与概览（FR-UX-001 的后端支撑）----
+    MeRoutes(userRepo, itemRepo, NotifyRepo(db)).register(router)
+
+    // ---- 附件域（FR-ATT-001~007）----
+    // KEK 由环境变量注入（生产应来自 KMS / HSM，禁止硬编码）；
+    // 附件内容用 KeyManager 生成的随机 DEK 加密（SM4-CBC + HMAC-SM3），
+    // DEK 本身被 KEK 包裹后落 arc_attachments.wrapped_dek（见 008 迁移）。
+    let kek = (getVariable("AMS_KEK") ?? "ams-dev-kek-change-me-in-production").toArray()
+    let keyManager = KeyManager(provider, { keyId: String => kek })
+    let storageRoot = getVariable("AMS_STORAGE_DIR") ?? "./data-attachments"
+    let attachmentRepo = AttachmentRepo(db)
+    let attachmentService = AttachmentService(
+        attachmentRepo,
+        LocalFileStorage(storageRoot),
+        QuarantineStorage("./data-quarantine"),
+        keyManager,
+        provider
+    )
+    AttachmentRoutes(attachmentService, attachmentRepo).register(router)
 
     // ---- 周期任务（FR-NTF-002 到期提醒 / FR-ARCH-008 回收站清理；D6 选型）----
     // 不在启动即刻执行：避免频繁重启造成重复推送。
