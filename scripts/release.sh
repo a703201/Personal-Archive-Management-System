@@ -1,8 +1,12 @@
-#!/bin/bash
+﻿#!/bin/bash
 # ============================================================
 # AMS · 发布到远程仓库 Release
 #
-# 用途：打包 → 推送 tag → 创建 GitHub Release 并上传资产。
+# 用途：打包 → 推送 tag → 创建 GitHub Release。
+#
+# **资产上传默认改为手动**（2026-10-26）：GitHub 对单次 asset 上传有网关时限，
+# 自动上传在大文件上容易 504。脚本默认只创建 Release 并打印上传指引；
+# 需要自动上传时加 --upload。
 #
 # 用法：
 #   bash scripts/release.sh --version 0.2.0
@@ -12,6 +16,7 @@
 # 前置条件：
 #   ① 已在 GitHub 仓库设置 token（环境变量）：
 #        GITHUB_TOKEN=ghp_xxx        （或 GH_TOKEN）
+#   ② 资产上传改为**手动**（见文末指引），不再由脚本自动完成
 #   ② 已配置 git 远程（默认 origin）：
 #        git remote -v
 #   ③ 远程仓库存在，且当前分支已推送
@@ -32,6 +37,7 @@ REMOTE="origin"
 SKIP_BUILD=0
 SKIP_PUSH=0
 ALLOW_DIRTY=0
+AUTO_UPLOAD=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -43,7 +49,7 @@ while [ $# -gt 0 ]; do
         --skip-build) SKIP_BUILD=1 ;;
         --skip-push)  SKIP_PUSH=1 ;;
         --allow-dirty) ALLOW_DIRTY=1 ;;
-        --allow-dirty) ALLOW_DIRTY=1 ;;
+        --upload)      AUTO_UPLOAD=1 ;;
         -h|--help)    sed -n '2,32p' "$0"; exit 0 ;;
         *) echo "[WARN] 未知参数：$1" ;;
     esac
@@ -149,7 +155,7 @@ fi
 API="https://api.github.com/repos/${OWNER_REPO}"
 
 # 5.1 Release 是否已存在
-REL_ID="$(curl -fsS -H "Authorization: Bearer ${TOKEN}" \
+REL_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     "${API}/releases/tags/${TAG}" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
@@ -175,7 +181,7 @@ PYEOF_NOTES
     if [ ! -s "$NOTES_FILE" ]; then
         echo "AMS ${VERSION}" > "$NOTES_FILE"
     fi
-    REL_ID="$(curl -fsS -X POST \
+    REL_ID="$(curl --ssl-no-revoke -fsS -X POST \
         -H "Authorization: Bearer ${TOKEN}" \
         -H "Accept: application/vnd.github+json" \
         -H "Content-Type: application/json" \
@@ -206,16 +212,51 @@ else
 fi
 
 echo ""
+RELEASE_URL="https://github.com/${OWNER_REPO}/releases/tag/${TAG}"
+
+if [ "$AUTO_UPLOAD" != "1" ]; then
+    # ---- 默认：资产由用户手动上传 ----
+    # 原因：GitHub 对单次 asset 上传有网关时限，大文件自动上传容易 504。
+    echo ""
+    echo "[4/4] 跳过自动上传（加 --upload 可启用）"
+    echo ""
+    echo "=== Release 已创建，资产请手动上传 ==="
+    echo "  Release: ${RELEASE_URL}"
+    echo "  待上传  : ${PKG_ZIP}"
+    echo ""
+    echo "方式 A：浏览器（最简单）"
+    echo "  打开上面的链接 -> Assets -> 拖入文件"
+    echo ""
+    echo "方式 B：GitHub CLI（推荐，绕开 API 网关限制）"
+    echo "  winget install GitHub.cli"
+    echo "  gh release upload ${TAG} \"${PKG_ZIP}\" --repo ${OWNER_REPO} --clobber"
+    echo ""
+    echo "  注：GitHub 对单次 asset 上传有网关时限，大文件用方式 B 更稳。"
+    exit 0
+fi
+
 echo "[4/4] 上传资产..."
 UPLOAD_URL="${API}/releases/${REL_ID}/assets?name=$(python3 -c "
 import urllib.parse, sys
 print(urllib.parse.quote(sys.argv[1]))" "$(basename "$PKG_ZIP")")"
+
+# ⚠️ 必须用 `-F "file=@..."`（multipart/form-data）。
+#   `--data-binary "@file"` 是把文件内容作为**原始 body** 发送，
+#   GitHub 的 asset 上传接口不接受（会返回 400）。
+#   `-F` 还会**流式**发送，不会把整个文件读进内存 —— 17 MB 的包无所谓，
+#   但工具链包 97 MB 时差别很大（内存版曾因此触发 504 Gateway Timeout）。
+# ⚠️ **不要**在 -F 里写 `;type=application/zip`：Windows 版 curl.exe 会把
+#   `;` 后半段当成另一个 form 字段（实测报 curl: (26)）。去掉即可，
+#   GitHub 不要求 Content-Type。
+# --ssl-no-revoke：Windows 的 curl 用 schannel，默认查证书吊销状态，
+# 被代理/防火墙挡住时失败（CRYPT_E_NO_REVOCATION_CHECK 0x80092012）。
 HTTP_CODE="$(curl -sS -o /tmp/ams_release_upload.out -w "%{http_code}" \
+    --ssl-no-revoke \
+    --max-time 1800 \
     -X POST \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Accept: application/vnd.github+json" \
-    -H "Content-Type: application/zip" \
-    --data-binary "@${PKG_ZIP}" \
+    -F "file=@${PKG_ZIP}" \
     "${UPLOAD_URL}")"
 
 if [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "200" ]; then

@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 # ============================================================
 # AMS · CI 工具链发布（把 SDK + stdx 做成 GitHub Release 资产）
 #
@@ -26,12 +26,20 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# 引入路径兼容工具（Git Bash / WSL / 原生 Windows 通用）
+# shellcheck source=scripts/ci/pathutil.sh
+. "$(dirname "${BASH_SOURCE[0]}")/pathutil.sh"
+
 SDK_VERSION="${CANGJIE_SDK_VERSION:-1.2.0}"
 STDX_VERSION="${CANGJIE_STDX_VERSION:-1.2.0.1}"
 TAG="toolchain-v${SDK_VERSION}"
 OUT_DIR="dist/toolchain"
+# 路径归一：不同 bash 环境（Git Bash / WSL）认的写法不同，
+# 统一用 ams_path_norm 归一到当前环境可用的形式。
 SDK_SRC="${CANGJIE_HOME:-${ROOT}/tools/cangjie}"
 STDX_SRC="${STDX_ROOT:-E:/CangjieLibs}/windows_x86_64_cjnative/dynamic/stdx"
+SDK_SRC="$(ams_path_norm "$SDK_SRC")"
+STDX_SRC="$(ams_path_norm "$STDX_SRC")"
 
 # 参数
 while [ $# -gt 0 ]; do
@@ -43,25 +51,31 @@ while [ $# -gt 0 ]; do
         --tag=*)    TAG="${1#*=}" ;;
         --tag)      shift; TAG="${1:-}" ;;
         --dry-run)  DRY_RUN=1 ;;
+        --upload)   AUTO_UPLOAD=1 ;;
         -h|--help)  sed -n '2,35p' "$0"; exit 0 ;;
         *) echo "[WARN] 未知参数：$1" ;;
     esac
     shift
 done
 DRY_RUN="${DRY_RUN:-0}"
+AUTO_UPLOAD=0
 
 echo "=== AMS · 发布 CI 工具链 ==="
 echo "  SDK  : ${SDK_SRC}  (${SDK_VERSION})"
 echo "  stdx : ${STDX_SRC}  (${STDX_VERSION})"
 echo "  tag  : ${TAG}"
+ams_path_env_info
 echo ""
 
 if [ ! -f "${SDK_SRC}/bin/cjc.exe" ]; then
     echo "[ERROR] SDK 目录无效（缺 bin/cjc.exe）：${SDK_SRC}"
+    echo "       可用 --sdk=<路径> 显式指定。"
     exit 1
 fi
 if [ ! -d "$STDX_SRC" ]; then
     echo "[ERROR] stdx 目录不存在：${STDX_SRC}"
+    echo "       可用 --stdx=<路径> 显式指定。"
+    echo "       常见位置：E:/CangjieLibs/windows_x86_64_cjnative/dynamic/stdx"
     exit 1
 fi
 
@@ -91,7 +105,13 @@ mkdir -p "$OUT_DIR"
 #    官方 SDK 目录（E:/Cangjie）里是没有的。
 #
 # 故：打包前先把 MinGW DLL 复制进 SDK 源目录的 bin/，再打包。
-MINGW_DLLS="libgcc_s_seh-1.dll libwinpthread-1.dll libssp-0.dll"
+# libgcc_s_seh-1.dll / libwinpthread-1.dll 是**必需**的
+# （cjc 编译 @Test 用例时需要，缺了报 "RunCJTask" 找不到）。
+# libssp-0.dll 是**可选**的：实测本机没有它，cjc 编译测试照样通过，
+# 故只在找到时顺手带上，找不到不算错误。
+MINGW_REQUIRED="libgcc_s_seh-1.dll libwinpthread-1.dll"
+MINGW_OPTIONAL="libssp-0.dll"
+MINGW_DLLS="${MINGW_REQUIRED} ${MINGW_OPTIONAL}"
 MINGW_CANDIDATES=(
     "${SDK_SRC}/bin"
     "${ROOT}/tools/cangjie/bin"
@@ -112,17 +132,16 @@ for req in $MINGW_DLLS; do
         fi
     done
 done
-if [ "$ADDED" = "0" ]; then
-    MISSING=""
-    for req in $MINGW_DLLS; do
-        [ -e "${SDK_SRC}/bin/$req" ] || MISSING="$MISSING $req"
-    done
-    if [ -n "$MISSING" ]; then
-        echo "[ERROR] 找不到 MinGW 运行库：$MISSING"
-        echo "       CI 上编译 @Test 用例会失败（RunCJTask 找不到）。"
-        echo "       请运行 bash scripts/install-sdk.sh 补齐，或手动放置。"
-        exit 1
-    fi
+# 只对**必需**的 DLL 做硬校验（可选的找不到不算错）
+MISSING=""
+for req in $MINGW_REQUIRED; do
+    [ -e "${SDK_SRC}/bin/$req" ] || MISSING="$MISSING $req"
+done
+if [ -n "$MISSING" ]; then
+    echo "[ERROR] 找不到必需的 MinGW 运行库：$MISSING"
+    echo "       CI 上编译 @Test 用例会失败（RunCJTask 找不到）。"
+    echo "       请运行 bash scripts/install-sdk.sh 补齐，或手动放置。"
+    exit 1
 fi
 
 # ---- 打包 SDK ----
@@ -133,23 +152,52 @@ else
     echo "[1/3] 打包 SDK（820 MB → 约 250 MB，需要几分钟）..."
     # 用 Python zipfile：Git Bash 通常没有 zip 命令，
     # 且 Python 能正确处理 Windows 路径与中文名。
+    #
+    # ⚠️ 直接写 zip，**不建临时目录**：
+    #    ① 免掉一次 820 MB 的复制；
+    #    ② 不需要递归删除（本机 safe-delete 会拦截 rm -rf）。
     PY="$(command -v python3 || command -v python)"
     "$PY" - "$SDK_SRC" "$SDK_ZIP" <<'PYEOF_ZIP'
 import os, sys, zipfile
 src, out = sys.argv[1], sys.argv[2]
 # 压缩包内根目录名固定为 cangjie/，与官方包结构一致
+# 排除清单（依据 PE 导入表实测，见 scripts/ci/README 或提交说明）：
+#   cjc.exe 的静态导入表**不含任何 LLVM 类 dll** —— 它是运行时
+#   **调用** opt.exe / lld.exe 子进程，故这两个 exe 及其 dll 必须保留。
+#   opt.exe / lld.exe 依赖：libLLVM-15.dll, libLLVM-Foundation-15.dll, libc++.dll
+#   下列 dll 只被 lldb* 调试器使用，编译用不到：
+#     libclang-cpp.dll, libclang.dll, liblldb.dll, libunwind.dll, libLTO.dll
+#   tools/ 是 clang-format / lldb / cjlint / IDE 插件，CI 用不到。
+EXCLUDE_EXACT = {
+    "third_party/llvm/bin/libclang-cpp.dll",
+    "third_party/llvm/bin/libclang.dll",
+    "third_party/llvm/bin/liblldb.dll",
+    "third_party/llvm/bin/libunwind.dll",
+    "third_party/llvm/bin/libLTO.dll",
+    "third_party/llvm/bin/libcangjie-lsp.dll",
+}
+EXCLUDE_PREFIX = ("tools/",)
+EXCLUDE_NAME_PREFIX = ("lldb",)
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
     for base, dirs, files in os.walk(src):
         rel_base = os.path.relpath(base, src)
         if rel_base == ".":
             rel_base = ""
-        # 跳过无用的临时文件
+        # 跳过无用目录
         dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
         for f in files:
             if f.endswith((".log", ".tmp")):
                 continue
+            rel = (rel_base + "/" + f).replace("\\", "/").lstrip("/")
+            if rel in EXCLUDE_EXACT:
+                continue
+            if any(rel.startswith(e) for e in EXCLUDE_PREFIX):
+                continue
+            base_name = os.path.basename(rel)
+            if base_name.startswith(EXCLUDE_NAME_PREFIX) and rel.startswith("third_party/llvm/"):
+                continue
             full = os.path.join(base, f)
-            arc = os.path.join("cangjie", rel_base, f).replace("\\", "/")
+            arc = os.path.join("cangjie", rel)
             z.write(full, arc)
 PYEOF_ZIP
     echo "      完成：$(du -h "$SDK_ZIP" | cut -f1)"
@@ -183,15 +231,40 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 
 # ---- 创建/复用 Release ----
+if [ "$AUTO_UPLOAD" != "1" ]; then
+    # ---- 默认：资产由用户手动上传 ----
+    # 原因：GitHub 对单次 asset 上传有网关时限，大文件自动上传容易 504。
+    echo ""
+    echo "[3/3] 跳过自动上传（加 --upload 可启用）"
+    echo ""
+    echo "=== Release 已创建，工具链资产请手动上传 ==="
+    echo "  Release: https://github.com/${ownerRepo}/releases/tag/${TAG}"
+    echo "  待上传  :"
+    echo "    ${SDK_ZIP}"
+    echo "    ${STDX_ZIP}"
+    echo ""
+    echo "方式 A：浏览器（最简单）"
+    echo "  打开上面的链接 -> Assets -> 拖入这两个文件"
+    echo ""
+    echo "方式 B：GitHub CLI（推荐，绕开 API 网关限制）"
+    echo "  winget install GitHub.cli"
+    echo "  gh release upload ${TAG} \"${SDK_ZIP}\" \"${STDX_ZIP}\" --repo ${ownerRepo} --clobber"
+    echo ""
+    echo "下一步："
+    echo "  在仓库 Settings -> Secrets and variables -> Actions -> Variables"
+    echo "  新增变量 CANGJIE_TOOLCHAIN_TAG = ${TAG}"
+    exit 0
+fi
+
 echo "[3/3] 上传到 Release ${TAG}..."
-REL_ID="$(curl -fsS -H "Authorization: Bearer ${TOKEN}" \
+REL_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     "${API}/releases/tags/${TAG}" 2>/dev/null \
     | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
 
 if [ -z "$REL_ID" ]; then
     echo "      创建 Release..."
-    REL_ID="$(curl -fsS -X POST \
+    REL_ID="$(curl --ssl-no-revoke -fsS -X POST \
         -H "Authorization: Bearer ${TOKEN}" \
         -H "Accept: application/vnd.github+json" \
         -H "Content-Type: application/json" \
@@ -224,7 +297,7 @@ fi
 for ZIP in "$SDK_ZIP" "$STDX_ZIP"; do
     NAME="$(basename "$ZIP")"
     # 删掉同名旧资产（否则 422）
-    AID="$(curl -fsS -H "Authorization: Bearer ${TOKEN}" \
+    AID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${TOKEN}" \
         -H "Accept: application/vnd.github+json" \
         "${API}/releases/${REL_ID}/assets" 2>/dev/null | python3 -c "
 import sys, json
@@ -236,16 +309,23 @@ except Exception:
     pass
 ")"
     if [ -n "$AID" ]; then
-        curl -fsS -X DELETE -H "Authorization: Bearer ${TOKEN}" \
+        curl --ssl-no-revoke -fsS -X DELETE -H "Authorization: Bearer ${TOKEN}" \
             "${API}/releases/assets/${AID}" >/dev/null 2>&1 || true
     fi
     echo "      上传 ${NAME}（$(du -h "$ZIP" | cut -f1)）..."
+    # ⚠️ 必须用 `-F "file=@..."`（multipart/form-data）。
+    #   `--data-binary "@file"` 发的是原始 body，GitHub 不接受。
+    #   `-F` 流式发送，不会把 97 MB 读进内存。
+    # --ssl-no-revoke：Windows 的 curl 用 schannel，默认会查证书吊销状态，
+    # 被代理/防火墙挡住时直接失败（CRYPT_E_NO_REVOCATION_CHECK 0x80092012）。
+    # 证书有效性校验不受影响。
     CODE="$(curl -sS -o /tmp/ams_tc_upload.out -w "%{http_code}" \
+        --ssl-no-revoke \
+        --max-time 1800 \
         -X POST \
         -H "Authorization: Bearer ${TOKEN}" \
         -H "Accept: application/vnd.github+json" \
-        -H "Content-Type: application/zip" \
-        --data-binary "@${ZIP}" \
+        -F "file=@${ZIP}" \
         "${API}/releases/${REL_ID}/assets?name=${NAME}")"
     if [ "$CODE" != "201" ] && [ "$CODE" != "200" ]; then
         echo "[ERROR] 上传失败（HTTP ${CODE}）："

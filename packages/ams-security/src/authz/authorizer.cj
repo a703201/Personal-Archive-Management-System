@@ -65,8 +65,19 @@ public class AccessContext {
     public let userId: String
     /** 权限点集合（来自角色合并） */
     private let permSet: HashSet<String>
-    /** 该用户可访问的主体 ID 集合（本人 + 代管 + 被授权） */
+    /** 该用户可访问的主体 ID 集合（本人拥有 + 被授权代管） */
     private let subjectIds: HashSet<String>
+    /**
+     * 该用户**本人拥有**的主体 ID 集合。
+     *
+     * 与 subjectIds 的区别（FR-ACL-007 敏感度分级的关键）：
+     *   - subjectIds  含代管主体 → 用于**归属校验**（能否访问该主体的数据）
+     *   - ownedSubjectIds 只含本人拥有的 → 用于**敏感度判定**
+     *
+     * 语义：所有者对自己名下的一切（含 sensitive/high 分类）天然可见；
+     * 代管人对 sensitive+ 分类仍需显式授权。
+     */
+    private let ownedSubjectIds: HashSet<String>
     /** 数据可见上限（取所有角色的最大值） */
     public let maxDataLevel: Int64
 
@@ -74,7 +85,8 @@ public class AccessContext {
         userId: String,
         perms: Array<String>,
         subjectIds: Array<String>,
-        maxDataLevel: Int64
+        maxDataLevel: Int64,
+        ownedSubjectIds!: Array<String> = []
     ) {
         this.userId = userId
         this.permSet = HashSet<String>()
@@ -85,7 +97,23 @@ public class AccessContext {
         for (s in subjectIds) {
             this.subjectIds.add(s)
         }
+        // ⚠️ **不做兜底**（fail-closed）：
+        //   未显式给出 ownedSubjectIds 时，该用户就**不拥有**任何主体。
+        //   若退化成「可访问集合即拥有集合」，代管人会被当成所有者，
+        //   从而能看到 sensitive/high 分类 —— 这是权限放大的方向，必须避免。
+        //   生产路径（AuthzService / 鉴权中间件）都会显式传入 ownedSubjectIds。
+        this.ownedSubjectIds = HashSet<String>()
+        for (s in ownedSubjectIds) {
+            this.ownedSubjectIds.add(s)
+        }
         this.maxDataLevel = maxDataLevel
+    }
+
+    /**
+     * 该用户是否**拥有**指定主体（不是代管）。
+     */
+    public func ownsSubject(subjectId: String): Bool {
+        return this.ownedSubjectIds.contains(subjectId)
     }
 
     /**
@@ -93,6 +121,33 @@ public class AccessContext {
      */
     public func hasPerm(code: String): Bool {
         return this.permSet.contains(code)
+    }
+
+    /**
+     * 是否满足指定的功能权限要求（**any 覆盖 own**）。
+     *
+     * 规则（与 Authorizer.hasFunctionPerm 保持一致）：
+     *   - 持有精确权限码 → 满足
+     *   - 需要的若是 own 范围，持有对应 any 范围 → 满足
+     *     （any 是 own 的超集：「可读任意」蕴含「可读自己的」）
+     *
+     * 【为什么放在 AccessContext 而不是只在 Authorizer 里】
+     *   鉴权中间件会先做一次**粗粒度**功能权限判定（快速拒绝），
+     *   再交给 Authorizer 做**细粒度**资源判定。
+     *   两处逻辑若不一致，会出现「Authorizer 判通过，但中间件先拒了」——
+     *   实测踩坑：持有 archive:read:any 的管理员读条目被中间件
+     *   按精确匹配 archive:read:own 拒掉（403），细粒度判定根本没执行。
+     *   故把规则收敛到 AccessContext，两处共用。
+     */
+    public func satisfiesPerm(required: String): Bool {
+        if (this.hasPerm(required)) {
+            return true
+        }
+        let p = Perm.parse(required)
+        match (p) {
+            case Some(x) => return this.hasPerm("${x.domain}:${x.action}:any")
+            case None => return false
+        }
     }
 
     /**
@@ -255,6 +310,17 @@ public class Authorizer {
     }
 
     /**
+     * 该判定器持有的授权列表。
+     *
+     * 供鉴权中间件复用，避免为同一请求重复查库。
+     *
+     * 注意：方法名不能与私有字段 `grants` 同名，故用 allGrants。
+     */
+    public func allGrants(): Array<Grant> {
+        return this.grants
+    }
+
+    /**
      * 判定是否可访问指定资源。
      *
      * @param ctx 访问上下文
@@ -377,9 +443,31 @@ public class Authorizer {
     ): Bool {
         match (resource.sensitivity) {
             case Sensitivity.Normal => return true
-            case Sensitivity.Sensitive => return this.hasExplicitGrant(ctx, resource, nowMillis)
+            case Sensitivity.Sensitive => return this.checkSensitive(ctx, resource, nowMillis)
             case Sensitivity.High => return this.checkHighSensitivity(ctx, resource, nowMillis)
         }
+    }
+
+    /**
+     * sensitive 分类的可见性判定。
+     *
+     * 规则（FR-ACL-007）：
+     *   - 主体**所有者**本人 → 可见（否则用户看不到自己的证件/联系方式，产品不成立）
+     *   - 代管人等非所有者 → 需显式授权（acl_grants）
+     *   - 持有 archive:read:any → 可见（放弃归属约束）
+     */
+    private func checkSensitive(
+        ctx: AccessContext,
+        resource: AuthzResource,
+        nowMillis: Int64
+    ): Bool {
+        if (ctx.hasPerm("archive:read:any")) {
+            return true
+        }
+        if (ctx.ownsSubject(resource.subjectId)) {
+            return true
+        }
+        return this.hasExplicitGrant(ctx, resource, nowMillis)
     }
 
     /**
@@ -391,6 +479,10 @@ public class Authorizer {
         nowMillis: Int64
     ): Bool {
         if (ctx.hasPerm("archive:read:any")) {
+            return true
+        }
+        // 主体所有者本人可见（PRD：「high 默认仅所有者可见」）
+        if (ctx.ownsSubject(resource.subjectId)) {
             return true
         }
         return this.hasExplicitGrant(ctx, resource, nowMillis)

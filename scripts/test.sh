@@ -213,6 +213,14 @@ for pkg in "${PKGS[@]}"; do
 
         _link_args="$(stdx_link_args "$tdir" "$src_dir")"
 
+        # ⚠️ 必须先移走旧 exe —— 否则**编译失败时旧 exe 仍在**，
+        #    后面 `if [ ! -f "$out" ]` 会误判为「编译成功」，
+        #    于是跑的是**旧版本**测试（结果与源码不一致，极难察觉）。
+        #    实测踩坑：加了新测试用例后编译报错（@Test 必须在顶层），
+        #    但输出仍是修改前的 27 通过 / 2 失败。
+        #    build.sh 早已有同样处理，此处补齐。
+        [ -f "$out" ] && mv -f "$out" "$out.old" 2>/dev/null
+
         if [ "$VERBOSE" = 1 ]; then
             echo "  [COMPILE] ${pkg}/${sub}"
             "$CJC" -p "$tdir" \

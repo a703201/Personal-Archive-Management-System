@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     AMS 仓颉开发环境脚本（PowerShell 版）
 

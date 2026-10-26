@@ -104,7 +104,7 @@ jobs:
           TAG="v${VER}"
 
           # Release 已存在则复用（支持重跑本 workflow）
-          REL_ID="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
+          REL_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
             2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
@@ -126,7 +126,7 @@ if m:
 PYEOF
             fi
             [ -s "$NOTES" ] || echo "AMS ${VER}" > "$NOTES"
-            REL_ID="$(curl -fsS -X POST \
+            REL_ID="$(curl --ssl-no-revoke -fsS -X POST \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               -H "Content-Type: application/json" \
@@ -146,7 +146,7 @@ PYEOF
           else
             echo "      Release 已存在（id=${REL_ID}），重新上传资产"
             # 删掉同名旧资产，避免 422
-            ASSET_ID="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
+            ASSET_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets" \
               2>/dev/null | python3 -c "
@@ -159,18 +159,25 @@ except Exception:
     pass
 ")"
             if [ -n "$ASSET_ID" ]; then
-              curl -fsS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" \
+              curl --ssl-no-revoke -fsS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" \
                 "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" || true
             fi
           fi
 
           echo "上传 ${ZIP} ..."
+          # ⚠️ 必须用 `-F "file=@..."`（multipart/form-data）。
+          #   `--data-binary "@file"` 发的是原始 body，GitHub 不接受（400）。
+          #   `-F` 还会流式发送，不把整个文件读进内存。
+          # --ssl-no-revoke：Windows runner 的 curl 用 schannel，
+          # 默认查证书吊销状态，被代理/防火墙挡住时失败
+          # （CRYPT_E_NO_REVOCATION_CHECK 0x80092012）。
           CODE="$(curl -sS -o /tmp/ams_upload.out -w "%{http_code}" \
+            --ssl-no-revoke \
+            --max-time 1800 \
             -X POST \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            -H "Content-Type: application/zip" \
-            --data-binary "@${ZIP}" \
+            -F "file=@${ZIP}" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=$(python3 -c "
 import urllib.parse, sys
 print(urllib.parse.quote(sys.argv[1]))" "$(basename "$ZIP")")")"

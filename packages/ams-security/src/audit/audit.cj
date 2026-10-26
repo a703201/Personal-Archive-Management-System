@@ -90,6 +90,45 @@ public enum AuditAction {
     | ConfigChange     // 配置变更
     | BatchOperation   // 数据批量操作
     | FieldReveal      // 展开敏感字段
+    /**
+     * 未知动作（历史遗留或新增动作尚未同步到此枚举）。
+     *
+     * 审计动作是封闭枚举，但审计表可能存有旧版本写入的码。
+     * 反查时归到 Unknown —— **记录仍然落库**，
+     * 链校验会把该条判为 Tampered（因为重算时 action 不同）。
+     * 这是有意的：宁可让链校验报出异常，也不静默改写历史记录。
+     */
+    | Unknown
+
+    /**
+     * 动作码 → AuditAction（反查，用于链校验时重建条目）。
+     *
+     * 未知码归为 Unknown。
+     */
+    public static func fromCode(code: String): AuditAction {
+        match (code) {
+            case "auth.login" => return AuditAction.Login
+            case "auth.login_failed" => return AuditAction.LoginFailed
+            case "auth.logout" => return AuditAction.Logout
+            case "auth.logout_all" => return AuditAction.LogoutAll
+            case "auth.password_change" => return AuditAction.PasswordChange
+            case "acl.role_assign" => return AuditAction.RoleAssign
+            case "acl.role_revoke" => return AuditAction.RoleRevoke
+            case "acl.grant_create" => return AuditAction.GrantCreate
+            case "acl.grant_revoke" => return AuditAction.GrantRevoke
+            case "share.create" => return AuditAction.ShareCreate
+            case "share.access" => return AuditAction.ShareAccess
+            case "archive.export" => return AuditAction.DataExport
+            case "archive.item_delete" => return AuditAction.ItemDelete
+            case "archive.item_restore" => return AuditAction.ItemRestore
+            case "kms.key_rotate" => return AuditAction.KeyRotate
+            case "acl.perm_change" => return AuditAction.PermChange
+            case "cfg.change" => return AuditAction.ConfigChange
+            case "archive.batch" => return AuditAction.BatchOperation
+            case "archive.field_reveal" => return AuditAction.FieldReveal
+            case _ => return AuditAction.Unknown
+        }
+    }
 
     /**
      * 动作码（写入 aud_logs.action）。
@@ -115,6 +154,7 @@ public enum AuditAction {
             case AuditAction.ConfigChange => return "cfg.change"
             case AuditAction.BatchOperation => return "archive.batch_operation"
             case AuditAction.FieldReveal => return "archive.field_reveal"
+            case AuditAction.Unknown => return "unknown"
         }
     }
 }
@@ -350,15 +390,35 @@ public class AuditService {
     }
 
     /**
-     * 校验链完整性。
+     * 校验链完整性（从创世锚点开始）。
      *
      * @param records 按 chainSeq 升序排列的记录
      * @return 校验结论
      */
     public func verifyChain(records: Array<AuditRecord>): ChainVerifyResult {
-        var expectedPrev = AuditService.genesisHash()
+        return this.verifyChainFrom(records, AuditService.genesisHash())
+    }
+
+    /**
+     * 校验链完整性（支持从任意段开始）。
+     *
+     * @param records    按 chainSeq 升序排列的记录（本段）
+     * @param startPrev  本段首条记录期望的 prev_hash
+     *                   —— 即「段前那一条记录的 record_hash」；
+     *                   若从整链头部（seq=1）开始则为创世哈希。
+     *
+     * 为什么需要它：审计链可能只校验中段（分页 / 只验新记录）。
+     * 中段首条的 prev_hash 是段前记录的哈希，而非创世哈希，
+     * 若不把段前哈希作为锚点传入，第一段就会被误判为 Broken。
+     */
+    public func verifyChainFrom(records: Array<AuditRecord>, startPrev: Array<Byte>): ChainVerifyResult {
+        var expectedPrev = startPrev
         for (r in records) {
             // ① 序号连续性
+            // ⚠️ 期望值必须以「本批第一条记录的 chain_seq」为锚点，
+            //    而非恒为 1 —— 从中间段（from > 1）校验时，
+            //    第 0 条的 chain_seq 就是 base，第 i 条应为 base + i。
+            //    否则整段都会被误判为 Missing。
             if (r.entry.chainSeq != expectedSeq(records, r)) {
                 return ChainVerifyResult.Missing(r.entry.chainSeq)
             }
@@ -401,12 +461,24 @@ public class AuditService {
     }
 
     /**
-     * 期望的链序号（从 1 开始连续）。
+     * 期望的链序号。
+     *
+     * 以本批第一条记录的 chain_seq 为锚点（base），
+     * 第 i 条记录（0-based）的期望值应为 base + i。
+     * 这样既支持「从头校验」（base=1 → 1,2,3…），
+     * 也支持「从中间段校验」（base=24 → 24,25,26…）。
+     *
+     * 若某条记录的 chain_seq 与 base+i 不符，说明中间有缺失（被删除），
+     * 此时返回其实际值，使调用方判定为 Missing。
      */
     private static func expectedSeq(records: Array<AuditRecord>, current: AuditRecord): Int64 {
+        if (records.isEmpty()) {
+            return current.entry.chainSeq
+        }
+        let base = records[0].entry.chainSeq
         for (i in 0..records.size) {
             if (records[i].entry.chainSeq == current.entry.chainSeq) {
-                return Int64(i + 1)
+                return base + Int64(i)
             }
         }
         return current.entry.chainSeq

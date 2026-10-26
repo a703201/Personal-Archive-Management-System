@@ -320,6 +320,21 @@ public func testServerOk(): Unit {
  * stdx 内置的 DirectDistributor 只做精确路径匹配（参数化路由会 404），
  * 本项目的 ParamDistributor 补上了这个能力。
  */
+/**
+ * 比较两个请求处理器是否为**同一个**（引用相等）。
+ *
+ * ⚠️ 为什么需要这个包装：
+ *   `HttpRequestHandler` 是函数类型，引用相等要用 `===`。
+ *   但 `@Assert` 宏会把 `===` 拆坏 —— 宏把运算符改写成 `==` 后，
+ *   多出的 `= h` 变成语法错误：
+ *     error: expected expression after '==', found '='
+ *       dummy(d.distribute("/api/users") == = h)
+ *   故把比较放进普通函数，让宏只看到一个 Bool 表达式。
+ */
+private func sameHandler(a: HttpRequestHandler, b: HttpRequestHandler): Bool {
+    return a === b
+}
+
 @Test
 public func testParamDistributor(): Unit {
     let d = ParamDistributor()
@@ -330,17 +345,17 @@ public func testParamDistributor(): Unit {
     d.register("/api/items/:itemId/tags/:tagId", h)
 
     // 精确路径命中
-    @Assert(d.distribute("/api/users") === h)
+    @Assert(sameHandler(d.distribute("/api/users"), h))
     // 单参数：任意段都命中
-    @Assert(d.distribute("/api/users/900001") === h)
-    @Assert(d.distribute("/api/users/abc") === h)
+    @Assert(sameHandler(d.distribute("/api/users/900001"), h))
+    @Assert(sameHandler(d.distribute("/api/users/abc"), h))
     // 参数 + 字面量段
-    @Assert(d.distribute("/api/users/900001/roles") === h)
+    @Assert(sameHandler(d.distribute("/api/users/900001/roles"), h))
     // 双参数
-    @Assert(d.distribute("/api/items/42/tags/7") === h)
+    @Assert(sameHandler(d.distribute("/api/items/42/tags/7"), h))
     // 段数不匹配 → 不命中（返回 404 处理器，不是 h）
-    @Assert(!(d.distribute("/api/users/900001/roles/extra") === h))
-    @Assert(!(d.distribute("/api/other") === h))
+    @Assert(!sameHandler(d.distribute("/api/users/900001/roles/extra"), h))
+    @Assert(!sameHandler(d.distribute("/api/other"), h))
 }
 
 /**

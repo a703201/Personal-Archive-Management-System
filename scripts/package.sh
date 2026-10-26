@@ -28,6 +28,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# 引入路径兼容工具（Git Bash / WSL / 原生 Windows 通用）
+# shellcheck source=scripts/ci/pathutil.sh
+. "$ROOT/scripts/ci/pathutil.sh"
+
 VERSION=""
 OUT_DIR="dist"
 SKIP_BUILD=0
@@ -127,7 +131,7 @@ if [ "$OS" = "windows" ]; then
         [ -e "$d" ] && cp "$d" "$STAGE/bin/" && DLL_COUNT=$((DLL_COUNT + 1))
     done
     # SDK 运行时目录里的其它 DLL（若 build/ 未覆盖）
-    CJ_RUNTIME="${CANGJIE_HOME:-E:/Cangjie}/runtime/lib/windows_x86_64_cjnative"
+    CJ_RUNTIME="$(ams_path_norm "${CANGJIE_HOME:-E:/Cangjie}/runtime/lib/windows_x86_64_cjnative")"
     if [ -d "$CJ_RUNTIME" ]; then
         for d in "$CJ_RUNTIME"/*.dll; do
             [ -e "$d" ] || continue

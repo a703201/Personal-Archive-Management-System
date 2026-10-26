@@ -70,7 +70,7 @@ if [ -f "$ZIP_PATH" ]; then
 else
     echo "[2/5] 下载中..."
     # 注意：GitCode 的 release 下载会 302 到带鉴权参数的 CDN，curl -L 可正常跟随
-    curl -fL --retry 3 --connect-timeout 20 -o "$ZIP_PATH" "$URL"
+    curl --ssl-no-revoke -fL --retry 3 --connect-timeout 20 -o "$ZIP_PATH" "$URL"
     echo "      下载完成: $(du -h "$ZIP_PATH" | cut -f1)"
 fi
 

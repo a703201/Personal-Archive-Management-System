@@ -82,6 +82,51 @@ jobs:
             echo "未配置 AMS_DB_PASSWORD，跳过集成测试"
           fi
 
+      - name: 授权链路端到端验证（FR-ACL-005~009）
+        shell: bash
+        env:
+          AMS_DB_PASSWORD: ${{ secrets.AMS_DB_PASSWORD }}
+        run: |
+          # 验证对象级鉴权链路：归属强制 / 敏感度分级 / 显式授权 / 授权到期与撤销。
+          # 这条链路横跨「中间件 → Authorizer → 仓储」，单靠单元测试覆盖不到
+          # （实测踩过：中间件在路由匹配前执行，pathParams 为空导致
+          #   guard 拿不到 :id → 对象级鉴权整体被跳过）。
+          if [ -n "$AMS_DB_PASSWORD" ]; then
+            bash scripts/ci/verify-authz.sh
+          else
+            echo "未配置 AMS_DB_PASSWORD，跳过授权链路验证"
+          fi
+
+      - name: 口令策略端到端验证（FR-AUTH-004）
+        shell: bash
+        env:
+          AMS_DB_PASSWORD: ${{ secrets.AMS_DB_PASSWORD }}
+        run: |
+          # 验证口令策略真的生效：弱口令字典 / 长度 / 字符类别 / 含用户名 /
+          # 重复字符 / 24 小时修改间隔。
+          # 这条链路横跨「路由 → PasswordValidator → 仓储」，
+          # 单靠单元测试覆盖不到（此前校验器从未被业务路径调用）。
+          if [ -n "$AMS_DB_PASSWORD" ]; then
+            bash scripts/ci/verify-password.sh
+          else
+            echo "未配置 AMS_DB_PASSWORD，跳过口令策略验证"
+          fi
+
+      - name: 审计哈希链端到端验证（FR-AUD-003）
+        shell: bash
+        env:
+          AMS_DB_PASSWORD: ${{ secrets.AMS_DB_PASSWORD }}
+        run: |
+          # 验证审计哈希链：新记录链路完整、篡改内容字段能被检出、改回后复原。
+          # 覆盖「落库 → 取链 → 规范化重算 → 比对」全链路，
+          # 单靠单元测试覆盖不到（此前 verifyChain 不支持子段校验，
+          # from>1 时首条记录的 prev_hash 锚点错误，会误判 Broken/Missing）。
+          if [ -n "$AMS_DB_PASSWORD" ]; then
+            bash scripts/ci/verify-audit.sh
+          else
+            echo "未配置 AMS_DB_PASSWORD，跳过审计哈希链验证"
+          fi
+
       - name: 打包校验（确保发布物可独立运行）
         shell: bash
         run: bash scripts/package.sh --skip-build --version 0.0.0-ci

@@ -275,6 +275,8 @@ TOPS=($(select_top "${TARGETS[@]:-}"))
 LINK_LIBS=""
 STDX_LIBS_ALL=""
 BUILT=()
+# 级联重建标记：本轮已有包被重建 → 后续包一律重编
+CASCADE_REBUILD=0
 
 # ---- stdx 动态库的链接参数 ----
 # stdx 的包（crypto / encoding / net / serialization ...）编译成动态库，
@@ -341,9 +343,18 @@ for top in "${TOPS[@]}"; do
             # 编译器优先使用 import-path 里的 .cjo 而非源码，
             # 所以源码改动后必须重编，否则改动不生效（这是本项目踩过的坑）。
             # 用时间戳判断而非每次全量重编 —— 后者会让构建慢一个数量级。
+            #
+            # ⚠️ 但**上游包变了，下游也必须重编** —— 下游的 .cjo 里固化了
+            #    上游的接口快照（如 Authorizer 新增方法后，ams.app.authz 的
+            #    .cjo 仍认为该方法不存在 → 报 "is not a member of class"）。
+            #    故用 CASCADE_REBUILD 标记：**本轮已有包被重建**时，
+            #    后续所有包一律重编（级联失效）。
+            #    代价是改动后全量重编一次（约 1~2 分钟），换来正确性。
             _cjo="$BUILD_DIR/${pkgname}.cjo"
             _need_build=1
-            if [ -f "$_cjo" ]; then
+            if [ "$CASCADE_REBUILD" = "1" ]; then
+                _need_build=1
+            elif [ -f "$_cjo" ]; then
                 _newest_src="$(ls -t "$subdir"/*.cj 2>/dev/null | head -1)"
                 if [ -n "$_newest_src" ] && [ "$_newest_src" -ot "$_cjo" ]; then
                     _need_build=0
@@ -380,11 +391,15 @@ for top in "${TOPS[@]}"; do
             lib="$BUILD_DIR/lib${pkgname}.a"
             if [ -f "$lib" ]; then
                 echo "OK -> $(basename "$lib")"
+                # 本包重建了 → 其下游也必须重编（级联失效，见上）
+                CASCADE_REBUILD=1
                 LINK_LIBS="$LINK_LIBS $(win_path "$ROOT/$lib")"
                 BUILT+=("$pkgname")
             else
                 echo "FAILED (期望产物 $lib)"
-                head -15 /tmp/ams_build.log | sed 's/^/           /'
+                # 只显示 **error 行**及其上下文 —— 之前的 head -15 会被
+                # warning 淹没，导致真实编译错误看不见（踩过坑）。
+                grep -n -A6 "error:" /tmp/ams_build.log | head -40 | sed 's/^/           /'
                 exit 1
             fi
         fi

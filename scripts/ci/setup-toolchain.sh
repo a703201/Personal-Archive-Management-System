@@ -37,6 +37,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# 引入路径兼容工具（Git Bash / WSL / 原生 Windows 通用）
+# shellcheck source=scripts/ci/pathutil.sh
+. "$(dirname "${BASH_SOURCE[0]}")/pathutil.sh"
+
 SDK_VERSION="${CANGJIE_SDK_VERSION:-1.2.0}"
 STDX_VERSION="${CANGJIE_STDX_VERSION:-1.2.0.1}"
 CACHE_DIR="${HOME}/.cache/ams-toolchain"
@@ -75,6 +79,7 @@ _win_path() {
 
 # ---- 1. SDK ----
 SDK_HOME=""
+ams_path_env_info
 if [ -n "${CANGJIE_HOME:-}" ] && [ -f "${CANGJIE_HOME}/bin/cjc.exe" ]; then
     SDK_HOME="$CANGJIE_HOME"
     echo "[1/3] 使用已有 SDK: ${SDK_HOME}"
@@ -99,7 +104,7 @@ else
                 AUTH=()
                 [ -n "$TOOLCHAIN_TOKEN" ] && AUTH=(-H "Authorization: Bearer ${TOOLCHAIN_TOKEN}")
                 # 公开仓库不需要 token；私有仓库必须带 token
-                if ! curl -fL --retry 3 --connect-timeout 30 "${AUTH[@]}" -o "$SDK_ZIP" "$ASSET_URL"; then
+                if ! curl --ssl-no-revoke -fL --retry 3 --connect-timeout 30 "${AUTH[@]}" -o "$SDK_ZIP" "$ASSET_URL"; then
                     echo "[ERROR] 工具链资产下载失败：${ASSET_URL}"
                     echo "       若仓库是私有的，请确认 GITHUB_TOKEN 已注入。"
                     echo "       若尚未发布工具链资产，请在本机执行："
@@ -124,7 +129,7 @@ else
         mkdir -p "$CACHE_DIR"
         SDK_ZIP="${CACHE_DIR}/cangjie-sdk-${SDK_VERSION}.zip"
         if [ ! -f "$SDK_ZIP" ]; then
-            curl -fL --retry 3 --connect-timeout 30 -o "$SDK_ZIP" "$SDK_URL"
+            curl --ssl-no-revoke -fL --retry 3 --connect-timeout 30 -o "$SDK_ZIP" "$SDK_URL"
         fi
         fi
         echo "      解压中（约 250 MB，需要一会儿）..."
@@ -169,7 +174,7 @@ fi
 
 # ---- 2. stdx ----
 echo "[2/3] 准备 stdx ${STDX_VERSION}..."
-STDX_TARGET="${STDX_ROOT}/windows_x86_64_cjnative"
+STDX_TARGET="$(ams_path_norm "${STDX_ROOT}/windows_x86_64_cjnative")"
 if [ -d "${STDX_TARGET}/dynamic/stdx" ]; then
     echo "      已存在: ${STDX_TARGET}/dynamic/stdx"
 else
@@ -177,7 +182,7 @@ else
     STDX_ZIP="${CACHE_DIR}/cangjie-stdx-${STDX_VERSION}.zip"
     if [ ! -f "$STDX_ZIP" ]; then
         echo "      下载中..."
-        curl -fL --retry 3 --connect-timeout 30 -o "$STDX_ZIP" "$STDX_URL"
+        curl --ssl-no-revoke -fL --retry 3 --connect-timeout 30 -o "$STDX_ZIP" "$STDX_URL"
     fi
     TMP="$(mktemp -d)"
     unzip -q "$STDX_ZIP" -d "$TMP"
@@ -211,8 +216,8 @@ else
 fi
 
 # ---- 输出环境变量供后续步骤使用 ----
-SDK_HOME_WIN="$(_win_path "$SDK_HOME")"
-STDX_DIR_WIN="$(_win_path "${STDX_TARGET}/dynamic/stdx")"
+SDK_HOME_WIN="$(_ams_native_to_win "$SDK_HOME")"
+STDX_DIR_WIN="$(_ams_native_to_win "${STDX_TARGET}/dynamic/stdx")"
 
 cat > "${GITHUB_ENV:-/tmp/ams_ci_env}" <<ENVEOF
 CANGJIE_HOME=${SDK_HOME_WIN}

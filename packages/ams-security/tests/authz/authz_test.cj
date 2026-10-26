@@ -166,9 +166,10 @@ public class AuthorizerTest {
         userId: String,
         perms: Array<String>,
         subjects: Array<String>,
-        level: Int64
+        level: Int64,
+        owned!: Array<String> = []
     ): AccessContext {
-        return AccessContext(userId, perms, subjects, level)
+        return AccessContext(userId, perms, subjects, level, ownedSubjectIds: owned)
     }
 
     /**
@@ -224,12 +225,24 @@ public class AuthorizerTest {
 
     @TestCase
     public func testSensitiveCategoryNeedsExplicitGrant() {
-        // sensitive 分类：归属通过还不够，需显式授权
+        // sensitive 分类：**代管人**（可访问但非拥有）归属通过还不够，需显式授权
         let a = Authorizer(Array<Grant>())
         let c = this.ctx("u1", ["archive:read:own"], ["s1"], 3)
         let r = a.authorize(c, "archive:read:own",
             this.res("s1", 3, Sensitivity.Sensitive, ""), this.now)
         @Assert(r.isAllowed(), false)
+    }
+
+    /**
+     * sensitive 分类的**所有者**天然可见（PRD FR-ACL-007：
+     * 「high 默认仅所有者可见」——所有者不需要任何额外授权）。
+     */
+    public func testSensitiveCategoryVisibleToOwner() {
+        let a = Authorizer(Array<Grant>())
+        let c = this.ctx("u1", ["archive:read:own"], ["s1"], 3, owned: ["s1"])
+        let r = a.authorize(c, "archive:read:own",
+            this.res("s1", 3, Sensitivity.Sensitive, ""), this.now)
+        @Assert(r.isAllowed(), true)
     }
 
     @TestCase
@@ -244,12 +257,23 @@ public class AuthorizerTest {
 
     @TestCase
     public func testHighCategoryNeedsAnyOrGrant() {
-        // high 分类：默认仅所有者可见（需 any 权限或显式授权）
+        // high 分类：默认仅**所有者**可见 —— 代管人需 any 权限或显式授权
         let a = Authorizer(Array<Grant>())
         let c = this.ctx("u1", ["archive:read:own"], ["s1"], 3)
         let r = a.authorize(c, "archive:read:own",
             this.res("s1", 5, Sensitivity.High, ""), this.now)
         @Assert(r.isAllowed(), false)
+    }
+
+    /**
+     * high 分类的**所有者**天然可见。
+     */
+    public func testHighCategoryVisibleToOwner() {
+        let a = Authorizer(Array<Grant>())
+        let c = this.ctx("u1", ["archive:read:own"], ["s1"], 3, owned: ["s1"])
+        let r = a.authorize(c, "archive:read:own",
+            this.res("s1", 5, Sensitivity.High, ""), this.now)
+        @Assert(r.isAllowed(), true)
     }
 
     @TestCase

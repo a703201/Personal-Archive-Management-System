@@ -26,6 +26,7 @@ import stdx.net.http.*
 
 import ams.kernel.error.*
 import ams.kernel.id.*
+import ams.security.authz.*
 import ams.kernel.time.*
 
 /**
@@ -310,6 +311,16 @@ public type Handler = (ApiRequest) -> ApiResponse
 /**
  * 路由条目。
  */
+/**
+ * 资源守卫。
+ *
+ * 用途：声明「本路由操作的资源是什么」，供鉴权中间件做**对象级**判定。
+ *
+ * 返回 None 表示该请求不涉及具体资源（如列表接口的分类过滤），
+ * 此时只做功能权限判定。
+ */
+public type ResourceGuard = (ApiRequest) -> Option<AuthzResource>
+
 public class Route {
     /** HTTP 方法 */
     public let method: String
@@ -321,19 +332,30 @@ public class Route {
     public let requiredPerm: String
     /** 是否允许匿名访问 */
     public let isPublic: Bool
+    /**
+     * 资源守卫（可选）。
+     *
+     * 给了它，鉴权中间件会在功能权限通过后追加：
+     *   - 数据归属校验（FR-ACL-006）
+     *   - 分类敏感度分级（FR-ACL-007）
+     *   - 显式授权与有效期（FR-ACL-008 / FR-ACL-009）
+     */
+    public let guard: ResourceGuard
 
     public init(
         method: String,
         pattern: String,
         handler: Handler,
         requiredPerm!: String = "",
-        isPublic!: Bool = false
+        isPublic!: Bool = false,
+        guard!: ResourceGuard = { _: ApiRequest => None }
     ) {
         this.method = method.toAsciiUpper()
         this.pattern = pattern
         this.handler = handler
         this.requiredPerm = requiredPerm
         this.isPublic = isPublic
+        this.guard = guard
     }
 }
 
@@ -361,29 +383,53 @@ public class Router {
     /**
      * 注册 GET 路由。
      */
-    public func get(pattern: String, handler: Handler, requiredPerm!: String = "", isPublic!: Bool = false): Unit {
-        this.add(Route("GET", pattern, handler, requiredPerm: requiredPerm, isPublic: isPublic))
+    public func get(
+        pattern: String,
+        handler: Handler,
+        requiredPerm!: String = "",
+        isPublic!: Bool = false,
+        guard!: ResourceGuard = { _: ApiRequest => None }
+    ): Unit {
+        this.add(Route("GET", pattern, handler, requiredPerm: requiredPerm, isPublic: isPublic, guard: guard))
     }
 
     /**
      * 注册 POST 路由。
      */
-    public func post(pattern: String, handler: Handler, requiredPerm!: String = "", isPublic!: Bool = false): Unit {
-        this.add(Route("POST", pattern, handler, requiredPerm: requiredPerm, isPublic: isPublic))
+    public func post(
+        pattern: String,
+        handler: Handler,
+        requiredPerm!: String = "",
+        isPublic!: Bool = false,
+        guard!: ResourceGuard = { _: ApiRequest => None }
+    ): Unit {
+        this.add(Route("POST", pattern, handler, requiredPerm: requiredPerm, isPublic: isPublic, guard: guard))
     }
 
     /**
      * 注册 PUT 路由。
      */
-    public func put(pattern: String, handler: Handler, requiredPerm!: String = "", isPublic!: Bool = false): Unit {
-        this.add(Route("PUT", pattern, handler, requiredPerm: requiredPerm, isPublic: isPublic))
+    public func put(
+        pattern: String,
+        handler: Handler,
+        requiredPerm!: String = "",
+        isPublic!: Bool = false,
+        guard!: ResourceGuard = { _: ApiRequest => None }
+    ): Unit {
+        this.add(Route("PUT", pattern, handler, requiredPerm: requiredPerm, isPublic: isPublic, guard: guard))
     }
 
     /**
      * 注册 DELETE 路由。
      */
-    public func delete(pattern: String, handler: Handler, requiredPerm!: String = "", isPublic!: Bool = false): Unit {
-        this.add(Route("DELETE", pattern, handler, requiredPerm: requiredPerm, isPublic: isPublic))
+    public func delete(
+        pattern: String,
+        handler: Handler,
+        requiredPerm!: String = "",
+        isPublic!: Bool = false,
+        guard!: ResourceGuard = { _: ApiRequest => None }
+    ): Unit {
+        this.add(Route("DELETE", pattern, handler, requiredPerm: requiredPerm, isPublic: isPublic, guard: guard))
     }
 
     /**

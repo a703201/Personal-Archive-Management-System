@@ -41,18 +41,59 @@ public type Middleware = (ApiRequest) -> Option<ApiResponse>
 /**
  * 鉴权所需的依赖。
  */
+/**
+ * 用户的可访问范围。
+ *
+ * 由仓储层一次性查出，供鉴权中间件构造 AccessContext。
+ */
+public class UserAccess {
+    /** 权限点集合 */
+    public let perms: ArrayList<String>
+    /** 角色码集合 */
+    public let roles: ArrayList<String>
+    /** 可访问的主体 ID（本人 + 代管 + 被授权） */
+    public let subjectIds: ArrayList<String>
+    /**
+     * 该用户**本人拥有**的主体 ID（不含代管）。
+     *
+     * 与 subjectIds 的区别见 AccessContext 的说明：
+     * 归属校验用 subjectIds，敏感度判定用 ownedSubjectIds。
+     */
+    public let ownedSubjectIds: ArrayList<String>
+    /** 数据可见上限（取所有角色的最大值） */
+    public let maxDataLevel: Int64
+
+    public init(
+        perms: ArrayList<String>,
+        roles: ArrayList<String>,
+        subjectIds: ArrayList<String>,
+        maxDataLevel: Int64,
+        ownedSubjectIds!: ArrayList<String> = ArrayList<String>()
+    ) {
+        this.perms = perms
+        this.roles = roles
+        this.subjectIds = subjectIds
+        this.ownedSubjectIds = ownedSubjectIds
+        this.maxDataLevel = maxDataLevel
+    }
+}
+
 public class AuthContext {
     /** 令牌服务（签发与校验） */
     public let tokenService: TokenService
-    /** 权限查询（拿用户权限点与角色） */
-    public let permLoader: (String) -> (ArrayList<String>, ArrayList<String>)
+    /** 权限查询（拿用户权限点、角色与可访问主体） */
+    public let accessLoader: (String) -> UserAccess
+    /** 临时授权查询（拿该用户的显式授权，含已撤销/已过期的，判定时自行过滤） */
+    public let grantLoader: (String) -> Array<Grant>
 
     public init(
         tokenService: TokenService,
-        permLoader: (String) -> (ArrayList<String>, ArrayList<String>)
+        accessLoader: (String) -> UserAccess,
+        grantLoader!: (String) -> Array<Grant> = { _: String => Array<Grant>() }
     ) {
         this.tokenService = tokenService
-        this.permLoader = permLoader
+        this.accessLoader = accessLoader
+        this.grantLoader = grantLoader
     }
 }
 
@@ -113,14 +154,30 @@ public func accessLogMiddleware(): Middleware {
  */
 public func authMiddleware(auth: AuthContext, router: Router): Middleware {
     return { req: ApiRequest =>
-        // 取出匹配的路由以确定所需权限
+        // 取出匹配的路由以确定所需权限与资源守卫
         let path = ApiRequest.pathOf(req.url)
         var requiredPerm = ""
         var isPublic = false
+        var guard: Option<ResourceGuard> = None
         match (router.find(req.method, path)) {
-            case Some((route, _)) =>
+            case Some((route, params)) =>
                 requiredPerm = route.requiredPerm
                 isPublic = route.isPublic
+                guard = Some(route.guard)
+                // ⚠️ 必须把路径参数填进 req！
+                //
+                // 中间件链在**路由匹配之前**执行（见 server.handleRequest），
+                // 此时 req.pathParams 还是空的 —— 路由分发阶段才会填。
+                // 若这里不填，资源守卫（guard）拿不到 :id 等参数 →
+                // 返回 None → **对象级鉴权被整体跳过**（FR-ACL-006/007/008/009
+                // 全部形同虚设，任何登录用户都能读写他人条目）。
+                //
+                // 实测踩坑：family 用户读他人条目返回 200 而非 403。
+                for ((k, v) in params) {
+                    if (!req.pathParams.contains(k)) {
+                        req.pathParams.add(k, v)
+                    }
+                }
             case None => ()
         }
 
@@ -140,16 +197,49 @@ public func authMiddleware(auth: AuthContext, router: Router): Middleware {
                     case CryptoResult.Ok(payload) =>
                         req.subjectId = payload.uid
                         req.sid = payload.sid
-                        let (perms, roles) = auth.permLoader(payload.uid)
-                        req.perms = perms
-                        req.roles = roles
+                        let access = auth.accessLoader(payload.uid)
+                        req.perms = access.perms
+                        req.roles = access.roles
                         // 功能权限判定（安全章 §6.1 第 2 步）
-                        if (!requiredPerm.isEmpty() && !perms.contains(requiredPerm)) {
+                        //
+                        // ⚠️ 必须用 satisfiesPerm（any 覆盖 own），**不能**用
+                        //    access.perms.contains(requiredPerm) 精确匹配：
+                        //    持有 archive:read:any 的用户读 own 范围的接口会被误拒，
+                        //    且 Authorizer 的细粒度判定根本没机会执行（实测踩坑）。
+                        let funcCtx = AccessContext(
+                            payload.uid,
+                            access.perms.toArray(),
+                            access.subjectIds.toArray(),
+                            access.maxDataLevel,
+                            ownedSubjectIds: access.ownedSubjectIds.toArray()
+                        )
+                        if (!requiredPerm.isEmpty() && !funcCtx.satisfiesPerm(requiredPerm)) {
                             return Some(ApiResponse.error(
                                 AppErrorKind.Forbidden,
                                 "无权限执行该操作",
                                 req.requestId
                             ))
+                        }
+                        // ---- 对象级判定（安全章 §6.1 第 3~5 步）----
+                        //
+                        // 路由可用 guard 声明「本操作涉及哪个资源」；
+                        // 有 guard 时追加：数据归属 + 敏感度分级 + 显式授权/有效期。
+                        //
+                        // ⚠️ 这是 FR-ACL-006/007/008/009 真正生效的地方。
+                        //    此前 Authorizer 虽已实现且有单测，但**没有任何业务路径调用**，
+                        //    导致敏感度分级与授权到期形同虚设。
+                        if (guard.isSome()) {
+                            let denied = MiddlewareGuards.checkResource(
+                                auth,
+                                req,
+                                access,
+                                requiredPerm,
+                                guard.getOrThrow(),
+                                payload.uid
+                            )
+                            if (denied.isSome()) {
+                                return denied
+                            }
                         }
                         return None
                     case CryptoResult.Err(_) =>
@@ -193,5 +283,56 @@ public func mapError(e: Exception, requestId: String): ApiResponse {
                 ("detail", e.toString())
             ])
             return ApiResponse.error(AppErrorKind.Internal, "服务内部错误", requestId)
+    }
+}
+
+
+/**
+ * 资源级鉴权的辅助逻辑。
+ *
+ * 抽成独立类而非塞进中间件闭包，原因：
+ *   仓颉的 match 分支必须是**单个表达式**，不能写多行语句块；
+ *   把判定逻辑放进方法里，中间件只需一行调用。
+ */
+public class MiddlewareGuards {
+    /**
+     * 判定请求涉及的资源是否可访问。
+     *
+     * @return 拒绝 → Some(403 响应)；允许 → None
+     */
+    public static func checkResource(
+        auth: AuthContext,
+        req: ApiRequest,
+        access: UserAccess,
+        requiredPerm: String,
+        guard: ResourceGuard,
+        userId: String
+    ): Option<ApiResponse> {
+        let resource = match (guard(req)) {
+            case Some(r) => r
+            case None => return None
+        }
+        let ctx = AccessContext(
+            userId,
+            access.perms.toArray(),
+            access.subjectIds.toArray(),
+            access.maxDataLevel,
+            ownedSubjectIds: access.ownedSubjectIds.toArray()
+        )
+        let authorizer = Authorizer(auth.grantLoader(userId))
+        let decision = authorizer.authorize(
+            ctx,
+            requiredPerm,
+            resource,
+            Times.nowMillis()
+        )
+        match (decision.isAllowed()) {
+            case true => return None
+            case false => return Some(ApiResponse.error(
+                AppErrorKind.Forbidden,
+                "无权限访问该资源",
+                req.requestId
+            ))
+        }
     }
 }
