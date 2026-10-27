@@ -24,6 +24,29 @@
   --radius-md: 10px;
   --radius-lg: 16px;
 
+  /* ---- G3 连续曲线（几何连续，曲率导数连续）----
+     苹果的 continuous 圆角：圆角用超椭圆（superellipse）而非圆弧，
+     corner-style:continuous 在 WebKit/新版 Chrome 原生支持；
+     不支持时退化为普通 border-radius（仍为平滑 G2 曲线，不破版）。 */
+  --g3-sm: 12px;
+  --g3-md: 18px;
+  --g3-lg: 24px;
+  --g3-xl: 30px;
+  --g3-pill: 999px;
+
+  /* ---- 缓动（动效从当前值出发，可打断；见 docs §8.5 + apple-design）----
+     --ease-apple 为苹果常用中幅位移曲线（曲率连续，G2+），
+     与 G3 连续曲线的「平滑、无折点」理念一致。 */
+  --ease-apple: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out-soft: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --ease-in-out-soft: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ---- 弹簧参数（设计意图：阻尼比 1.0 / 响应 0.3s，临界阻尼无过冲）----
+     仅作文档式标注，CSS 过渡用它映射出的等效时长。 */
+  --spring-soft: 250ms;
+  --spring-mid: 200ms;
+  --spring-fast: 150ms;
+
   /* ---- 字体 ---- */
   --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei',
     'Helvetica Neue', Arial, sans-serif;
@@ -65,6 +88,14 @@
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.18);
+
+  /* 材质（Apple 玻璃层：半透明 + 模糊，承载层级） */
+  --material-toolbar: rgba(255, 255, 255, 0.72);
+  --material-sidebar: rgba(255, 255, 255, 0.82);
+  --material-sheet: rgba(255, 255, 255, 0.86);
+  --material-scrim: rgba(20, 22, 28, 0.32);
+  --material-blur: 24px;
 
   /* 敏感度配色（遵循国内习惯：高=红、低=绿） */
   --sens-normal: #1a9c5b;
@@ -98,6 +129,14 @@
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.6);
+
+  /* 材质（深色：玻璃层更暗，模糊更强以分离层级） */
+  --material-toolbar: rgba(28, 30, 35, 0.72);
+  --material-sidebar: rgba(28, 30, 35, 0.82);
+  --material-sheet: rgba(34, 36, 41, 0.9);
+  --material-scrim: rgba(0, 0, 0, 0.5);
+  --material-blur: 28px;
 
   --sens-normal: #35c07c;
   --sens-sensitive: #e0a234;
@@ -188,7 +227,7 @@ a {
 .card {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--g3-md);
   box-shadow: var(--shadow-sm);
   padding: var(--sp-4);
 }
@@ -223,6 +262,114 @@ a {
 .badge--normal { background: var(--sens-normal); }
 .badge--sensitive { background: var(--sens-sensitive); }
 .badge--high { background: var(--sens-high); }
+
+/* ============================================================
+   补充：G3 连续曲线 + Apple 质感细节
+   依据 docs/07 §3/§8/§11/§12 与 apple-design 技能
+   ============================================================ */
+
+/* 承载层与可交互元素统一启用 continuous 圆角（几何连续，曲率导数连续）。
+   不支持 corner-style 的浏览器自动退化为普通 border-radius，不破版。 */
+.card,
+.badge,
+button,
+input,
+select,
+textarea,
+.g3 {
+  corner-style: continuous;
+}
+
+/* 聚焦可见性（§11.1）：2px 强调色 + 2px 偏移，禁止 outline:none */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 字距分级（apple-design §15：大字号收紧、正文近 0，绝不全局固定 letter-spacing） */
+h1, .h1 { letter-spacing: -0.02em; line-height: 1.1; }
+h2, .h2 { letter-spacing: -0.012em; }
+h3, .h3 { letter-spacing: -0.006em; }
+
+/* 通用按钮质感（Apple：按下即时反馈、轻微回弹；反馈在 100ms 内可见） */
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* 主操作：强调色实底 */
+.btn-primary {
+  border: none;
+  background: var(--accent);
+  color: var(--text-inverse);
+  border-radius: var(--g3-sm);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  transition: background-color var(--spring-fast) ease-out, filter var(--spring-fast) ease-out,
+    transform 100ms ease-out;
+}
+.btn-primary:hover { filter: brightness(1.05); }
+.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* 次操作：描边 */
+.btn-ghost {
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-radius: var(--g3-sm);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  transition: background-color var(--spring-fast) ease-out;
+}
+.btn-ghost:hover { background: var(--bg-hover); }
+
+/* 危险操作：红色实底 */
+.btn-danger {
+  border: none;
+  background: var(--danger);
+  color: #fff;
+  border-radius: var(--g3-sm);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  transition: filter var(--spring-fast) ease-out, transform 100ms ease-out;
+}
+.btn-danger:hover { filter: brightness(1.06); }
+
+/* 文本/链接型操作 */
+.btn-text {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--spring-fast) ease-out;
+}
+.btn-text:hover { background: var(--bg-hover); }
+
+/* 行内输入：G3 连续圆角 + 聚焦环 */
+.field-control {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--g3-sm);
+  padding: var(--sp-3);
+  font-size: var(--font-size-md);
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  transition: border-color var(--spring-fast) ease-out, box-shadow var(--spring-fast) ease-out;
+}
+.field-control:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
 
 /* ---- 尊重「减少动态效果」偏好 ---- */
 @media (prefers-reduced-motion: reduce) {

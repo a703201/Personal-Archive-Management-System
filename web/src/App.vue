@@ -10,21 +10,57 @@
  *
  * 顶栏常驻全局搜索入口与主题开关（FR-UX-005 / FR-UX-002）。
  */
-import { RouterLink, RouterView } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
+import { RouterLink, RouterView, useRoute } from 'vue-router'
 import GlobalSearch from './components/GlobalSearch.vue'
+import ToastHost from './components/ToastHost.vue'
 import { useTheme } from './composables/useTheme'
+import { api, getToken } from './api/client'
 
+const route = useRoute()
 const { resolved, mode, setMode, toggle } = useTheme()
+
+/**
+ * 管理类导航按真实权限逐模块显隐（后端仍是权威校验，前端仅决定入口）。
+ * 注意：org_admin 未必含 audit:read，故不能用一个总开关。
+ */
+const canUsers = ref(false)
+const canRoles = ref(false)
+const canAudit = ref(false)
+const hasAdmin = computed(() => canUsers.value || canRoles.value || canAudit.value)
+
+onMounted(async () => {
+  if (!getToken()) return
+  try {
+    const me = await api<{ perms: string[] }>('/me')
+    const p = me.perms ?? []
+    canUsers.value = p.includes('user:read:any') || p.includes('user:manage')
+    canRoles.value = p.includes('acl:manage')
+    canAudit.value = p.includes('audit:read')
+  } catch {
+    canUsers.value = false
+    canRoles.value = false
+    canAudit.value = false
+  }
+})
 </script>
 
 <template>
-  <div class="app-shell">
+  <div v-if="!route.meta.public" class="app-shell">
     <!-- 侧栏：desktop 及以上显示 -->
     <aside class="sidebar">
       <div class="brand">AMS</div>
       <nav class="nav">
+        <p class="nav__group">个人</p>
+        <RouterLink class="nav__item" to="/archive">档案</RouterLink>
         <RouterLink class="nav__item" to="/overview">概览</RouterLink>
         <RouterLink class="nav__item" to="/profile">个人主页</RouterLink>
+        <template v-if="hasAdmin">
+          <p class="nav__group">管理</p>
+          <RouterLink v-if="canUsers" class="nav__item" to="/users">用户管理</RouterLink>
+          <RouterLink v-if="canRoles" class="nav__item" to="/roles">角色与权限</RouterLink>
+          <RouterLink v-if="canAudit" class="nav__item" to="/audit">审计日志</RouterLink>
+        </template>
       </nav>
     </aside>
 
@@ -32,8 +68,12 @@ const { resolved, mode, setMode, toggle } = useTheme()
       <header class="topbar">
         <!-- 移动端顶部导航 -->
         <nav class="nav nav--inline">
+          <RouterLink class="nav__item" to="/archive">档案</RouterLink>
           <RouterLink class="nav__item" to="/overview">概览</RouterLink>
           <RouterLink class="nav__item" to="/profile">个人主页</RouterLink>
+          <RouterLink v-if="canUsers" class="nav__item" to="/users">用户</RouterLink>
+          <RouterLink v-if="canRoles" class="nav__item" to="/roles">角色</RouterLink>
+          <RouterLink v-if="canAudit" class="nav__item" to="/audit">审计</RouterLink>
         </nav>
 
         <div class="topbar__right">
@@ -64,6 +104,10 @@ const { resolved, mode, setMode, toggle } = useTheme()
       </main>
     </div>
   </div>
+  <div v-else class="login-only">
+    <RouterView />
+  </div>
+  <ToastHost />
 </template>
 
 <style scoped>
@@ -83,7 +127,10 @@ const { resolved, mode, setMode, toggle } = useTheme()
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
-  background: var(--bg-surface);
+  /* Apple 材质：半透明玻璃层 + 模糊，承载层级（见 apple-design §12） */
+  background: var(--material-toolbar);
+  backdrop-filter: blur(var(--material-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(180%);
   border-bottom: 1px solid var(--border-subtle);
   position: sticky;
   top: 0;
@@ -109,10 +156,25 @@ const { resolved, mode, setMode, toggle } = useTheme()
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+  padding: 0 var(--sp-2);
 }
 .nav--inline {
   flex-direction: row;
   gap: var(--sp-3);
+  padding: 0;
+}
+
+/* 分组标题：小字号 + 略正字距（apple-design §15：小字不收紧） */
+.nav__group {
+  margin: var(--sp-3) var(--sp-3) var(--sp-1);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.nav--inline .nav__group {
+  display: none;
 }
 
 .nav__item {
@@ -156,8 +218,10 @@ const { resolved, mode, setMode, toggle } = useTheme()
   .sidebar {
     display: flex;
     flex-direction: column;
-    width: 200px;
-    background: var(--bg-surface);
+    width: 220px;
+    background: var(--material-sidebar);
+    backdrop-filter: blur(var(--material-blur)) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--material-blur)) saturate(180%);
     border-right: 1px solid var(--border-subtle);
     flex-shrink: 0;
   }
