@@ -32,6 +32,7 @@ import ams.app.attachment.*
 import ams.app.item.*
 import ams.app.scheduler.*
 import ams.app.search.*
+import ams.app.subject.*
 import ams.crypto.impl.*
 import ams.crypto.key.*
 import ams.crypto.provider.*
@@ -163,6 +164,13 @@ main(): Int64 {
     let userRepo = UserRepo(db)
     let roleRepo = RoleRepo(db)
 
+    // ---- 档案主体（arc_subjects）----
+    // 主体是「条目归属」的锚点：arc_items.subject_id 必须属于调用者的
+    // 可访问主体集合，否则 createItem 返回 403。
+    // 此前全仓无任何主体写入点 → 所有用户都建不了第一条档案。
+    // 姓名字段（name_enc）是密文列，加解密由 SubjectService 负责。
+    let subjectService = SubjectService(SubjectRepo(db), provider, kek)
+
     // ---- 6. 安全层 ----
     let policy = PasswordPolicy()
     let hasher = PasswordHasher(provider, policy)
@@ -231,6 +239,11 @@ main(): Int64 {
         itemFieldRepo,
         recorder: auditRecorder
     )
+    // ---- 主体接口（/api/subjects）：必须在条目接口之前就绪 ----
+    // 前端建档流程是「先拉主体 → 再按主体建条目」，
+    // GET /api/subjects 会为首访用户懒建「本人」主体。
+    SubjectRoutes(subjectService, userRepo).register(router)
+
     // 注册顺序：先条目（含 /api/items/recycle-bin 与 /api/items/:id），
     // 再子资源（/api/items/:id/fields），避免通配路径抢先匹配。
     ItemRoutes(itemRepo, userRepo, searchService: searchService).register(router)
@@ -255,7 +268,18 @@ main(): Int64 {
     SearchRoutes(searchService, userRepo, blindIndexService: blindIndexService).register(router)
 
     // ---- 个人中心与概览（FR-UX-001 的后端支撑）----
-    MeRoutes(userRepo, itemRepo, NotifyRepo(db)).register(router)
+    // 注入口令相关能力后，PUT /api/me 与 POST /api/me/password 才可用
+    // （此前个人主页只能看不能改 —— 后端根本没有写入口）。
+    MeRoutes(
+        userRepo,
+        itemRepo,
+        NotifyRepo(db),
+        hasher: hasher,
+        passwordValidator: passwordValidator,
+        policy: policy,
+        authService: authService,
+        kdfIterations: policy.iterations
+    ).register(router)
 
     // ---- 附件域（FR-ATT-001~007）----
     // KEK 由环境变量注入（生产应来自 KMS / HSM，禁止硬编码）；

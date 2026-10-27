@@ -139,6 +139,25 @@ public class ItemRoutes {
         return this.userRepo.listAccessibleSubjectIds(uid).toArray()
     }
 
+    /**
+     * 按 ?subjectId 收窄可访问主体集合。
+     *
+     * 只在**已算出的可访问集合内**取交集 —— 传别人的 subjectId
+     * 不会扩大可见范围：交集为空即空列表（FR-ACL-006：归属由服务端定）。
+     */
+    private static func narrow(subjects: Array<String>, want: String): Array<String> {
+        if (want.isEmpty()) {
+            return subjects
+        }
+        let out = ArrayList<String>()
+        for (s in subjects) {
+            if (s == want) {
+                out.add(s)
+            }
+        }
+        return out.toArray()
+    }
+
     // ---------------------------------------------------------------
     // 处理器
     // ---------------------------------------------------------------
@@ -158,7 +177,13 @@ public class ItemRoutes {
         if (size < 1 || size > 200) {
             throw validationError("size", "每页条数须在 1~200 之间")
         }
-        let subjects = this.accessibleSubjects(req)
+        // 支持按主体筛选（前端「档案」页的主体切换）：
+        // 与服务端算出的可访问集合取交集，越权传参只会得到空结果。
+        let wantSubject = match (req.queryParam("subjectId")) {
+            case Some(v) => v
+            case None => ""
+        }
+        let subjects = ItemRoutes.narrow(this.accessibleSubjects(req), wantSubject)
         let rows = this.itemRepo.list(subjects, category, status, keyword, size, (page - 1) * size)
         let total = this.itemRepo.count(subjects, category, status, keyword)
         let sb = StringBuilder()
