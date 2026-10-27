@@ -15,10 +15,33 @@
 
 ---
 
-## [未发布]
+## [0.2.0] — 2026-10-27
+
+P0 需求全量落地（54 已实现 / 0 部分 / 0 未实现），并以单元测试套件全绿（214 通过 / 0 失败）收口。
 
 ### 新增
-- 待补充
+
+- **检索索引自动构建（FR-SRC-001）**：条目创建/更新与扩展字段保存成功后自动 `indexItem`；新增 `SearchRepo.listUnindexedItemIds` + `SearchService.reindexUnindexed`，并暴露运维端点 `POST /api/admin/search/reindex?limit=`（默认 500 / 上限 5000）用于存量回填。
+- **盲索引等值检索（FR-SRC-005 / D4 决策落地）**：新增 `BlindIndexService`（由 KEK 派生全局盲索引密钥，按字段键选归一化规则 + HMAC-SM3）；写入侧落 `value_bidx`，查询侧 `GET /api/search?fkey=&fval=` 路由接通。部分掩码匹配经决策降级为「不实现」。
+- **单元测试套件扩充**：`ams-api` 测试包补充至 21 个用例；全量套件 **214 用例通过 / 0 失败**。
+
+### 修复
+
+- **附件数维护（FR-SRC-003）**：新增 `ItemRepo.bumpAttachmentCount`（原子 `UPDATE ... + ?`），`AttachmentService` 上传落库成功后 +1；检索按附件数排序/展示恢复正确。
+- **敏感字段掩码位数对齐（FR-SRC-006 / D2）**：`Masker.maskIdCard` 由「前 6 后 4」改为「前 4 后 2」，并接线到扩展字段展示路径（`GET /api/items/:id/fields` 无 `archive:read_sensitive` 权限时敏感字段默认走掩码）。
+- **单元测试套件红态修复**：修掉 2 个长期预存编译错误（`api_test.cj` 误用本版本编译器不支持的 `===` 引用相等、以及 `AuthContext.accessLoader` 返回类型错误），并同步 `search_test.cj` 的掩码断言；修复前该包整包编译失败、21 个用例从未执行。
+
+### 文档
+
+- 新增 `docs/10-P0实现状态核对.md`：逐条以代码为准核对 54 条 P0（结论 54/0/0），记录接线审计（§7.11）、D2/D4 落地（§7.12）、测试套件红态发现与修复（§7.13）。
+- `docs/08-SM4方案变更说明.md`：SM4-GCM → SM4-CBC+HMAC-SM3 论证（待产品签字，D3）。
+
+### 已知限制
+
+- 仅交付 Windows x86_64；Linux / ARM64 需在对应平台构建（架构文档 §7.2）。
+- 前端（`web/`）尚未完全实现。
+- 会话存储当前为内存实现，重启后需重新登录（生产需接 DB）。
+- 真实端到端运行时验证（连 openGauss 跑盲索引 round-trip、GIN 分词命中、附件加解密、存量 `reindex` 回填）尚未执行。
 
 ---
 
@@ -83,5 +106,5 @@
 - 前端（`web/`）尚未实现
 - 会话存储当前为内存实现，重启后需重新登录（生产需接 DB）
 
-[未发布]: https://github.com/a703201/Personal-Archive-Management-System/compare/v0.1.0...HEAD
+[0.2.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/a703201/Personal-Archive-Management-System/releases/tag/v0.1.0

@@ -25,21 +25,49 @@ package ams.api.routes
 import std.collection.*
 
 import ams.api.http.*
+import ams.app.search.*
 import ams.data.repo.*
 import ams.kernel.error.*
 import ams.kernel.id.*
+import ams.kernel.log.*
 import ams.security.authz.*
 
 /**
  * 条目接口。
+ *
+ * 【检索索引接线】
+ *   searchService 可选注入：条目创建 / 更新后同步重建 arc_search_index。
+ *   此前 indexItem() 有实现但**零调用点**，GIN tokens 索引恒为空，
+ *   导致 /api/search 的关键词检索永远命中不了结果（FR-SRC-001 形同虚设）。
+ *   索引失败**不阻断**主流程（条目已落库，索引可后续重建），只记日志。
  */
 public class ItemRoutes {
     private let itemRepo: ItemRepo
     private let userRepo: UserRepo
+    private let searchService: ?SearchService
 
-    public init(itemRepo: ItemRepo, userRepo: UserRepo) {
+    public init(itemRepo: ItemRepo, userRepo: UserRepo, searchService!: ?SearchService = None) {
         this.itemRepo = itemRepo
         this.userRepo = userRepo
+        this.searchService = searchService
+    }
+
+    /**
+     * 重建检索索引（尽力而为，失败仅记日志）。
+     */
+    private func reindex(itemId: Int64): Unit {
+        match (this.searchService) {
+            case Some(svc) =>
+                try {
+                    svc.indexItem(itemId)
+                } catch (e: Exception) {
+                    Log.get().warn("search.index.failed", None, [
+                        ("itemId", "${itemId}"),
+                        ("reason", e.toString())
+                    ])
+                }
+            case None => ()
+        }
     }
 
     /**
@@ -203,6 +231,8 @@ public class ItemRoutes {
             json.get("extra") ?? "{}",
             UserRepo.parseId(req.subjectId)
         )
+        // 同步重建检索索引（失败不影响创建结果）
+        this.reindex(id)
         return ApiResponse.ok("{\"id\":\"${id}\"}", req.requestId)
     }
 
@@ -254,6 +284,8 @@ public class ItemRoutes {
             // 乐观锁失败 → 409 冲突（FR-ARCH-007），并说明当前版本
             throw ItemRoutes.conflict(r.version)
         }
+        // 同步重建检索索引（失败不影响更新结果）
+        this.reindex(id)
         return ApiResponse.ok("{\"updated\":true}", req.requestId)
     }
 

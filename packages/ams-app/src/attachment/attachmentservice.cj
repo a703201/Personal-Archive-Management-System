@@ -64,19 +64,22 @@ public class AttachmentService {
     private let quarantine: StorageBackend
     private let keyManager: KeyManager
     private let cipherProvider: CryptoProvider
+    private let itemRepo: ?ItemRepo
 
     public init(
         repo: AttachmentRepo,
         storage: StorageBackend,
         quarantine: StorageBackend,
         keyManager: KeyManager,
-        cipherProvider: CryptoProvider
+        cipherProvider: CryptoProvider,
+        itemRepo!: ?ItemRepo = None
     ) {
         this.repo = repo
         this.storage = storage
         this.quarantine = quarantine
         this.keyManager = keyManager
         this.cipherProvider = cipherProvider
+        this.itemRepo = itemRepo
     }
 
     /**
@@ -163,6 +166,24 @@ public class AttachmentService {
             status.toCode(), operatorId
         )
         this.repo.setWrappedDek(attId, AttachmentService.encodeWrapped(wrapped))
+
+        // ---- 7b. 同步条目附件计数（FR-SRC-003 排序依赖）----
+        // 仅新建（非秒传命中）才 +1；仅当附件确实挂在某条目下。
+        match (itemId) {
+            case Some(iid) =>
+                match (this.itemRepo) {
+                    case Some(ir) =>
+                        try {
+                            ir.bumpAttachmentCount(iid, 1)
+                        } catch (e: Exception) {
+                            Log.get().warn("attachment.count.bump.failed", None, [
+                                ("itemId", "${iid}"), ("reason", e.toString())
+                            ])
+                        }
+                    case None => ()
+                }
+            case None => ()
+        }
 
         let versionId = this.repo.addVersion(
             attId, 1, storageKey, encrypted.size, ext, mime, fp,

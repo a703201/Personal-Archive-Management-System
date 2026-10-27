@@ -579,6 +579,27 @@ public class ItemRepo {
         }
     }
 
+    /**
+     * 调整条目的附件计数（FR-SRC-003 / 检索排序依赖）。
+     *
+     * 此前附件上传后**从不更新** arc_items.attachment_count，
+     * 导致「按附件数排序/筛选」永远拿到 0。这里在上传落库后 +1。
+     * 用原子 UPDATE 自增，避免并发下的读改写竞态。
+     */
+    public func bumpAttachmentCount(itemId: Int64, delta: Int64): Unit {
+        let sql = "UPDATE arc_items SET attachment_count = attachment_count + ? " +
+                  "WHERE id = ? AND deleted_at IS NULL"
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, delta)
+            st.set(1, itemId)
+            st.update()
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+    }
+
     // ---- 内部工具 ----
 
     /**

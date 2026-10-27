@@ -85,6 +85,31 @@ public class SearchService {
     }
 
     /**
+     * 批量回填「尚未建立索引」的条目（供运维端点调用）。
+     *
+     * 用途：索引接线补齐之前创建的存量条目没有索引行，
+     * 关键词检索会漏掉它们。单条失败不影响整批。
+     *
+     * @return 本次成功建立索引的条数
+     */
+    public func reindexUnindexed(limit: Int64): Int64 {
+        let ids = this.searchRepo.listUnindexedItemIds(limit)
+        var done: Int64 = 0
+        for (id in ids) {
+            try {
+                this.indexItem(id)
+                done = done + 1
+            } catch (e: Exception) {
+                Log.get().warn("search.reindex.skip", None, [
+                    ("itemId", "${id}"),
+                    ("reason", e.toString())
+                ])
+            }
+        }
+        return done
+    }
+
+    /**
      * 执行检索。
      *
      * @param q 查询条件（subjectIds 必须已由服务端填好）

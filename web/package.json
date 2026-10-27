@@ -1,7 +1,7 @@
 {
   "name": "ams-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "AMS 个人档案管理系统 · 前端（Vue 3 + TypeScript + Vite）",
   "scripts": {

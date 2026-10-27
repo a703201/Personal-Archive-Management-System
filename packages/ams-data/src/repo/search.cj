@@ -91,6 +91,32 @@ public class SearchRepo {
         }
     }
 
+    /**
+     * 列出**尚未建立索引**的条目 ID（供存量回填）。
+     *
+     * 场景：索引接线补齐之前已创建的条目，arc_search_index 里没有对应行，
+     * 关键词检索会漏掉它们。运维调用 /api/admin/search/reindex 分批回填。
+     */
+    public func listUnindexedItemIds(limit: Int64): Array<Int64> {
+        let sql = "SELECT i.id FROM arc_items i " +
+                  "LEFT JOIN arc_search_index s ON s.item_id = i.id " +
+                  "WHERE s.item_id IS NULL AND i.deleted_at IS NULL " +
+                  "ORDER BY i.id LIMIT ?"
+        let out = ArrayList<Int64>()
+        try {
+            let c = this.db.connect()
+            let st = c.prepareStatement(sql)
+            st.set(0, limit)
+            let rs = st.query()
+            for (row in readRows(rs).all()) {
+                out.add(row.i64("id"))
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        }
+        return out.toArray()
+    }
+
     // ------------------------------------------------------------
     // 检索
     // ------------------------------------------------------------

@@ -76,8 +76,8 @@ public class MaskerTest {
 
     @TestCase
     public func testIdCardMaskKeepsIndustryConvention() {
-        // 身份证：保留前 6 后 4
-        @Assert(Masker.maskIdCard("110101199001011234"), "110101********1234")
+        // 身份证：保留前 4 后 2（对齐 FR-SRC-006 / D2 决策）
+        @Assert(Masker.maskIdCard("110101199001011234"), "1101************34")
     }
 
     @TestCase

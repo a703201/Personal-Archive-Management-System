@@ -21,8 +21,11 @@ package ams.api.routes
 import std.collection.*
 
 import ams.api.http.*
+import ams.app.search.*
+import ams.core.search.*
 import ams.data.repo.*
 import ams.kernel.error.*
+import ams.kernel.log.*
 
 /**
  * 字段定义接口（FR-ARCH-003）。
@@ -259,17 +262,23 @@ public class ItemFieldRoutes {
     private let fieldDefRepo: FieldDefRepo
     private let itemFieldRepo: ItemFieldRepo
     private let userRepo: UserRepo
+    private let searchService: ?SearchService
+    private let blindIndexService: ?BlindIndexService
 
     public init(
         itemRepo: ItemRepo,
         fieldDefRepo: FieldDefRepo,
         itemFieldRepo: ItemFieldRepo,
-        userRepo: UserRepo
+        userRepo: UserRepo,
+        searchService!: ?SearchService = None,
+        blindIndexService!: ?BlindIndexService = None
     ) {
         this.itemRepo = itemRepo
         this.fieldDefRepo = fieldDefRepo
         this.itemFieldRepo = itemFieldRepo
         this.userRepo = userRepo
+        this.searchService = searchService
+        this.blindIndexService = blindIndexService
     }
 
     public func register(router: Router): Unit {
@@ -288,6 +297,8 @@ public class ItemFieldRoutes {
         let id = RowData.toI64(req.pathParam("id") ?? "")
         let rec = this.requireAccessible(req, id)
         let values = this.itemFieldRepo.listByItem(id)
+        // FR-SRC-006：敏感字段默认掩码；仅持 archive:read_sensitive 才返回明文
+        let canReveal = req.perms.contains("archive:read_sensitive")
         let sb = StringBuilder()
         sb.append("{\"itemId\":${rec.id},\"category\":${rec.category},\"fields\":[")
         var first = true
@@ -296,15 +307,35 @@ public class ItemFieldRoutes {
                 sb.append(",")
             }
             first = false
+            let shown = if (canReveal) { v.value } else { this.maskField(v.fieldKey, v.value, v.sensitivity) }
             sb.append("{\"fieldDefId\":${v.fieldDefId},")
             sb.append("\"fieldKey\":\"${ApiResponse.escape(v.fieldKey)}\",")
             sb.append("\"fieldName\":\"${ApiResponse.escape(v.fieldName)}\",")
             sb.append("\"dataType\":${v.dataType},")
             sb.append("\"sensitivity\":${v.sensitivity},")
-            sb.append("\"value\":\"${ApiResponse.escape(v.value)}\"}")
+            sb.append("\"value\":\"${ApiResponse.escape(shown)}\"}")
         }
         sb.append("]}")
         return ApiResponse.ok(sb.toString(), req.requestId)
+    }
+
+    /**
+     * 按字段键选择掩码器（FR-SRC-006）：
+     *   id_number/id_card → 前4后2；phone/mobile → 前3后4；其余按敏感度首尾掩码。
+     * sensitivity < 2 视为普通字段，不掩码。
+     */
+    private func maskField(fieldKey: String, value: String, sensitivity: Int64): String {
+        if (sensitivity < 2 || value.isEmpty()) {
+            return value
+        }
+        let k = fieldKey.toAsciiLower()
+        if (k.contains("id") || k.contains("card")) {
+            return Masker.maskIdCard(value)
+        }
+        if (k.contains("phone") || k.contains("mobile")) {
+            return Masker.maskPhone(value)
+        }
+        return Masker.mask(value, sensitivity)
     }
 
     /**
@@ -331,12 +362,39 @@ public class ItemFieldRoutes {
             let value = kv.value
             for (fd in defs) {
                 if (fd.fieldKey == key) {
-                    this.itemFieldRepo.save(id, fd.id, fd.dataType, value)
+                    // 盲索引：由服务按字段键选规则算出（写入侧落 value_bidx，供精确检索）
+                    let bidx = match (this.blindIndexService) {
+                        case Some(s) => s.bidx(fd.fieldKey, value)
+                        case None => None<Array<Byte>>
+                    }
+                    this.itemFieldRepo.save(id, fd.id, fd.dataType, value, bidx: bidx)
                     saved = saved + 1
                 }
             }
         }
+        // 扩展字段参与索引内容，保存后需重建（失败不影响写入结果）
+        if (saved > 0) {
+            this.reindex(UserRepo.parseId(rec.id))
+        }
         return ApiResponse.ok("{\"itemId\":${rec.id},\"saved\":${saved}}", req.requestId)
+    }
+
+    /**
+     * 重建检索索引（尽力而为，失败仅记日志）。
+     */
+    private func reindex(itemId: Int64): Unit {
+        match (this.searchService) {
+            case Some(svc) =>
+                try {
+                    svc.indexItem(itemId)
+                } catch (e: Exception) {
+                    Log.get().warn("search.index.failed", None, [
+                        ("itemId", "${itemId}"),
+                        ("reason", e.toString())
+                    ])
+                }
+            case None => ()
+        }
     }
 
     // ---------------------------------------------------------

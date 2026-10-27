@@ -143,6 +143,10 @@ main(): Int64 {
     // ---- 4. 密码学提供者 ----
     let provider: CryptoProvider = StdxCryptoProvider()
 
+    // 盲索引密钥：由 KEK 派生（与附件 DEK 包裹密钥同源），写读两侧一致（FR-SRC-005）
+    let kek = (getVariable("AMS_KEK") ?? "ams-dev-kek-change-me-in-production").toArray()
+    let blindIndexService = BlindIndexService(provider, kek)
+
     log.info("server.boot", None, [
         ("version", "0.1.0"),
         ("httpHost", config.httpHost),
@@ -214,34 +218,41 @@ main(): Int64 {
     ).register(router)
     // 条目接口（FR-ARCH-001~008）：带资源守卫，对象级鉴权在此生效
     let itemRepo = ItemRepo(db)
-    ItemRoutes(itemRepo, userRepo).register(router)
+    let itemFieldRepo = ItemFieldRepo(db)
+
+    // ---- 检索执行层（FR-SRC-001~006）----
+    // SearchService 复用条目与扩展字段仓库来构建索引；
+    // 敏感字段展开（reveal）经 auditRecorder 留痕。
+    // 【提前创建的原因】ItemRoutes 要在条目创建/更新后调用 indexItem() 重建索引，
+    // 否则 arc_search_index 恒为空、关键词检索永不命中。
+    let searchService = SearchService(
+        SearchRepo(db),
+        itemRepo,
+        itemFieldRepo,
+        recorder: auditRecorder
+    )
+    // 注册顺序：先条目（含 /api/items/recycle-bin 与 /api/items/:id），
+    // 再子资源（/api/items/:id/fields），避免通配路径抢先匹配。
+    ItemRoutes(itemRepo, userRepo, searchService: searchService).register(router)
 
     // ---- 字段定义与扩展字段（FR-ARCH-003 / 004 / 005）----
     // ① 先播种 11 套内置分类字段模板：此前模板只存在于代码里（catalog.cj），
     //    未写入 arc_field_defs —— 现在启动时幂等落库（已存在则跳过）。
     let fieldDefRepo = FieldDefRepo(db)
-    let itemFieldRepo = ItemFieldRepo(db)
     let seeded = FieldTemplateService(fieldDefRepo).ensureBuiltinTemplates()
     Log.get().info("startup.field.templates", None, [("seeded", "${seeded}")])
     // ② 字段定义 CRUD（ARCH-003）+ 条目扩展字段明细读写（ARCH-004）
     FieldDefRoutes(fieldDefRepo, userRepo).register(router)
-    ItemFieldRoutes(itemRepo, fieldDefRepo, itemFieldRepo, userRepo).register(router)
+    // 扩展字段值参与索引内容，保存后需重建索引；敏感字段按规则落盲索引（FR-SRC-005）
+    ItemFieldRoutes(itemRepo, fieldDefRepo, itemFieldRepo, userRepo, searchService: searchService, blindIndexService: blindIndexService).register(router)
 
     // ---- 导出接口（FR-EXP-004 / FR-EXP-007）----
     // 配额由共享 rateLimiter 计量；导出审计经 auditRecorder 落库
     let exportService = ExportService(itemRepo, rateLimiter, recorder: auditRecorder)
     ExportRoutes(userRepo, exportService).register(router)
 
-    // ---- 检索执行层（FR-SRC-001~006）----
-    // SearchService 复用条目与扩展字段仓库来构建索引；
-    // 敏感字段展开（reveal）经 auditRecorder 留痕。
-    let searchService = SearchService(
-        SearchRepo(db),
-        itemRepo,
-        ItemFieldRepo(db),
-        recorder: auditRecorder
-    )
-    SearchRoutes(searchService, userRepo).register(router)
+    // ---- 检索接口（SearchService 已在条目接口之前创建）----
+    SearchRoutes(searchService, userRepo, blindIndexService: blindIndexService).register(router)
 
     // ---- 个人中心与概览（FR-UX-001 的后端支撑）----
     MeRoutes(userRepo, itemRepo, NotifyRepo(db)).register(router)
@@ -250,7 +261,6 @@ main(): Int64 {
     // KEK 由环境变量注入（生产应来自 KMS / HSM，禁止硬编码）；
     // 附件内容用 KeyManager 生成的随机 DEK 加密（SM4-CBC + HMAC-SM3），
     // DEK 本身被 KEK 包裹后落 arc_attachments.wrapped_dek（见 008 迁移）。
-    let kek = (getVariable("AMS_KEK") ?? "ams-dev-kek-change-me-in-production").toArray()
     let keyManager = KeyManager(provider, { keyId: String => kek })
     let storageRoot = getVariable("AMS_STORAGE_DIR") ?? "./data-attachments"
     let attachmentRepo = AttachmentRepo(db)
@@ -259,7 +269,8 @@ main(): Int64 {
         LocalFileStorage(storageRoot),
         QuarantineStorage("./data-quarantine"),
         keyManager,
-        provider
+        provider,
+        itemRepo: itemRepo
     )
     AttachmentRoutes(attachmentService, attachmentRepo).register(router)
 
@@ -267,7 +278,7 @@ main(): Int64 {
     // 不在启动即刻执行：避免频繁重启造成重复推送。
     // 由 cron 或运维调用 POST /api/admin/tasks/run 驱动（内部有 24h 间隔闸门）。
     let scheduler = Scheduler(itemRepo, NotifyRepo(db))
-    AdminRoutes(scheduler).register(router)
+    AdminRoutes(scheduler, searchService: searchService).register(router)
 
     // ---- 审计查询接口（FR-AUD-003/004）----
     // auditRecorder 已在上面创建（供 AuthService 记录登录/登出）

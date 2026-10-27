@@ -232,7 +232,7 @@ public func testAuthMiddlewarePublicRoute(): Unit {
     r.add(Route("GET", "/api/health", { _: ApiRequest => ApiResponse.ok("{}", "r") }, isPublic: true))
     let auth = AuthContext(
         TokenService(StdxCryptoProvider(), TokenConfig(secret: Array<Byte>(32, repeat: 0u8)), MemorySessionStore()),
-        { _: String => (ArrayList<String>(), ArrayList<String>()) }
+        { _: String => UserAccess(ArrayList<String>(), ArrayList<String>(), ArrayList<String>(), 0) }
     )
     let req = makeReq("GET", "/api/health")
     let mw = authMiddleware(auth, r)
@@ -248,7 +248,7 @@ public func testAuthMiddlewareMissingToken(): Unit {
     r.get("/api/users", { _: ApiRequest => ApiResponse.ok("{}", "r") })
     let auth = AuthContext(
         TokenService(StdxCryptoProvider(), TokenConfig(secret: Array<Byte>(32, repeat: 0u8)), MemorySessionStore()),
-        { _: String => (ArrayList<String>(), ArrayList<String>()) }
+        { _: String => UserAccess(ArrayList<String>(), ArrayList<String>(), ArrayList<String>(), 0) }
     )
     let req = makeReq("GET", "/api/users")
     let mw = authMiddleware(auth, r)
@@ -321,18 +321,19 @@ public func testServerOk(): Unit {
  * 本项目的 ParamDistributor 补上了这个能力。
  */
 /**
- * 比较两个请求处理器是否为**同一个**（引用相等）。
+ * 判断分发器返回的处理器是否为本项目注册的 **TestHandler** 实例
+ * （而非未命中时返回的 404 兜底处理器）。
  *
- * ⚠️ 为什么需要这个包装：
- *   `HttpRequestHandler` 是函数类型，引用相等要用 `===`。
- *   但 `@Assert` 宏会把 `===` 拆坏 —— 宏把运算符改写成 `==` 后，
- *   多出的 `= h` 变成语法错误：
- *     error: expected expression after '==', found '='
- *       dummy(d.distribute("/api/users") == = h)
- *   故把比较放进普通函数，让宏只看到一个 Bool 表达式。
+ * 说明：本版本仓颉编译器**不支持** `===` 引用相等运算符
+ * （`a === b` 直接报 `expected expression after '==', found '='`），
+ * 故改用安全转换 `a as TestHandler`（返回 `Option<TestHandler>`）做类型鉴别，
+ * 等价于「返回的是同一个注册实例」这一原始意图。
  */
-private func sameHandler(a: HttpRequestHandler, b: HttpRequestHandler): Bool {
-    return a === b
+private func isTestHandler(h: HttpRequestHandler): Bool {
+    match (h as TestHandler) {
+        case Some(_) => return true
+        case None => return false
+    }
 }
 
 @Test
@@ -345,17 +346,17 @@ public func testParamDistributor(): Unit {
     d.register("/api/items/:itemId/tags/:tagId", h)
 
     // 精确路径命中
-    @Assert(sameHandler(d.distribute("/api/users"), h))
+    @Assert(isTestHandler(d.distribute("/api/users")))
     // 单参数：任意段都命中
-    @Assert(sameHandler(d.distribute("/api/users/900001"), h))
-    @Assert(sameHandler(d.distribute("/api/users/abc"), h))
+    @Assert(isTestHandler(d.distribute("/api/users/900001")))
+    @Assert(isTestHandler(d.distribute("/api/users/abc")))
     // 参数 + 字面量段
-    @Assert(sameHandler(d.distribute("/api/users/900001/roles"), h))
+    @Assert(isTestHandler(d.distribute("/api/users/900001/roles")))
     // 双参数
-    @Assert(sameHandler(d.distribute("/api/items/42/tags/7"), h))
-    // 段数不匹配 → 不命中（返回 404 处理器，不是 h）
-    @Assert(!sameHandler(d.distribute("/api/users/900001/roles/extra"), h))
-    @Assert(!sameHandler(d.distribute("/api/other"), h))
+    @Assert(isTestHandler(d.distribute("/api/items/42/tags/7")))
+    // 段数不匹配 → 返回 404 兜底处理器（不是 TestHandler）
+    @Assert(!isTestHandler(d.distribute("/api/users/900001/roles/extra")))
+    @Assert(!isTestHandler(d.distribute("/api/other")))
 }
 
 /**

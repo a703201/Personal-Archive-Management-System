@@ -22,6 +22,8 @@ package ams.data.repo
 import std.collection.*
 import std.database.sql.*
 
+import stdx.encoding.hex.*
+
 import ams.data.db.*
 import ams.kernel.error.*
 import ams.kernel.id.*
@@ -112,18 +114,26 @@ public class ItemFieldRepo {
      *
      * @param dataType 字段类型编码（ams.core.item.FieldType.toCode）
      * @param value    取值字符串；空串表示清空（存 NULL）
+     * @param bidx     盲索引（HMAC-SM3 摘要，BYTEA）；可选，由上层按字段规则算好。
+     *                 传入 None 表示不维护盲索引（该列置 NULL，精确检索将忽略此字段）。
      */
-    public func save(itemId: Int64, fieldDefId: Int64, dataType: Int64, value: String): Unit {
+    public func save(
+        itemId: Int64,
+        fieldDefId: Int64,
+        dataType: Int64,
+        value: String,
+        bidx!: ?Array<Byte> = None
+    ): Unit {
         if (dataType == 2) {
-            ItemFieldRepo.writeNum(this.db, itemId, fieldDefId, value)
+            ItemFieldRepo.writeNum(this.db, itemId, fieldDefId, value, bidx)
         } else if (dataType == 3) {
-            ItemFieldRepo.writeDate(this.db, itemId, fieldDefId, value)
+            ItemFieldRepo.writeDate(this.db, itemId, fieldDefId, value, bidx)
         } else if (dataType == 6) {
-            ItemFieldRepo.writeBool(this.db, itemId, fieldDefId, value)
+            ItemFieldRepo.writeBool(this.db, itemId, fieldDefId, value, bidx)
         } else if (dataType == 11) {
-            ItemFieldRepo.writeJson(this.db, itemId, fieldDefId, value)
+            ItemFieldRepo.writeJson(this.db, itemId, fieldDefId, value, bidx)
         } else {
-            ItemFieldRepo.writeText(this.db, itemId, fieldDefId, value)
+            ItemFieldRepo.writeText(this.db, itemId, fieldDefId, value, bidx)
         }
     }
 
@@ -147,24 +157,27 @@ public class ItemFieldRepo {
     // 按类型分支写入
     // ------------------------------------------------------------
 
-    private static func writeText(db: Database, itemId: Int64, fieldDefId: Int64, value: String): Unit {
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_text) " +
-                  "VALUES (?, ?, ?, ?) " +
-                  "ON CONFLICT (item_id, field_def_id) DO UPDATE SET value_text = EXCLUDED.value_text"
-        ItemFieldRepo.exec4(db, sql, itemId, fieldDefId, value)
+    private static func writeText(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
+        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_text, value_bidx) " +
+                  "VALUES (?, ?, ?, ?, decode(?, 'hex')) " +
+                  "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
+                  "SET value_text = EXCLUDED.value_text, value_bidx = EXCLUDED.value_bidx"
+        ItemFieldRepo.exec5(db, sql, itemId, fieldDefId, value, bidx)
     }
 
-    private static func writeJson(db: Database, itemId: Int64, fieldDefId: Int64, value: String): Unit {
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_json) " +
-                  "VALUES (?, ?, ?, ?::jsonb) " +
-                  "ON CONFLICT (item_id, field_def_id) DO UPDATE SET value_json = EXCLUDED.value_json"
-        ItemFieldRepo.exec4(db, sql, itemId, fieldDefId, value)
+    private static func writeJson(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
+        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_json, value_bidx) " +
+                  "VALUES (?, ?, ?, ?::jsonb, decode(?, 'hex')) " +
+                  "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
+                  "SET value_json = EXCLUDED.value_json, value_bidx = EXCLUDED.value_bidx"
+        ItemFieldRepo.exec5(db, sql, itemId, fieldDefId, value, bidx)
     }
 
-    private static func writeDate(db: Database, itemId: Int64, fieldDefId: Int64, value: String): Unit {
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_date) " +
-                  "VALUES (?, ?, ?, CAST(? AS DATE)) " +
-                  "ON CONFLICT (item_id, field_def_id) DO UPDATE SET value_date = EXCLUDED.value_date"
+    private static func writeDate(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
+        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_date, value_bidx) " +
+                  "VALUES (?, ?, ?, CAST(? AS DATE), decode(?, 'hex')) " +
+                  "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
+                  "SET value_date = EXCLUDED.value_date, value_bidx = EXCLUDED.value_bidx"
         try {
             let c = db.connect()
             let st = c.prepareStatement(sql)
@@ -174,19 +187,21 @@ public class ItemFieldRepo {
             } else {
                 st.set(3, value)
             }
+            ItemFieldRepo.bindBidx(st, 4, bidx)
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
         }
     }
 
-    private static func writeNum(db: Database, itemId: Int64, fieldDefId: Int64, value: String): Unit {
+    private static func writeNum(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
         // 数值同时写 value_num 与 numeric_value_norm（后者供范围/排序检索）
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_num, numeric_value_norm) " +
-                  "VALUES (?, ?, ?, CAST(? AS NUMERIC), CAST(? AS NUMERIC)) " +
+        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_num, numeric_value_norm, value_bidx) " +
+                  "VALUES (?, ?, ?, CAST(? AS NUMERIC), CAST(? AS NUMERIC), decode(?, 'hex')) " +
                   "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
                   "SET value_num = EXCLUDED.value_num, " +
-                  "    numeric_value_norm = EXCLUDED.numeric_value_norm"
+                  "    numeric_value_norm = EXCLUDED.numeric_value_norm, " +
+                  "    value_bidx = EXCLUDED.value_bidx"
         try {
             let c = db.connect()
             let st = c.prepareStatement(sql)
@@ -198,16 +213,18 @@ public class ItemFieldRepo {
                 st.set(3, value)
                 st.set(4, value)
             }
+            ItemFieldRepo.bindBidx(st, 5, bidx)
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
         }
     }
 
-    private static func writeBool(db: Database, itemId: Int64, fieldDefId: Int64, value: String): Unit {
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_bool) " +
-                  "VALUES (?, ?, ?, CAST(? AS BOOLEAN)) " +
-                  "ON CONFLICT (item_id, field_def_id) DO UPDATE SET value_bool = EXCLUDED.value_bool"
+    private static func writeBool(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
+        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_bool, value_bidx) " +
+                  "VALUES (?, ?, ?, CAST(? AS BOOLEAN), decode(?, 'hex')) " +
+                  "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
+                  "SET value_bool = EXCLUDED.value_bool, value_bidx = EXCLUDED.value_bidx"
         try {
             let c = db.connect()
             let st = c.prepareStatement(sql)
@@ -217,6 +234,7 @@ public class ItemFieldRepo {
             } else {
                 st.set(3, value)
             }
+            ItemFieldRepo.bindBidx(st, 4, bidx)
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
@@ -226,7 +244,7 @@ public class ItemFieldRepo {
     /**
      * 通用 upsert（TEXT / JSONB 两种，占位符形式一致）。
      */
-    private static func exec4(db: Database, sql: String, itemId: Int64, fieldDefId: Int64, value: String): Unit {
+    private static func exec5(db: Database, sql: String, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
         try {
             let c = db.connect()
             let st = c.prepareStatement(sql)
@@ -236,9 +254,19 @@ public class ItemFieldRepo {
             } else {
                 st.set(3, value)
             }
+            ItemFieldRepo.bindBidx(st, 4, bidx)
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
+        }
+    }
+
+    /** 绑定盲索引（BYTEA）：有则写原始字节，无则 NULL。 */
+    /** 绑定盲索引（BYTEA）：与查询侧 decode(?, 'hex') 对称，统一走十六进制串。 */
+    private static func bindBidx(st: Statement, i: Int64, bidx: ?Array<Byte>): Unit {
+        match (bidx) {
+            case Some(b) => st.set(i, toHexString(b))
+            case None => st.setNull(i)
         }
     }
 

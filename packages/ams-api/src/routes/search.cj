@@ -31,10 +31,12 @@ import ams.kernel.error.*
 public class SearchRoutes {
     private let service: SearchService
     private let userRepo: UserRepo
+    private let blindIndexService: ?BlindIndexService
 
-    public init(service: SearchService, userRepo: UserRepo) {
+    public init(service: SearchService, userRepo: UserRepo, blindIndexService!: ?BlindIndexService = None) {
         this.service = service
         this.userRepo = userRepo
+        this.blindIndexService = blindIndexService
     }
 
     public func register(router: Router): Unit {
@@ -52,6 +54,8 @@ public class SearchRoutes {
      * 查询参数：
      *   keyword / category / status / issuer / issuedFrom / issuedTo /
      *   expiresFrom / expiresTo / tags / sort / dir / size / cursor
+     *   fkey / fval —— 盲索引精确匹配：fkey=字段键（如 id_number），fval=明文值，
+     *                  两者齐全才生效（FR-SRC-005，仅全值精确匹配）
      */
     private func doSearch(req: ApiRequest): ApiResponse {
         let keyword = match (req.queryParam("keyword")) {
@@ -90,6 +94,17 @@ public class SearchRoutes {
             case None => cursor = Cursor("", "")
         }
 
+        // ---- FR-SRC-005 盲索引精确匹配（仅全值；部分掩码匹配按 D4 决策降级）----
+        var blindFilters: Array<(String, Array<Byte>)> = Array<(String, Array<Byte>)>()
+        let fkey = SearchRoutes.queryOrEmpty(req, "fkey")
+        let fval = SearchRoutes.queryOrEmpty(req, "fval")
+        if (!fkey.isEmpty() && !fval.isEmpty()) {
+            match (this.blindIndexService) {
+                case Some(s) => blindFilters = [(fkey, s.bidx(fkey, fval))]
+                case None => ()
+            }
+        }
+
         let q = SearchQuery(
             keyword,
             subjects,
@@ -101,7 +116,7 @@ public class SearchRoutes {
             expiresFrom,
             expiresTo,
             tags,
-            [],
+            blindFilters,
             [],
             sort,
             pageSize,

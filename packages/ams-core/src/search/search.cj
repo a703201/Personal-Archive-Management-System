@@ -249,13 +249,16 @@ public class Masker {
     }
 
     /**
-     * 身份证号的专用掩码（保留前 6 后 4 —— 行业惯例）。
+     * 身份证号的专用掩码（保留前 4 后 2 —— 对齐 FR-SRC-006）。
+     *
+     * 例：18 位 → "1101**********34"（前 4 位省+市 + 后 2 位校验位，
+     * 中间 12 位打码；共暴露 6/18 位，比行业惯用的前 6 后 4 更克制）。
      */
     public static func maskIdCard(value: String): String {
-        if (value.size < 10) {
+        if (value.size < 6) {
             return Masker.repeat("*", value.size)
         }
-        return "${value[0..6]}${Masker.repeat("*", value.size - 10)}${value[value.size - 4..value.size]}"
+        return "${value[0..4]}${Masker.repeat("*", value.size - 6)}${value[value.size - 2..value.size]}"
     }
 
     /**
