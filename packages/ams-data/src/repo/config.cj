@@ -44,13 +44,15 @@ public class TagRepo {
                   "(EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS created_at_ms, version " +
                   "FROM arc_tags WHERE owner_id = ? AND deleted_at IS NULL " +
                   "ORDER BY usage_count DESC, id"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, ownerId)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -60,8 +62,8 @@ public class TagRepo {
     public func find(ownerId: Int64, tagId: Int64): Option<RowData> {
         let sql = "SELECT id, owner_id, name, name_norm, color, category, usage_count, parent_id, version " +
                   "FROM arc_tags WHERE id = ? AND owner_id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, tagId)
             st.set(1, ownerId)
@@ -69,6 +71,8 @@ public class TagRepo {
             return rs.first()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -91,8 +95,8 @@ public class TagRepo {
         let sql = "INSERT INTO arc_tags (id, owner_id, name, name_norm, color, category, parent_id, " +
                   "created_at, created_by, updated_at, updated_by) " +
                   "VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, ownerId)
@@ -119,6 +123,8 @@ public class TagRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -137,8 +143,8 @@ public class TagRepo {
         let sql = "UPDATE arc_tags SET name = ?, name_norm = ?, color = ?, category = ?, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, name)
             st.set(1, nameNorm)
@@ -156,6 +162,8 @@ public class TagRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -165,8 +173,8 @@ public class TagRepo {
      * 同时解除与条目的关联，避免条目上残留失效标签。
      */
     public func softDelete(ownerId: Int64, tagId: Int64, operatorId: Int64): Bool {
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let del = c.prepareStatement(
                 "DELETE FROM arc_item_tags WHERE tag_id = ? AND item_id IN " +
                 "(SELECT id FROM arc_items WHERE subject_id IN " +
@@ -186,6 +194,8 @@ public class TagRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -195,8 +205,8 @@ public class TagRepo {
     public func attach(tagId: Int64, itemId: Int64): Bool {
         let sql = "INSERT INTO arc_item_tags (id, item_id, tag_id, created_at) " +
                   "VALUES (?, ?, ?, CURRENT_TIMESTAMP)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, Ids.next())
             st.set(1, itemId)
@@ -207,6 +217,8 @@ public class TagRepo {
             return true
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -215,8 +227,8 @@ public class TagRepo {
      */
     public func detach(tagId: Int64, itemId: Int64): Bool {
         let sql = "DELETE FROM arc_item_tags WHERE item_id = ? AND tag_id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, itemId)
             st.set(1, tagId)
@@ -227,6 +239,8 @@ public class TagRepo {
             return n > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -237,13 +251,15 @@ public class TagRepo {
         let sql = "SELECT t.id, t.name, t.color, t.category, t.usage_count " +
                   "FROM arc_item_tags it JOIN arc_tags t ON t.id = it.tag_id " +
                   "WHERE it.item_id = ? AND t.deleted_at IS NULL ORDER BY t.name"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, itemId)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -253,14 +269,16 @@ public class TagRepo {
     private func bumpUsage(tagId: Int64, delta: Int64): Unit {
         let sql = "UPDATE arc_tags SET usage_count = GREATEST(0, usage_count + ?), " +
                   "last_used_at = CURRENT_TIMESTAMP WHERE id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, delta)
             st.set(1, tagId)
             st.update()
         } catch (e: Exception) {
             // 计数失败不影响主流程语义（标签关系已建立）
+        } finally {
+            c.close()
         }
     }
 }
@@ -291,8 +309,8 @@ public class NotifyRepo {
         let sql = "INSERT INTO nft_messages (id, user_id, category, title, body, link, priority, " +
                   "is_read, created_at, expires_at) " +
                   "VALUES (?, ?, ?, ?, ?, ?, ?, FALSE, CURRENT_TIMESTAMP, ?)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, userId)
@@ -314,6 +332,8 @@ public class NotifyRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -331,13 +351,15 @@ public class NotifyRepo {
         } else {
             "${base} ORDER BY is_read ASC, priority DESC, created_at DESC LIMIT ${lim} OFFSET ${off}"
         }
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -348,8 +370,8 @@ public class NotifyRepo {
         let sql = "SELECT COUNT(*) AS n FROM nft_messages " +
                   "WHERE user_id = ? AND is_read = FALSE " +
                   "AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             let rs = readRows(st.query())
@@ -359,6 +381,8 @@ public class NotifyRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -368,14 +392,16 @@ public class NotifyRepo {
     public func markRead(userId: Int64, messageId: Int64): Bool {
         let sql = "UPDATE nft_messages SET is_read = TRUE, read_at = CURRENT_TIMESTAMP " +
                   "WHERE id = ? AND user_id = ? AND is_read = FALSE"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, messageId)
             st.set(1, userId)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -385,13 +411,15 @@ public class NotifyRepo {
     public func markAllRead(userId: Int64): Int64 {
         let sql = "UPDATE nft_messages SET is_read = TRUE, read_at = CURRENT_TIMESTAMP " +
                   "WHERE user_id = ? AND is_read = FALSE"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             return st.update().rowCount
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -400,12 +428,14 @@ public class NotifyRepo {
      */
     public func purgeExpired(): Int64 {
         let sql = "DELETE FROM nft_messages WHERE expires_at IS NOT NULL AND expires_at <= CURRENT_TIMESTAMP"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             return st.update().rowCount
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 }
@@ -430,13 +460,15 @@ public class ConfigRepo {
                   "CASE WHEN is_secret = TRUE THEN '***' ELSE value END AS value, " +
                   "(EXTRACT(EPOCH FROM updated_at) * 1000)::bigint AS updated_at_ms, version " +
                   "FROM cfg_settings WHERE scope = ? AND deleted_at IS NULL ORDER BY key"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, scope)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -449,8 +481,8 @@ public class ConfigRepo {
         let sql = "SELECT id, scope, key, value_type, is_secret, " +
                   "CASE WHEN is_secret = TRUE THEN '***' ELSE value END AS value, version " +
                   "FROM cfg_settings WHERE scope = ? AND key = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, scope)
             st.set(1, key)
@@ -458,6 +490,8 @@ public class ConfigRepo {
             return rs.first()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -498,8 +532,8 @@ public class ConfigRepo {
     ): Bool {
         // openGauss 不支持 ON CONFLICT，用「先查后判 + 分支插入/更新」实现 upsert。
         // 唯一索引 uk_cfg_settings(scope, key) 保证并发下的最终一致。
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let q = c.prepareStatement(
                 "SELECT id FROM cfg_settings WHERE scope = ? AND key = ? AND deleted_at IS NULL"
             )
@@ -541,6 +575,8 @@ public class ConfigRepo {
             return true
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -551,8 +587,8 @@ public class ConfigRepo {
         let sql = "UPDATE cfg_settings SET deleted_at = CURRENT_TIMESTAMP, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE scope = ? AND key = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, operatorId)
             st.set(1, scope)
@@ -560,6 +596,8 @@ public class ConfigRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -569,12 +607,14 @@ public class ConfigRepo {
     public func listDictTypes(): RowSet {
         let sql = "SELECT id, code, name, description, version " +
                   "FROM cfg_dict_types WHERE deleted_at IS NULL ORDER BY code"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -586,13 +626,15 @@ public class ConfigRepo {
                   "FROM cfg_dict_items i JOIN cfg_dict_types t ON t.id = i.dict_type_id " +
                   "WHERE t.code = ? AND t.deleted_at IS NULL " +
                   "ORDER BY i.sort_order, i.code"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, dictTypeCode)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -603,8 +645,8 @@ public class ConfigRepo {
         let id = Ids.next()
         let sql = "INSERT INTO cfg_dict_types (id, code, name, description, created_at, created_by, " +
                   "updated_at, updated_by) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, code)
@@ -616,6 +658,8 @@ public class ConfigRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -633,8 +677,8 @@ public class ConfigRepo {
         let sql = "INSERT INTO cfg_dict_items (id, dict_type_id, code, label, sort_order, is_enabled, " +
                   "created_at, created_by, updated_at, updated_by) " +
                   "VALUES (?, ?, ?, ?, ?, TRUE, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, dictTypeId)
@@ -647,6 +691,8 @@ public class ConfigRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 }

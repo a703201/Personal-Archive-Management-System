@@ -135,8 +135,8 @@ public class ItemRepo {
         for (s in subjectIds) {
             params.add(SqlParam.Str(s))
         }
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             ItemRepo.bind(st, params)
             let rows = readRows(st.query())
@@ -146,6 +146,8 @@ public class ItemRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -172,8 +174,8 @@ public class ItemRepo {
                   "CAST(COALESCE(EXTRACT(EPOCH FROM updated_at) * 1000, 0) AS BIGINT) AS updated_ms, " +
                   "CAST(COALESCE(EXTRACT(EPOCH FROM deleted_at) * 1000, 0) AS BIGINT) AS deleted_ms " +
                   "FROM arc_items WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             let rows = readRows(st.query())
@@ -183,6 +185,8 @@ public class ItemRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -235,13 +239,15 @@ public class ItemRepo {
         sql += " ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?"
         params.add(SqlParam.Num(limit))
         params.add(SqlParam.Num(offset))
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             ItemRepo.bind(st, params)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -276,8 +282,8 @@ public class ItemRepo {
             params.add(SqlParam.Str("%${keyword}%"))
             params.add(SqlParam.Str("%${keyword}%"))
         }
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             ItemRepo.bind(st, params)
             let rows = readRows(st.query())
@@ -287,6 +293,8 @@ public class ItemRepo {
             return rows.at(0).i64("n")
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -316,8 +324,8 @@ public class ItemRepo {
                   "created_at, created_by, updated_at, updated_by, version" +
                   ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, 0, " +
                   "CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, subjectId)
@@ -337,6 +345,8 @@ public class ItemRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -363,8 +373,8 @@ public class ItemRepo {
                   "issued_date = ?, expires_at = ?, issuer = ?, remark = ?, extra = ?::jsonb, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE id = ? AND version = ? AND deleted_at IS NULL AND subject_id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, title)
             st.set(1, title)
@@ -381,6 +391,8 @@ public class ItemRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -400,8 +412,8 @@ public class ItemRepo {
         let sql = "UPDATE arc_items SET status = ?, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE id = ? AND version = ? AND deleted_at IS NULL AND subject_id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, toStatus)
             st.set(1, operatorId)
@@ -411,6 +423,8 @@ public class ItemRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -426,8 +440,8 @@ public class ItemRepo {
         let sql = "UPDATE arc_items SET status = ?, deleted_at = CURRENT_TIMESTAMP, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE id = ? AND version = ? AND deleted_at IS NULL AND subject_id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, 3)   // ItemStatus.Deleted
             st.set(1, operatorId)
@@ -437,6 +451,8 @@ public class ItemRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -451,8 +467,8 @@ public class ItemRepo {
         let sql = "UPDATE arc_items SET status = 1, deleted_at = NULL, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE id = ? AND deleted_at IS NOT NULL AND subject_id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, operatorId)
             st.set(1, id)
@@ -460,6 +476,8 @@ public class ItemRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -487,13 +505,15 @@ public class ItemRepo {
         for (s in subjectIds) {
             params.add(SqlParam.Str(s))
         }
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             ItemRepo.bind(st, params)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -518,13 +538,15 @@ public class ItemRepo {
         for (s in subjectIds) {
             params.add(SqlParam.Str(s))
         }
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             ItemRepo.bind(st, params)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -537,12 +559,14 @@ public class ItemRepo {
     public func purgeExpired(): Int64 {
         let sql = "DELETE FROM arc_items " +
                   "WHERE deleted_at IS NOT NULL AND deleted_at <= CURRENT_TIMESTAMP - INTERVAL '30 days'"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             return st.update().rowCount
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -569,13 +593,15 @@ public class ItemRepo {
                   "WHERE i.deleted_at IS NULL " +
                   "AND i.expires_at = CURRENT_DATE + CAST(? AS INTEGER) " +
                   "ORDER BY i.expires_at, i.id"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, days)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -589,14 +615,16 @@ public class ItemRepo {
     public func bumpAttachmentCount(itemId: Int64, delta: Int64): Unit {
         let sql = "UPDATE arc_items SET attachment_count = attachment_count + ? " +
                   "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, delta)
             st.set(1, itemId)
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 

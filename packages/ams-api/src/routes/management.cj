@@ -320,8 +320,10 @@ public class ManagementRoutes {
             case Some(c) => c
             case None => throw validationError("code", "缺少角色编码")
         }
-        let json = ManagementRoutes.body(req)
-        let perms = ManagementRoutes.stringArray(json, "perms")
+        // 权限码天然是多值；SimpleJson 是「按逗号切分扁平 key:value」的轻量解析器，
+        // 数组或多值字符串会被逗号截断（只取到第一个片段），故直接从原始 body 解析 perms。
+        ManagementRoutes.body(req)
+        let perms = ManagementRoutes.permsFromBody(req.bodyText())
         let ok = this.roleRepo.assignPerms(code, perms, ManagementRoutes.operatorId(req))
         if (!ok) {
             throw notFound("角色")
@@ -776,6 +778,68 @@ public class ManagementRoutes {
             case None => ()
         }
         return out
+    }
+
+    /**
+     * 从原始请求体解析 perms 多值字段。
+     *
+     * 兼容两种形态：
+     *   "perms": ["a","b"]   —— 数组
+     *   "perms": "a,b,c"     —— 逗号分隔字符串
+     *
+     * 之所以不直接用 SimpleJson：它按逗号切分扁平 key:value，
+     * 会把数组内的逗号当成字段分隔符，导致多值只保留第一段。
+     */
+    private static func permsFromBody(raw: String): ArrayList<String> {
+        let out = ArrayList<String>()
+        let keyPos = ManagementRoutes.idxOf(raw, "\"perms\"")
+        if (keyPos < 0) {
+            return out
+        }
+        let seg = raw[keyPos..]
+        let colon = ManagementRoutes.idxOf(seg, ":")
+        let lb = ManagementRoutes.idxOf(seg, "[")
+        if (lb >= 0 && colon >= 0 && lb > colon) {
+            // ---- 数组形态 ----
+            let rb = ManagementRoutes.idxOf(seg, "]")
+            if (rb > lb) {
+                let inner = seg[lb + 1..rb]
+                for (part in inner.split(",")) {
+                    let t = part.trimStart().trimEnd()
+                    if (!t.isEmpty()) {
+                        out.add(SimpleJson.unquotePublic(t))
+                    }
+                }
+            }
+        } else if (colon >= 0) {
+            // ---- 字符串形态："a,b,c" ----
+            let rest = seg[colon + 1..]
+            let q1 = ManagementRoutes.idxOf(rest, "\"")
+            if (q1 >= 0) {
+                let rest2 = rest[q1 + 1..]
+                let q2 = ManagementRoutes.idxOf(rest2, "\"")
+                if (q2 >= 0) {
+                    let val = rest2[0..q2]
+                    for (part in val.split(",")) {
+                        let t = part.trimStart().trimEnd()
+                        if (!t.isEmpty()) {
+                            out.add(t)
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /**
+     * 子串首次出现位置；未找到返回 -1（String.indexOf 返回 Option）。
+     */
+    private static func idxOf(s: String, sub: String): Int64 {
+        match (s.indexOf(sub)) {
+            case Some(i) => return i
+            case None => return -1
+        }
     }
 
     /**

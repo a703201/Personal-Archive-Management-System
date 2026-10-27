@@ -13,6 +13,8 @@
 // ============================================================
 package ams.crypto.blindindex
 
+import std.collection.*
+
 import ams.crypto.provider.*
 
 /**
@@ -122,34 +124,54 @@ public class BlindIndex {
 
     /**
      * 去掉所有空白字符（含全角空格）。
+     *
+     * 【为什么按字节而不是按 `s[i..i+1]` 拼接】
+     *   仓颉的 `String.size` 是**字节数**，`s[i..i+1]` 切出的是**单个字节**。
+     *   中文等多字节字符被逐字节切碎后拼回，会产生非法 UTF-8 序列，
+     *   `StringBuilder.toString()` 直接抛：
+     *     IllegalArgumentException: Invalid utf8 byte sequence
+     *   实测：盲索引对「居民身份证」这类含中文的值必崩 →
+     *     PUT /api/items/:id/fields 返回 INTERNAL_ERROR。
+     *   故这里在字节层面过滤，再整体 fromUtf8，保证切分点永远落在字符边界上
+     *   （空白字符的字节值 0x20/0x09/0x0A/0x0D 与 U+3000 的 E3 80 80
+     *    在 UTF-8 中不会与其它字符的首字节混淆）。
      */
     private static func removeWhitespace(s: String): String {
-        var out = StringBuilder()
-        for (i in 0..s.size) {
-            let c = s[i]
-            // 空格(32) / 制表(9) / 换行(10) / 回车(13) / 全角空格(0x3000 的 UTF-8 字节)
-            if (c != 32u8 && c != 9u8 && c != 10u8 && c != 13u8) {
-                out.append(s[i..(i + 1)])
+        let src = s.toArray()
+        let out = ArrayList<Byte>()
+        var i: Int64 = 0
+        while (i < src.size) {
+            let b = src[i]
+            if (b == 32 || b == 9 || b == 10 || b == 13) {
+                i = i + 1
+                continue
             }
+            // 全角空格 U+3000 = E3 80 80
+            if (b == 0xE3 && i + 2 < src.size && src[i + 1] == 0x80 && src[i + 2] == 0x80) {
+                i = i + 3
+                continue
+            }
+            out.add(b)
+            i = i + 1
         }
-        return out.toString()
+        return String.fromUtf8(out.toArray())
     }
 
     /**
      * 去掉分隔符：- + ( ) 空格 等。
+     *
+     * 只保留 ASCII 数字与字母 —— 结果天然是合法 UTF-8。
      */
     private static func removeSeparators(s: String): String {
-        var out = StringBuilder()
-        for (i in 0..s.size) {
-            let c = s[i]
-            // '0'..'9' 与字母保留
-            let isDigit = c >= 48u8 && c <= 57u8
-            let isUpper = c >= 65u8 && c <= 90u8
-            let isLower = c >= 97u8 && c <= 122u8
+        let out = ArrayList<Byte>()
+        for (b in s.toArray()) {
+            let isDigit = b >= 48 && b <= 57
+            let isUpper = b >= 65 && b <= 90
+            let isLower = b >= 97 && b <= 122
             if (isDigit || isUpper || isLower) {
-                out.append(s[i..(i + 1)])
+                out.add(b)
             }
         }
-        return out.toString()
+        return String.fromUtf8(out.toArray())
     }
 }

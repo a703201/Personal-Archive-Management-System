@@ -50,29 +50,90 @@ public class SimpleJson {
      * 解析扁平整数字符串对象。
      *
      * 解析失败返回 None（调用方按缺字段处理）。
+     *
+     * 【切分规则】只按**顶层**逗号切分（见 splitTopLevel）：
+     *   引号内的 , 与 : 不参与切分，花括号 / 方括号内的逗号也不切分。
+     *   此前用朴素 split(",")，导致昵称 / 备注 / 标题里出现半角逗号时
+     *   该字段值被截断，并可能让后续字段错位。
      */
     public static func parse(text: String): Option<SimpleJson> {
-        let obj = SimpleJson()
         let t = text.trimStart().trimEnd()
-        if (!t.startsWith("{") || !t.endsWith("}")) {
+        if (t.size < 2 || !t.startsWith("{") || !t.endsWith("}")) {
             return None
         }
-        let inner = t[1..t.size - 1]
-        if (inner.trimStart().trimEnd().isEmpty()) {
-            return Some(obj)
-        }
-        for (part in inner.split(",")) {
-            let kv = part.split(":", 2)
-            if (kv.size < 2) {
-                continue
-            }
-            let k = SimpleJson.unquote(kv[0].trimStart().trimEnd())
-            let v = SimpleJson.unquote(kv[1].trimStart().trimEnd())
-            if (!k.isEmpty()) {
-                obj.fields[k] = v
-            }
+        let obj = SimpleJson()
+        for (part in SimpleJson.splitTopLevel(t).iterator()) {
+            SimpleJson.putPair(obj, part)
         }
         return Some(obj)
+    }
+
+    /**
+     * 按**顶层**逗号切分对象体（去掉外层花括号后的各段）。
+     *
+     * 「顶层」= 不在字符串字面量内、且不在嵌套 {} / [] 内。
+     * 供需要保留键顺序的调用方复用（如扩展字段的扁平写入）。
+     */
+    public static func splitTopLevel(text: String): ArrayList<String> {
+        let out = ArrayList<String>()
+        let t = text.trimStart().trimEnd()
+        if (t.size < 2 || !t.startsWith("{") || !t.endsWith("}")) {
+            return out
+        }
+        let bytes = t.toArray()
+        var i: Int64 = 1
+        var start: Int64 = 1
+        var inStr = false
+        var escaped = false
+        var depth: Int64 = 0
+        while (i < bytes.size) {
+            let b = bytes[i]
+            if (inStr) {
+                if (escaped) {
+                    escaped = false
+                } else if (b == 92) {
+                    escaped = true
+                } else if (b == 34) {
+                    inStr = false
+                }
+            } else if (b == 34) {
+                inStr = true
+            } else if (b == 123 || b == 91) {
+                depth = depth + 1
+            } else if (b == 125 || b == 93) {
+                if (depth > 0) {
+                    depth = depth - 1
+                }
+            } else if (b == 44 && depth == 0) {
+                out.add(String.fromUtf8(bytes[start..i]))
+                start = i + 1
+            }
+            i = i + 1
+        }
+        // 末段：直到外层右花括号之前
+        if (start < bytes.size - 1) {
+            out.add(String.fromUtf8(bytes[start..bytes.size - 1]))
+        }
+        return out
+    }
+
+    /**
+     * 解析一段 "key":value 并写入对象（键必为无逗号/冒号的标识符）。
+     */
+    private static func putPair(obj: SimpleJson, part: String): Unit {
+        let p = part.trimStart().trimEnd()
+        if (p.isEmpty()) {
+            return
+        }
+        let kv = p.split(":", 2)
+        if (kv.size < 2) {
+            return
+        }
+        let k = SimpleJson.unquote(kv[0].trimStart().trimEnd())
+        let v = SimpleJson.unquote(kv[1].trimStart().trimEnd())
+        if (!k.isEmpty()) {
+            obj.fields[k] = v
+        }
     }
 
     /**

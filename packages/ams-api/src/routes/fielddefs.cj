@@ -414,21 +414,16 @@ public class ItemFieldRoutes {
     /**
      * 解析扁平 JSON 对象为「键/值对」列表。
      *
-     * 与 SimpleJson.parse 规则一致（逗号分割 + 去引号），
+     * 与 SimpleJson.parse 规则一致（顶层逗号分割 + 去引号），
      * 但额外保留**键**以便遍历 —— SimpleJson 把 fields 藏在 HashMap 里且不暴露键集合，
      * 而扩展字段的键随模板动态变化，必须能枚举。
+     *
+     * 切分复用 SimpleJson.splitTopLevel：引号内的逗号不切分，
+     * 因此「通讯地址」这类含半角逗号的值不会再被截断。
      */
     private static func flatPairs(text: String): ArrayList<FieldPair> {
         let out = ArrayList<FieldPair>()
-        let t = text.trimStart().trimEnd()
-        if (!t.startsWith("{") || !t.endsWith("}")) {
-            return out
-        }
-        let inner = t[1..t.size - 1]
-        if (inner.trimStart().trimEnd().isEmpty()) {
-            return out
-        }
-        for (part in inner.split(",")) {
+        for (part in SimpleJson.splitTopLevel(text).iterator()) {
             let kv = part.split(":", 2)
             if (kv.size >= 2) {
                 let k = SimpleJson.unquotePublic(kv[0].trimStart().trimEnd())

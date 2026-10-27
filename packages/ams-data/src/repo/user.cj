@@ -319,6 +319,20 @@ public class UserRepo {
                                       "(EXTRACT(EPOCH FROM created_at) * 1000)::bigint AS created_at_ms, version"
 
     /**
+     * 绑定「可空文本」参数：空串按 NULL 落库。
+     *
+     * 不能直接 set("")：sys_users.email / phone 上有唯一部分索引
+     * （WHERE email IS NOT NULL），空串会让第二个无邮箱用户撞约束。
+     */
+    private static func bindNullable(st: Statement, idx: Int, v: String): Unit {
+        if (v.isEmpty()) {
+            st.setNull(idx)
+        } else {
+            st.set(idx, v)
+        }
+    }
+
+    /**
      * 把字符串形式的用户 ID 解析为 Int64。
      *
      * 解析失败返回 0（调用方据此判定无效主体）。
@@ -345,8 +359,8 @@ public class UserRepo {
     public func findByUsername(username: String): Option<UserRecord> {
         let sql = "SELECT ${UserRepo.AUTH_COLUMNS} FROM sys_users " +
                   "WHERE username = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, username)
             let rs = readRows(st.query())
@@ -356,6 +370,8 @@ public class UserRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -365,8 +381,8 @@ public class UserRepo {
     public func findByEmail(email: String): Option<UserRecord> {
         let sql = "SELECT ${UserRepo.AUTH_COLUMNS} FROM sys_users " +
                   "WHERE email = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, email)
             let rs = readRows(st.query())
@@ -376,6 +392,8 @@ public class UserRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -385,8 +403,8 @@ public class UserRepo {
     public func findByPhone(phone: String): Option<UserRecord> {
         let sql = "SELECT ${UserRepo.AUTH_COLUMNS} FROM sys_users " +
                   "WHERE phone = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, phone)
             let rs = readRows(st.query())
@@ -396,6 +414,8 @@ public class UserRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -405,8 +425,8 @@ public class UserRepo {
     public func findById(id: Int64): Option<UserRecord> {
         let sql = "SELECT ${UserRepo.AUTH_COLUMNS} FROM sys_users " +
                   "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             let rs = readRows(st.query())
@@ -416,6 +436,8 @@ public class UserRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -436,8 +458,8 @@ public class UserRepo {
             "${base} AND (username ILIKE ? OR nickname ILIKE ? OR email ILIKE ?) " +
             "ORDER BY id DESC LIMIT ${lim} OFFSET ${off}"
         }
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             if (!keyword.isEmpty()) {
                 let like = "%${keyword}%"
@@ -448,6 +470,8 @@ public class UserRepo {
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -461,8 +485,8 @@ public class UserRepo {
         } else {
             "${base} AND (username ILIKE ? OR nickname ILIKE ? OR email ILIKE ?)"
         }
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             if (!keyword.isEmpty()) {
                 let like = "%${keyword}%"
@@ -477,6 +501,8 @@ public class UserRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -496,8 +522,8 @@ public class UserRepo {
         let sql = "INSERT INTO sys_users (id, username, email, phone, nickname, password_hash, " +
                   "password_updated_at, kdf_cost, status, created_at, created_by, updated_at, updated_by) " +
                   "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, 0, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, username)
@@ -524,6 +550,48 @@ public class UserRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 更新个人资料（自助修改昵称 / 邮箱 / 手机号）。
+     *
+     * 为什么单独一个方法而不是复用 create/update：
+     *   ① 自助场景**不允许**改 status / perm_version（越权面）；
+     *   ② 邮箱与手机号是「可空 + 唯一部分索引」列，
+     *      空串必须写成 NULL，否则第二个用户会撞唯一约束
+     *      （SQLSTATE 23505，与 create 的坑同源）；
+     *   ③ 只按 id 定位，operator 恒为自己。
+     *
+     * @param nickname 空串 → NULL
+     * @param email    空串 → NULL
+     * @param phone    空串 → NULL
+     * @return false = 用户不存在或已删除
+     */
+    public func updateProfile(
+        userId: Int64,
+        nickname: String,
+        email: String,
+        phone: String
+    ): Bool {
+        let sql = "UPDATE sys_users SET nickname = ?, email = ?, phone = ?, " +
+                  "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
+                  "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            UserRepo.bindNullable(st, 0, nickname)
+            UserRepo.bindNullable(st, 1, email)
+            UserRepo.bindNullable(st, 2, phone)
+            st.set(3, userId)
+            st.set(4, userId)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -535,8 +603,8 @@ public class UserRepo {
                   "password_updated_at = CURRENT_TIMESTAMP, failed_attempts = 0, locked_until = NULL, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, passwordHash)
             st.set(1, kdfCost)
@@ -545,6 +613,8 @@ public class UserRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -559,8 +629,8 @@ public class UserRepo {
                   "THEN CURRENT_TIMESTAMP + (? * INTERVAL '1 second') ELSE locked_until END, " +
                   "updated_at = CURRENT_TIMESTAMP, version = version + 1 " +
                   "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, maxAttempts)
             st.set(1, lockSeconds)
@@ -569,6 +639,8 @@ public class UserRepo {
             return true
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -580,8 +652,8 @@ public class UserRepo {
                   "last_login_at = CURRENT_TIMESTAMP, last_login_ip = ?, " +
                   "updated_at = CURRENT_TIMESTAMP, version = version + 1 " +
                   "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, ip)
             st.set(1, userId)
@@ -589,6 +661,8 @@ public class UserRepo {
             return true
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -598,8 +672,8 @@ public class UserRepo {
     public func setStatus(userId: Int64, status: Int64, operatorId: Int64): Bool {
         let sql = "UPDATE sys_users SET status = ?, updated_at = CURRENT_TIMESTAMP, " +
                   "updated_by = ?, version = version + 1 WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, status)
             st.set(1, operatorId)
@@ -607,6 +681,8 @@ public class UserRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -617,14 +693,16 @@ public class UserRepo {
         let sql = "UPDATE sys_users SET failed_attempts = 0, locked_until = NULL, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, operatorId)
             st.set(1, userId)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -634,14 +712,16 @@ public class UserRepo {
     public func softDelete(userId: Int64, operatorId: Int64): Bool {
         let sql = "UPDATE sys_users SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, " +
                   "updated_by = ?, version = version + 1 WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, operatorId)
             st.set(1, userId)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -661,8 +741,8 @@ public class UserRepo {
                   "  owner_id = ?" +
                   "  OR ? = ANY(custodian_ids)" +
                   ") ORDER BY id"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             st.set(1, userId)
@@ -672,6 +752,8 @@ public class UserRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
         return out
     }
@@ -685,8 +767,8 @@ public class UserRepo {
     public func listOwnedSubjectIds(userId: Int64): ArrayList<String> {
         let out = ArrayList<String>()
         let sql = "SELECT id FROM arc_subjects WHERE deleted_at IS NULL AND owner_id = ? ORDER BY id"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             let rows = readRows(st.query())
@@ -695,6 +777,8 @@ public class UserRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
         return out
     }
@@ -709,8 +793,8 @@ public class UserRepo {
         let sql = "SELECT COALESCE(MAX(r.max_data_level), 0) FROM sys_user_roles ur " +
                   "JOIN sys_roles r ON r.id = ur.role_id " +
                   "WHERE ur.user_id = ? AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             let rows = readRows(st.query())
@@ -720,6 +804,8 @@ public class UserRepo {
             return rows.at(0).i64("coalesce")
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -737,13 +823,15 @@ public class UserRepo {
                   "CAST(COALESCE(EXTRACT(EPOCH FROM expires_at) * 1000, 0) AS BIGINT) AS expires_ms, " +
                   "CAST(COALESCE(EXTRACT(EPOCH FROM revoked_at) * 1000, 0) AS BIGINT) AS revoked_ms " +
                   "FROM acl_grants WHERE grantee_id = ? ORDER BY granted_at DESC"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -758,8 +846,8 @@ public class UserRepo {
     public func millisSincePasswordUpdate(userId: Int64): Int64 {
         let sql = "SELECT CAST(COALESCE(EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - password_updated_at)) * 1000, 0) AS BIGINT) " +
                   "AS elapsed_ms FROM sys_users WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             let rows = readRows(st.query())
@@ -769,6 +857,8 @@ public class UserRepo {
             return rows.at(0).i64("elapsed_ms")
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 }
@@ -790,12 +880,14 @@ public class RoleRepo {
     public func listPerms(): RowSet {
         let sql = "SELECT id, code, name, domain, action, scope, is_sensitive, description " +
                   "FROM sys_perms ORDER BY domain, action, code"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -805,12 +897,14 @@ public class RoleRepo {
     public func listRoles(): RowSet {
         let sql = "SELECT id, code, name, is_builtin, description, max_data_level, version " +
                   "FROM sys_roles WHERE deleted_at IS NULL ORDER BY id"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -859,8 +953,8 @@ public class RoleRepo {
      */
     private func queryStrings<T>(sql: String, param: T): ArrayList<String> {
         let out = ArrayList<String>()
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, param)
             let rs = readRows(st.query())
@@ -870,6 +964,8 @@ public class RoleRepo {
             return out
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -879,11 +975,12 @@ public class RoleRepo {
      * @param permCodes 权限码列表；先删旧映射再插新映射
      */
     public func assignPerms(roleCode: String, permCodes: ArrayList<String>, operatorId: Int64): Bool {
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             // 查 role_id
             let q = c.prepareStatement("SELECT id FROM sys_roles WHERE code = ? AND deleted_at IS NULL")
-            q.set(1, roleCode)
+            // 参数下标 0-based（与全仓其他仓库一致；原为 1-based，导致越界 DATABASE_FAILURE）
+            q.set(0, roleCode)
             let rs = readRows(q.query())
             var roleId: Int64 = 0
             match (rs.first()) {
@@ -892,7 +989,7 @@ public class RoleRepo {
             }
 
             let del = c.prepareStatement("DELETE FROM sys_role_perms WHERE role_id = ?")
-            del.set(1, roleId)
+            del.set(0, roleId)
             del.update()
 
             for (code in permCodes.iterator()) {
@@ -900,14 +997,16 @@ public class RoleRepo {
                     "INSERT INTO sys_role_perms (id, role_id, perm_id) " +
                     "SELECT ?, ?, id FROM sys_perms WHERE code = ?"
                 )
-                ins.set(1, Ids.next())
-                ins.set(2, roleId)
-                ins.set(3, code)
+                ins.set(0, Ids.next())
+                ins.set(1, roleId)
+                ins.set(2, code)
                 ins.update()
             }
             return true
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -925,8 +1024,8 @@ public class RoleRepo {
         let sql = "INSERT INTO sys_roles (id, code, name, is_builtin, description, " +
                   "max_data_level, parent_role_id, created_at, created_by, updated_at, updated_by) " +
                   "VALUES (?, ?, ?, FALSE, ?, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, code)
@@ -948,6 +1047,8 @@ public class RoleRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -961,8 +1062,8 @@ public class RoleRepo {
         let sql = "UPDATE sys_roles SET name = ?, description = ?, max_data_level = ?, " +
                   "parent_role_id = ?, updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE code = ? AND deleted_at IS NULL AND is_builtin = FALSE"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, name)
             if (description.isEmpty()) {
@@ -981,6 +1082,8 @@ public class RoleRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -991,14 +1094,16 @@ public class RoleRepo {
         let sql = "UPDATE sys_roles SET deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP, " +
                   "updated_by = ?, version = version + 1 " +
                   "WHERE code = ? AND deleted_at IS NULL AND is_builtin = FALSE"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, operatorId)
             st.set(1, code)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -1015,8 +1120,8 @@ public class RoleRepo {
         let sql = "INSERT INTO sys_user_roles (id, user_id, role_id, subject_id, category, granted_by) " +
                   "SELECT ?, ?, r.id, ?, ?, ? FROM sys_roles r " +
                   "WHERE r.code = ? AND r.deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, userId)
@@ -1032,6 +1137,8 @@ public class RoleRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -1042,8 +1149,8 @@ public class RoleRepo {
         let sql = "DELETE FROM sys_user_roles " +
                   "WHERE role_id = (SELECT id FROM sys_roles WHERE code = ? AND deleted_at IS NULL) " +
                   "AND user_id = ? AND COALESCE(subject_id, 0) = COALESCE(?, 0)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, roleCode)
             st.set(1, userId)
@@ -1055,6 +1162,8 @@ public class RoleRepo {
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -1066,13 +1175,15 @@ public class RoleRepo {
                   "CAST(COALESCE(EXTRACT(EPOCH FROM ur.expires_at) * 1000, 0) AS BIGINT) AS expires_ms " +
                   "FROM sys_user_roles ur JOIN sys_roles r ON r.id = ur.role_id " +
                   "WHERE ur.user_id = ? AND r.deleted_at IS NULL ORDER BY r.code"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -1089,8 +1200,8 @@ public class RoleRepo {
         let sql = "INSERT INTO acl_grants (id, subject_id, item_id, category, grantee_id, " +
                   "perm_codes, granted_by, expires_at) " +
                   "VALUES (?, ?, ?, ?, ?, ?, ?, to_timestamp(?))"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, subjectId)
@@ -1112,6 +1223,8 @@ public class RoleRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -1121,13 +1234,15 @@ public class RoleRepo {
     public func revokeGrant(grantId: Int64, operatorId: Int64): Bool {
         let sql = "UPDATE acl_grants SET revoked_at = CURRENT_TIMESTAMP, revoke_reason = 'manual' " +
                   "WHERE id = ? AND revoked_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, grantId)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -1139,13 +1254,15 @@ public class RoleRepo {
                   "CAST(COALESCE(EXTRACT(EPOCH FROM expires_at) * 1000, 0) AS BIGINT) AS expires_ms, " +
                   "CAST(COALESCE(EXTRACT(EPOCH FROM revoked_at) * 1000, 0) AS BIGINT) AS revoked_ms " +
                   "FROM acl_grants WHERE grantee_id = ? ORDER BY granted_at DESC"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, granteeId)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 }

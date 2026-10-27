@@ -76,8 +76,8 @@ public class SearchRepo {
                   "subject_id = EXCLUDED.subject_id, category = EXCLUDED.category, " +
                   "title_norm = EXCLUDED.title_norm, content = EXCLUDED.content, " +
                   "tokens = EXCLUDED.tokens, updated_at = CURRENT_TIMESTAMP"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, itemId)
             st.set(1, subjectId)
@@ -88,6 +88,8 @@ public class SearchRepo {
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -103,8 +105,8 @@ public class SearchRepo {
                   "WHERE s.item_id IS NULL AND i.deleted_at IS NULL " +
                   "ORDER BY i.id LIMIT ?"
         let out = ArrayList<Int64>()
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, limit)
             let rs = st.query()
@@ -113,6 +115,8 @@ public class SearchRepo {
             }
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
         return out.toArray()
     }
@@ -278,13 +282,15 @@ public class SearchRepo {
         sb.append(" LIMIT ? ")
         params.add(SqlParam.Num(q.pageSize + 1))
 
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sb.toString())
             SearchRepo.bind(st, params)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 

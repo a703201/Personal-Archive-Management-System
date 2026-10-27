@@ -98,14 +98,16 @@ public class ItemFieldRepo {
                   "LEFT JOIN arc_field_defs d ON d.id = f.field_def_id " +
                   "WHERE f.item_id = ? " +
                   "ORDER BY COALESCE(d.display_order, 9999), f.id"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, itemId)
             let rows = readRows(st.query())
             return ItemFieldRepo.collect(rows)
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -142,14 +144,16 @@ public class ItemFieldRepo {
      */
     public func deleteByItem(itemId: Int64): Int64 {
         let sql = "DELETE FROM arc_item_fields WHERE item_id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, itemId)
             st.update()
             return itemId
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -158,107 +162,150 @@ public class ItemFieldRepo {
     // ------------------------------------------------------------
 
     private static func writeText(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_text, value_bidx) " +
-                  "VALUES (?, ?, ?, ?, decode(?, 'hex')) " +
-                  "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
-                  "SET value_text = EXCLUDED.value_text, value_bidx = EXCLUDED.value_bidx"
-        ItemFieldRepo.exec5(db, sql, itemId, fieldDefId, value, bidx)
+        ItemFieldRepo.upsert(
+            db, itemId, fieldDefId,
+            "value_text = ?, value_bidx = decode(?, 'hex')",
+            "value_text, value_bidx",
+            "?, decode(?, 'hex')",
+            value, bidx
+        )
     }
 
     private static func writeJson(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_json, value_bidx) " +
-                  "VALUES (?, ?, ?, ?::jsonb, decode(?, 'hex')) " +
-                  "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
-                  "SET value_json = EXCLUDED.value_json, value_bidx = EXCLUDED.value_bidx"
-        ItemFieldRepo.exec5(db, sql, itemId, fieldDefId, value, bidx)
+        ItemFieldRepo.upsert(
+            db, itemId, fieldDefId,
+            "value_json = ?::jsonb, value_bidx = decode(?, 'hex')",
+            "value_json, value_bidx",
+            "?::jsonb, decode(?, 'hex')",
+            value, bidx
+        )
     }
 
     private static func writeDate(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_date, value_bidx) " +
-                  "VALUES (?, ?, ?, CAST(? AS DATE), decode(?, 'hex')) " +
-                  "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
-                  "SET value_date = EXCLUDED.value_date, value_bidx = EXCLUDED.value_bidx"
-        try {
-            let c = db.connect()
-            let st = c.prepareStatement(sql)
-            ItemFieldRepo.bindCommon(st, itemId, fieldDefId)
-            if (value.isEmpty()) {
-                st.setNull(3)
-            } else {
-                st.set(3, value)
-            }
-            ItemFieldRepo.bindBidx(st, 4, bidx)
-            st.update()
-        } catch (e: Exception) {
-            throw toDbError(e)
-        }
+        ItemFieldRepo.upsert(
+            db, itemId, fieldDefId,
+            "value_date = CAST(? AS DATE), value_bidx = decode(?, 'hex')",
+            "value_date, value_bidx",
+            "CAST(? AS DATE), decode(?, 'hex')",
+            value, bidx
+        )
     }
 
     private static func writeNum(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
         // 数值同时写 value_num 与 numeric_value_norm（后者供范围/排序检索）
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_num, numeric_value_norm, value_bidx) " +
-                  "VALUES (?, ?, ?, CAST(? AS NUMERIC), CAST(? AS NUMERIC), decode(?, 'hex')) " +
-                  "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
-                  "SET value_num = EXCLUDED.value_num, " +
-                  "    numeric_value_norm = EXCLUDED.numeric_value_norm, " +
-                  "    value_bidx = EXCLUDED.value_bidx"
+        let setClause = "value_num = CAST(? AS NUMERIC), " +
+                        "numeric_value_norm = CAST(? AS NUMERIC), " +
+                        "value_bidx = decode(?, 'hex')"
+        let insCols = "value_num, numeric_value_norm, value_bidx"
+        let insVals = "CAST(? AS NUMERIC), CAST(? AS NUMERIC), decode(?, 'hex')"
+        let c = db.connect()
         try {
-            let c = db.connect()
-            let st = c.prepareStatement(sql)
-            ItemFieldRepo.bindCommon(st, itemId, fieldDefId)
-            if (value.isEmpty()) {
-                st.setNull(3)
-                st.setNull(4)
-            } else {
-                st.set(3, value)
-                st.set(4, value)
+            // ① 先尝试更新既有行
+            let upd = c.prepareStatement(
+                "UPDATE arc_item_fields SET " + setClause + " WHERE item_id = ? AND field_def_id = ?"
+            )
+            ItemFieldRepo.bindNumTriple(upd, 0, value, bidx)
+            upd.set(3, itemId)
+            upd.set(4, fieldDefId)
+            if (upd.update().rowCount > 0) {
+                return
             }
-            ItemFieldRepo.bindBidx(st, 5, bidx)
-            st.update()
+            // ② 不存在则插入
+            let ins = c.prepareStatement(
+                "INSERT INTO arc_item_fields (id, item_id, field_def_id, " + insCols +
+                ") VALUES (?, ?, ?, " + insVals + ")"
+            )
+            ItemFieldRepo.bindCommon(ins, itemId, fieldDefId)
+            ItemFieldRepo.bindNumTriple(ins, 3, value, bidx)
+            ins.update()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
     private static func writeBool(db: Database, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
-        let sql = "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_bool, value_bidx) " +
-                  "VALUES (?, ?, ?, CAST(? AS BOOLEAN), decode(?, 'hex')) " +
-                  "ON CONFLICT (item_id, field_def_id) DO UPDATE " +
-                  "SET value_bool = EXCLUDED.value_bool, value_bidx = EXCLUDED.value_bidx"
-        try {
-            let c = db.connect()
-            let st = c.prepareStatement(sql)
-            ItemFieldRepo.bindCommon(st, itemId, fieldDefId)
-            if (value.isEmpty()) {
-                st.setNull(3)
-            } else {
-                st.set(3, value)
-            }
-            ItemFieldRepo.bindBidx(st, 4, bidx)
-            st.update()
-        } catch (e: Exception) {
-            throw toDbError(e)
-        }
+        ItemFieldRepo.upsert(
+            db, itemId, fieldDefId,
+            "value_bool = CAST(? AS BOOLEAN), value_bidx = decode(?, 'hex')",
+            "value_bool, value_bidx",
+            "CAST(? AS BOOLEAN), decode(?, 'hex')",
+            value, bidx
+        )
     }
 
     /**
-     * 通用 upsert（TEXT / JSONB 两种，占位符形式一致）。
+     * 幂等写入（先 UPDATE，未命中再 INSERT）。
+     *
+     * 【为什么不用 INSERT ... ON CONFLICT DO UPDATE】
+     *   openGauss 不支持 PG 9.5 的 `ON CONFLICT (cols) DO UPDATE`
+     *   —— 实测直接语法错误：
+     *     SqlException: syntax error at or near "CONFLICT (" (SQLSTATE 42601)
+     *   于是「填写分类专属字段」这条链路此前**每次都 500**，
+     *   前端即便能建档也存不下任何扩展字段。
+     *   改为两步写：单用户编辑场景无并发竞争，
+     *   多标签页同时保存同一字段时后写覆盖先写，符合最后写入胜出语义。
+     *
+     * @param setClause      UPDATE 的 SET 片段（占位符：值, 盲索引）
+     * @param insertCols     INSERT 的列清单（值列, value_bidx）
+     * @param insertHolders  INSERT 的占位符片段（与列一一对应）
      */
-    private static func exec5(db: Database, sql: String, itemId: Int64, fieldDefId: Int64, value: String, bidx: ?Array<Byte>): Unit {
+    private static func upsert(
+        db: Database,
+        itemId: Int64,
+        fieldDefId: Int64,
+        setClause: String,
+        insertCols: String,
+        insertHolders: String,
+        value: String,
+        bidx: ?Array<Byte>
+    ): Unit {
+        let c = db.connect()
         try {
-            let c = db.connect()
-            let st = c.prepareStatement(sql)
-            ItemFieldRepo.bindCommon(st, itemId, fieldDefId)
-            if (value.isEmpty()) {
-                st.setNull(3)
-            } else {
-                st.set(3, value)
+            let upd = c.prepareStatement(
+                "UPDATE arc_item_fields SET " + setClause + " WHERE item_id = ? AND field_def_id = ?"
+            )
+            ItemFieldRepo.bindValueBidx(upd, 0, value, bidx)
+            upd.set(2, itemId)
+            upd.set(3, fieldDefId)
+            if (upd.update().rowCount > 0) {
+                return
             }
-            ItemFieldRepo.bindBidx(st, 4, bidx)
-            st.update()
+            let ins = c.prepareStatement(
+                "INSERT INTO arc_item_fields (id, item_id, field_def_id, " + insertCols +
+                ") VALUES (?, ?, ?, " + insertHolders + ")"
+            )
+            ItemFieldRepo.bindCommon(ins, itemId, fieldDefId)
+            ItemFieldRepo.bindValueBidx(ins, 3, value, bidx)
+            ins.update()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
+    }
+
+    /** 绑定「值 + 盲索引」两个相邻参数（空值按 NULL）。 */
+    private static func bindValueBidx(st: Statement, start: Int64, value: String, bidx: ?Array<Byte>): Unit {
+        if (value.isEmpty()) {
+            st.setNull(start)
+        } else {
+            st.set(start, value)
+        }
+        ItemFieldRepo.bindBidx(st, start + 1, bidx)
+    }
+
+    /** 绑定「数值 + 数值 + 盲索引」三个相邻参数。 */
+    private static func bindNumTriple(st: Statement, start: Int64, value: String, bidx: ?Array<Byte>): Unit {
+        if (value.isEmpty()) {
+            st.setNull(start)
+            st.setNull(start + 1)
+        } else {
+            st.set(start, value)
+            st.set(start + 1, value)
+        }
+        ItemFieldRepo.bindBidx(st, start + 2, bidx)
     }
 
     /** 绑定盲索引（BYTEA）：有则写原始字节，无则 NULL。 */

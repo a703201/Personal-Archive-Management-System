@@ -81,8 +81,8 @@ public class AuditRepo {
                   "client_ip, user_agent, trace_id, detail, occurred_ms, prev_hash, record_hash, occurred_at" +
                   ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, " +
                   "CURRENT_TIMESTAMP)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, chainSeq)
@@ -107,6 +107,8 @@ public class AuditRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -120,8 +122,8 @@ public class AuditRepo {
         // BYTEA 列直接读会出问题；十六进制串再解码为字节。
         let sql = "SELECT chain_seq, encode(record_hash, 'hex') AS record_hash_hex " +
                   "FROM aud_logs ORDER BY chain_seq DESC LIMIT 1"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             let rows = readRows(st.query())
             if (rows.isEmpty()) {
@@ -131,6 +133,8 @@ public class AuditRepo {
             return (r.i64("chain_seq"), AuditRepo.fromHex(r.str("record_hash_hex")))
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -146,8 +150,8 @@ public class AuditRepo {
     public func recordHashAt(seq: Int64): Option<Array<Byte>> {
         let sql = "SELECT encode(record_hash, 'hex') AS record_hash_hex " +
                   "FROM aud_logs WHERE chain_seq = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, seq)
             let rows = readRows(st.query())
@@ -161,6 +165,8 @@ public class AuditRepo {
             return Some(AuditRepo.fromHex(hex))
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -175,14 +181,16 @@ public class AuditRepo {
                   "encode(record_hash, 'hex') AS record_hash_hex, " +
                   "occurred_ms " +
                   "FROM aud_logs WHERE chain_seq >= ? ORDER BY chain_seq ASC LIMIT ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, fromSeq)
             st.set(1, limit)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -246,13 +254,15 @@ public class AuditRepo {
         sql += " ORDER BY chain_seq DESC LIMIT ? OFFSET ?"
         params.add(SqlParam.Num(limit))
         params.add(SqlParam.Num(offset))
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             AuditRepo.bind(st, params)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -303,8 +313,8 @@ public class AuditRepo {
             sql += " AND client_ip = ?"
             params.add(SqlParam.Str(clientIp))
         }
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             AuditRepo.bind(st, params)
             let rows = readRows(st.query())
@@ -314,6 +324,8 @@ public class AuditRepo {
             return rows.at(0).i64("n")
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 

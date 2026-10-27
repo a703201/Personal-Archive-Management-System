@@ -116,8 +116,8 @@ public class AttachmentRepo {
                   "created_at, created_by, updated_at, updated_by, version" +
                   ") VALUES (?, ?, ?, ?, ?, 0, 0, ?, 0, 'SM4-CBC', ?, ?, ?, ?, ?, ?, ?, " +
                   "FALSE, TRUE, 0, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, subjectId)
@@ -141,6 +141,8 @@ public class AttachmentRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -150,22 +152,24 @@ public class AttachmentRepo {
     public func setWrappedDek(id: Int64, wrappedDek: String): Unit {
         let sql = "UPDATE arc_attachments SET wrapped_dek = ?, " +
                   "updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, wrappedDek)
             st.set(1, id)
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
     public func findById(id: Int64): Option<AttachmentRecord> {
         let sql = "SELECT " + AttachmentRepo.COLS + " FROM arc_attachments " +
                   "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             let all = readRows(st.query()).all()
@@ -175,6 +179,8 @@ public class AttachmentRepo {
             return Some(AttachmentRepo.toRecord(all[0]))
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -184,13 +190,15 @@ public class AttachmentRepo {
     public func listByItem(itemId: Int64): ArrayList<AttachmentRecord> {
         let sql = "SELECT " + AttachmentRepo.COLS + " FROM arc_attachments " +
                   "WHERE item_id = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, itemId)
             return AttachmentRepo.collect(readRows(st.query()))
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -200,8 +208,8 @@ public class AttachmentRepo {
     public func findByDedupKey(subjectId: Int64, dedupKey: String): Option<AttachmentRecord> {
         let sql = "SELECT " + AttachmentRepo.COLS + " FROM arc_attachments " +
                   "WHERE subject_id = ? AND dedup_key = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, subjectId)
             st.set(1, dedupKey)
@@ -212,6 +220,8 @@ public class AttachmentRepo {
             return Some(AttachmentRepo.toRecord(all[0]))
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -236,8 +246,8 @@ public class AttachmentRepo {
                   "mime_type, sm3_fingerprint, iv, is_current, status, change_note, " +
                   "uploaded_by, uploaded_at" +
                   ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, FALSE, ?, ?, ?, CURRENT_TIMESTAMP)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, attachmentId)
@@ -254,6 +264,8 @@ public class AttachmentRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -268,13 +280,15 @@ public class AttachmentRepo {
                   "CAST(COALESCE(EXTRACT(EPOCH FROM uploaded_at) * 1000, 0) AS BIGINT) AS uploaded_ms " +
                   "FROM arc_attachment_versions WHERE attachment_id = ? " +
                   "ORDER BY version_no DESC"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, attachmentId)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -282,8 +296,8 @@ public class AttachmentRepo {
      * 切换当前版本（FR-ATT-004）：把目标版本置为当前，其余置为非当前。
      */
     public func setCurrentVersion(attachmentId: Int64, versionId: Int64): Bool {
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st1 = c.prepareStatement(
                 "UPDATE arc_attachment_versions SET is_current = FALSE WHERE attachment_id = ?")
             st1.set(0, attachmentId)
@@ -303,6 +317,8 @@ public class AttachmentRepo {
             return true
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -312,14 +328,16 @@ public class AttachmentRepo {
     public func setStatus(id: Int64, status: Int64): Unit {
         let sql = "UPDATE arc_attachments SET status = ?, " +
                   "updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, status)
             st.set(1, id)
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -329,8 +347,8 @@ public class AttachmentRepo {
     public func setCurrentVersionId(id: Int64, versionId: Int64, versionCount: Int64): Unit {
         let sql = "UPDATE arc_attachments SET current_version_id = ?, version_count = ?, " +
                   "updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, versionId)
             st.set(1, versionCount)
@@ -338,6 +356,8 @@ public class AttachmentRepo {
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -347,13 +367,15 @@ public class AttachmentRepo {
     public func incrDownload(id: Int64): Unit {
         let sql = "UPDATE arc_attachments SET download_count = download_count + 1, " +
                   "last_accessed_at = CURRENT_TIMESTAMP WHERE id = ?"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.update()
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 

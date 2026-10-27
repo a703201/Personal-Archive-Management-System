@@ -113,8 +113,8 @@ public class FieldDefRepo {
                   "WHERE category = ? AND deleted_at IS NULL AND status = 1 " +
                   "AND (subject_id IS NULL OR subject_id = ?) " +
                   "ORDER BY display_order, id"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, category)
             st.set(1, subjectId)
@@ -122,6 +122,8 @@ public class FieldDefRepo {
             return FieldDefRepo.collect(rows)
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -133,22 +135,24 @@ public class FieldDefRepo {
                   "WHERE category = ? AND subject_id IS NULL " +
                   "AND deleted_at IS NULL AND status = 1 " +
                   "ORDER BY display_order, id"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, category)
             let rows = readRows(st.query())
             return FieldDefRepo.collect(rows)
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
     public func findById(id: Int64): Option<FieldDefRecord> {
         let sql = "SELECT " + FieldDefRepo.COLS + " FROM arc_field_defs " +
                   "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             let rows = readRows(st.query())
@@ -159,6 +163,8 @@ public class FieldDefRepo {
             return Some(FieldDefRepo.toRecord(all[0]))
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -172,8 +178,8 @@ public class FieldDefRepo {
         let sql = "SELECT " + FieldDefRepo.COLS + " FROM arc_field_defs " +
                   "WHERE category = ? AND field_key = ? AND subject_id IS NULL " +
                   "AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, category)
             st.set(1, fieldKey)
@@ -185,6 +191,8 @@ public class FieldDefRepo {
             return Some(FieldDefRepo.toRecord(all[0]))
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -225,8 +233,8 @@ public class FieldDefRepo {
                   "?, ?, ?::jsonb, ?, " +
                   FieldDefRepo.bl(isSystem) + ", 1, " +
                   "CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1)"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             if (subjectId == 0) {
@@ -250,6 +258,8 @@ public class FieldDefRepo {
             return id
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -273,8 +283,8 @@ public class FieldDefRepo {
                   FieldDefRepo.bl(isRequired) + ", " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
                   "WHERE id = ? AND deleted_at IS NULL AND is_system = FALSE"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, fieldName)
             st.set(1, displayOrder)
@@ -286,6 +296,8 @@ public class FieldDefRepo {
             return true
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -296,14 +308,16 @@ public class FieldDefRepo {
         let sql = "UPDATE arc_field_defs SET deleted_at = CURRENT_TIMESTAMP, " +
                   "updated_at = CURRENT_TIMESTAMP " +
                   "WHERE id = ? AND deleted_at IS NULL AND is_system = FALSE"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.update()
             return true
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -313,8 +327,8 @@ public class FieldDefRepo {
     public func countBuiltin(): Int64 {
         let sql = "SELECT COUNT(*) AS cnt FROM arc_field_defs " +
                   "WHERE subject_id IS NULL AND deleted_at IS NULL"
+        let c = this.db.connect()
         try {
-            let c = this.db.connect()
             let st = c.prepareStatement(sql)
             let rows = readRows(st.query())
             let all = rows.all()
@@ -324,6 +338,8 @@ public class FieldDefRepo {
             return all[0].i64("cnt")
         } catch (e: Exception) {
             throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
