@@ -189,7 +189,7 @@ public class PasswordResetService {
             "验证码 ${minutes} 分钟内有效，最多可尝试 ${ResetPolicy.MaxAttempts} 次。\n" +
             "如果这不是您本人的操作，请忽略本邮件 —— 您的口令不会发生任何变化。\n\n" +
             "—— AMS 档案管理系统（本邮件由系统自动发送，请勿回复）"
-        this.mailer.sendSafe(user.email, subject, body)
+        this.mailer.sendAlert(user.email, user.phone, subject, body)
         this.audit("${user.id}", AuditAction.PasswordReset, "user", user.username,
                    AuditResult.Success, "AUTH_RESET_CODE_SENT", ip, ua)
         Log.get().info("auth.reset.code_sent", None, [

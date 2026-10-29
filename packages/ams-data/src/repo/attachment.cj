@@ -45,12 +45,17 @@ public class AttachmentRecord {
     public let status: Int64
     public let downloadCount: Int64
     public let dedupKey: String
+    /** 手动录入摘要（FR-ATT-013 降级：OCR 不可用时由用户填写） */
+    public let summary: String
+    /** 手动录入关键词（逗号分隔，随条目检索索引） */
+    public let keywords: String
 
     public init(
         id: Int64, subjectId: Int64, itemId: Int64, category: Int64, title: String,
         currentVersionId: Int64, versionCount: Int64, storageKey: String,
         keyVersion: Int64, wrappedDek: String, fileSize: Int64, fileExt: String,
-        mimeType: String, status: Int64, downloadCount: Int64, dedupKey: String
+        mimeType: String, status: Int64, downloadCount: Int64, dedupKey: String,
+        summary!: String = "", keywords!: String = ""
     ) {
         this.id = id
         this.subjectId = subjectId
@@ -68,6 +73,8 @@ public class AttachmentRecord {
         this.status = status
         this.downloadCount = downloadCount
         this.dedupKey = dedupKey
+        this.summary = summary
+        this.keywords = keywords
     }
 }
 
@@ -87,7 +94,8 @@ public class AttachmentRepo {
         "storage_key, key_version, COALESCE(wrapped_dek, '') AS wrapped_dek, " +
         "COALESCE(file_size, 0) AS file_size, COALESCE(file_ext, '') AS file_ext, " +
         "COALESCE(mime_type, '') AS mime_type, status, download_count, " +
-        "COALESCE(dedup_key, '') AS dedup_key"
+        "COALESCE(dedup_key, '') AS dedup_key, " +
+        "COALESCE(summary, '') AS summary, COALESCE(keywords, '') AS keywords"
 
     /**
      * 新建附件主记录（初始状态由调用方给定，通常为 scanning）。
@@ -105,7 +113,9 @@ public class AttachmentRepo {
         fingerprint: Array<Byte>,
         dedupKey: String,
         status: Int64,
-        operatorId: Int64
+        operatorId: Int64,
+        summary!: String = "",
+        keywords!: String = ""
     ): Int64 {
         let id = Ids.next()
         let sql = "INSERT INTO arc_attachments (" +
@@ -113,9 +123,11 @@ public class AttachmentRepo {
                   "storage_key, storage_backend, encryption_alg, key_version, file_size, " +
                   "file_ext, mime_type, sm3_fingerprint, dedup_key, status, " +
                   "is_current_deleted, watermark_enabled, download_count, " +
+                  "summary, keywords, " +
                   "created_at, created_by, updated_at, updated_by, version" +
                   ") VALUES (?, ?, ?, ?, ?, 0, 0, ?, 0, 'SM4-CBC', ?, ?, ?, ?, ?, ?, ?, " +
-                  "FALSE, TRUE, 0, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1)"
+                  "FALSE, TRUE, 0, ?, ?, " +
+                  "CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1)"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
@@ -135,8 +147,10 @@ public class AttachmentRepo {
             st.set(10, fingerprint)
             st.set(11, dedupKey)
             st.set(12, status)
-            st.set(13, operatorId)
-            st.set(14, operatorId)
+            st.set(13, summary)
+            st.set(14, keywords)
+            st.set(15, operatorId)
+            st.set(16, operatorId)
             st.update()
             return id
         } catch (e: Exception) {
@@ -218,6 +232,37 @@ public class AttachmentRepo {
                 return None
             }
             return Some(AttachmentRepo.toRecord(all[0]))
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 取某主体全部「可用」附件的去重键集合（FR-IMP-004 附件去重预检用）。
+     *
+     * 一次性取回，导入预检时按内存集合比对，避免「每个文件各查一次库」。
+     * 只含未删除、未隔离（status<>3）的附件 —— 隔离件（疑似恶意）不参与去重，
+     * 否则会误导用户以为「安全文件已存在」。
+     */
+    public func listDedupKeys(subjectId: Int64): HashSet<String> {
+        let sql = "SELECT dedup_key FROM arc_attachments " +
+                  "WHERE subject_id = ? AND deleted_at IS NULL AND status <> 3 " +
+                  "AND dedup_key IS NOT NULL AND dedup_key <> ''"
+        let c = this.db.connect()
+        let set = HashSet<String>()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, subjectId)
+            let rows = readRows(st.query())
+            for (r in rows.all()) {
+                let k = r.str("dedup_key")
+                if (!k.isEmpty()) {
+                    set.add(k)
+                }
+            }
+            return set
         } catch (e: Exception) {
             throw toDbError(e)
         } finally {
@@ -602,7 +647,32 @@ public class AttachmentRepo {
             r.str("mime_type"),
             r.i64("status"),
             r.i64("download_count"),
-            r.str("dedup_key")
+            r.str("dedup_key"),
+            summary: r.str("summary"),
+            keywords: r.str("keywords")
         )
+    }
+
+    /**
+     * 更新附件摘要与关键词（FR-ATT-013 降级：OCR 不可用时由用户手动录入）。
+     */
+    public func updateMeta(id: Int64, summary: String, keywords: String, operatorId: Int64): Bool {
+        let sql = "UPDATE arc_attachments SET summary = ?, keywords = ?, " +
+                  "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
+                  "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, summary)
+            st.set(1, keywords)
+            st.set(2, operatorId)
+            st.set(3, id)
+            st.update()
+            return true
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
     }
 }

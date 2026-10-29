@@ -33,6 +33,9 @@ AMS · 家庭协作（FR-ACL-010）端到端验收 + 前后端同端口部署验
   六、条目级授权的隔离性
       同主体下只授一条 → 共享列表恰好 1 条，另一条详情 404
       /api/items 里也只多这一条（不因同一主体而整片放开）
+  三-B、并发 accept 压测
+      单条使用邀请（maxUses=1）下 10 个账号并发兑换 → 恰好 1 人成功入组、其余 9 人一律 404
+      （验证 consumeOnce 的单条 UPDATE + WHERE 行锁原子语义）
 """
 import json
 import os
@@ -45,6 +48,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import concurrent.futures
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PORT = os.environ.get("AMS_VERIFY_PORT", "18102")
@@ -373,6 +377,62 @@ check("第 2 次错误码 → 403", r[0] == 403, str(r[2])[:200])
 r = call("POST", "/api/family/invites/accept",
          {"token": inv3.get("token"), "code": inv3.get("code")}, token=tok_c)
 check("错误超限后即使 code 正确也 404（邀请已作废）", r[0] == 404, str(r[2])[:200])
+
+# ---------------------------------------------------------------
+# 三-B、并发 accept 压测
+#   单一使用邀请（maxUses=1）下，10 个不同账号并发去兑换，
+#   必须恰好 1 人成功入组、其余 9 人一律失败 —— 验证 consumeOnce
+#   的「单条 UPDATE + WHERE 行锁」原子语义（docs/14 §12.4 / docs/15 §9）。
+#   用不同账号是因为同一账号第二次会走 alreadyMember 幂等分支，
+#   不再是并发竞态。
+# ---------------------------------------------------------------
+print()
+print("[三-B] 并发 accept 压测（单条邀请 · 10 并发只应 1 人成功）")
+
+CONC_N = 10
+conc_toks = []
+for i in range(CONC_N):
+    u = "e2e_cc_%d_%s" % (i, suffix)
+    call("POST", "/api/auth/register",
+         {"username": u, "password": pwd, "email": "%s@e2e.local" % u})
+    rr = call("POST", "/api/auth/login", {"username": u, "password": pwd})
+    tt = (data_of(rr) or {}).get("accessToken")
+    if not tt:
+        print("  [WARN] 并发账号 %s 登录失败：%s" % (u, str(rr[2])[:120]))
+    conc_toks.append(tt)
+
+# 单条使用邀请：maxUses=1；失败上限放宽到 20，避免 code 错误计数干扰
+r = call("POST", "/api/family/groups/%s/invites" % gid,
+         {"targetRole": "member", "expiresInMinutes": 30,
+          "maxUses": 1, "maxFails": 20}, token=tok_a)
+conc = data_of(r) or {}
+check("并发段：A 生成单条使用邀请", r[0] == 200, str(r[2])[:200])
+ccode = conc.get("code", "")
+ctoken = conc.get("token", "")
+
+def _accept_once(tok):
+    if not tok:
+        return 0
+    return call("POST", "/api/family/invites/accept",
+                {"token": ctoken, "code": ccode}, token=tok)[0]
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=CONC_N) as ex:
+    statuses = list(ex.map(_accept_once, conc_toks))
+
+ok_cnt = sum(1 for s in statuses if s == 200)
+non2xx = [s for s in statuses if s != 200]
+check("并发 10 次接受，恰好 1 次成功（原子 consumeOnce）",
+      ok_cnt == 1, "ok=%d statuses=%s" % (ok_cnt, statuses))
+check("其余 9 次全部非 2xx", len(non2xx) == CONC_N - 1, "non2xx=%s" % non2xx)
+check("失败均为 404（已用尽/不可枚举，非 5xx）",
+      all(s == 404 for s in non2xx), "non2xx=%s" % non2xx)
+
+# 组内实际只多了 1 名成员（owner A + B 已在本组；并发胜出者 +1，而非 10 人）
+r = call("GET", "/api/family/groups/%s/members" % gid, token=tok_a)
+joined = [m for m in (data_of(r) or {}).get("items", [])
+          if str(m.get("userId")) not in (str(id_a), str(id_b))]
+check("并发准入后组内恰好 1 名新成员（非 10）", len(joined) == 1,
+      "joined=%s" % [m.get("userId") for m in joined])
 
 # ---------------------------------------------------------------
 # 四、授权前：B 看不到任何东西

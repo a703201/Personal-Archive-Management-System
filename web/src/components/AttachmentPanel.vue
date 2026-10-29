@@ -29,6 +29,10 @@ interface Att {
   mimeType: string
   status: number
   downloadCount: number
+  /** 手动录入摘要（FR-ATT-013 降级：OCR 不可用时由用户填写） */
+  summary: string
+  /** 手动录入关键词（逗号分隔，随条目检索索引） */
+  keywords: string
 }
 
 interface Ver {
@@ -93,6 +97,66 @@ const tagOpen = ref(false)
 const tags = ref<{ id: number; name: string }[]>([])
 const pickedTags = ref<Set<number>>(new Set())
 
+/** 摘要 / 关键词编辑（FR-ATT-013 降级：OCR 不可用时手动录入） */
+const metaOpen = ref(false)
+const metaAtt = ref<Att | null>(null)
+const metaSummary = ref('')
+const metaKeywords = ref('')
+
+/** 缩略图（FR-ATT-012 降级：服务端无图像编解码库，前端按原图 CSS 缩放） */
+const thumbs = ref<Record<number, string>>({})
+
+function isImageAtt(a: Att): boolean {
+  const m = a.mimeType ?? ''
+  return m.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'].includes(
+    (a.fileExt ?? '').toLowerCase(),
+  )
+}
+
+/** 为图片附件预拉取一次 blob 并生成 ObjectURL（列表缩略图用，按 CSS 缩放） */
+async function ensureThumb(a: Att): Promise<void> {
+  if (thumbs.value[a.id] || !isImageAtt(a)) return
+  try {
+    const url = await fetchBlob(a.id)
+    thumbs.value = { ...thumbs.value, [a.id]: url }
+  } catch {
+    /* 缩略图失败不影响列表，留空即可 */
+  }
+}
+
+function revokeThumbs(): void {
+  for (const id of Object.keys(thumbs.value)) {
+    URL.revokeObjectURL(thumbs.value[Number(id)])
+  }
+  thumbs.value = {}
+}
+
+function openMeta(a: Att): void {
+  metaAtt.value = a
+  metaSummary.value = a.summary ?? ''
+  metaKeywords.value = a.keywords ?? ''
+  metaOpen.value = true
+}
+
+async function saveMeta(): Promise<void> {
+  if (!metaAtt.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    await api(`/attachments/${metaAtt.value.id}`, {
+      method: 'PUT',
+      body: { summary: metaSummary.value, keywords: metaKeywords.value },
+    })
+    notice.value = '已保存摘要与关键词'
+    metaOpen.value = false
+    await load()
+  } catch (e) {
+    error.value = (e as Error).message || '保存失败'
+  } finally {
+    busy.value = false
+  }
+}
+
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
@@ -109,10 +173,17 @@ function fmtTime(ms: number): string {
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
+  revokeThumbs()
   try {
     const res = await api<{ attachments: Att[] }>(`/attachments?itemId=${props.itemId}`)
     list.value = res.attachments ?? []
     picked.value = new Set()
+    // 预拉取图片缩略图（FR-ATT-012 降级：前端 CSS 缩放，无服务端缩略图生成）
+    for (const a of list.value) {
+      if (isImageAtt(a)) {
+        void ensureThumb(a)
+      }
+    }
   } catch (e) {
     error.value = (e as Error).message || '附件加载失败'
   } finally {
@@ -414,6 +485,9 @@ onMounted(load)
             :aria-label="`选择 ${a.title}`"
             @change="toggle(a.id)"
           />
+          <div v-if="thumbs[a.id]" class="att-thumb">
+            <img :src="thumbs[a.id]" class="att-thumb__img" :alt="`${a.title} 缩略图`" />
+          </div>
           <div class="att-item__main">
             <div class="att-item__title">
               {{ a.title }}
@@ -423,10 +497,15 @@ onMounted(load)
             <div class="att-item__sub">
               {{ fmtSize(a.fileSize) }} · 下载 {{ a.downloadCount }} 次
             </div>
+            <div v-if="a.summary || a.keywords" class="att-item__meta">
+              <span v-if="a.summary" class="att-item__metaline">摘要：{{ a.summary }}</span>
+              <span v-if="a.keywords" class="att-item__metaline">关键词：{{ a.keywords }}</span>
+            </div>
           </div>
           <div class="att-item__ops">
             <button class="btn-text" type="button" @click="openPreview(a)">预览</button>
             <button class="btn-text" type="button" @click="openVersions(a)">版本</button>
+            <button class="btn-text" type="button" @click="openMeta(a)">摘要</button>
           </div>
         </li>
       </ul>
@@ -550,6 +629,37 @@ onMounted(load)
           <button class="btn-ghost" type="button" :disabled="busy" @click="applyTags('remove')">
             移除标签
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 摘要 / 关键词编辑（FR-ATT-013 降级：OCR 不可用时手动录入） -->
+    <div v-if="metaOpen" class="modal" role="dialog" aria-modal="true" @click.self="metaOpen = false">
+      <div class="modal__card">
+        <div class="modal__head">
+          <span class="modal__title">编辑摘要 · {{ metaAtt?.title }}</span>
+          <button class="btn-text" type="button" @click="metaOpen = false">关闭</button>
+        </div>
+        <label class="field">
+          <span class="field__label">摘要</span>
+          <textarea
+            v-model="metaSummary"
+            class="field__input"
+            rows="3"
+            placeholder="一句话描述附件内容（OCR 不可用时的降级录入）"
+          ></textarea>
+        </label>
+        <label class="field">
+          <span class="field__label">关键词</span>
+          <input
+            v-model="metaKeywords"
+            class="field__input"
+            type="text"
+            placeholder="逗号分隔，随条目检索索引"
+          />
+        </label>
+        <div class="cmp">
+          <button class="btn-ghost" type="button" :disabled="busy" @click="saveMeta">保存</button>
         </div>
       </div>
     </div>
@@ -838,5 +948,50 @@ onMounted(load)
   border-color: var(--accent, #2563eb);
   background: rgba(37, 99, 235, 0.1);
   color: var(--accent, #2563eb);
+}
+.att-thumb {
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-sm, 8px);
+  overflow: hidden;
+  background: var(--bg-app, #eef1f6);
+}
+.att-thumb__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.att-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 4px;
+}
+.att-item__metaline {
+  font-size: 12px;
+  color: var(--text-secondary, #4b5563);
+}
+.field {
+  display: block;
+  margin-bottom: 12px;
+}
+.field__label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary, #4b5563);
+  margin-bottom: 6px;
+}
+.field__input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border-subtle, #e5e7eb);
+  border-radius: var(--radius-sm, 8px);
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text-primary, #1f2937);
+  background: var(--bg-surface, #fff);
+  resize: vertical;
 }
 </style>

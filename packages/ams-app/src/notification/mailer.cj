@@ -28,10 +28,17 @@ import ams.kernel.log.*
 public class Mailer {
     private let emailRepo: EmailRepo
     private let configRepo: ConfigRepo
+    /** 短信 provider（FR-NTF-005）：默认 Noop，sms.enabled=true 时启用。 */
+    private let smsProvider: SmsProvider
 
-    public init(emailRepo: EmailRepo, configRepo: ConfigRepo) {
+    public init(
+        emailRepo: EmailRepo,
+        configRepo: ConfigRepo,
+        smsProvider!: SmsProvider = NoopSmsProvider()
+    ) {
         this.emailRepo = emailRepo
         this.configRepo = configRepo
+        this.smsProvider = smsProvider
     }
 
     /**
@@ -77,5 +84,24 @@ public class Mailer {
             Log.get().error("mail.failed", None, [("to", toAddr), ("err", "${e}")])
             return 0
         }
+    }
+
+    /**
+     * 安全事件告警（FR-NTF-005）：站内信（调用方负责 push）+ 邮件 + 可选短信。
+     *
+     * 邮件始终发送；短信仅当 sms.enabled=true 且该用户留有手机号时尝试，
+     * 失败不影响邮件与站内信。返回的 id 为邮件入队 id（短信不返回 id）。
+     */
+    public func sendAlert(toAddr: String, phone: String, subject: String, body: String): Int64 {
+        let mailId = this.send(toAddr, subject, body)
+        let smsEnabled = this.configRepo.getValue("sms", "enabled", "false") == "true"
+        if (smsEnabled && !phone.isEmpty()) {
+            try {
+                this.smsProvider.send(phone, "【AMS】${subject}")
+            } catch (e: Exception) {
+                Log.get().error("sms.failed", None, [("phone", phone), ("err", "${e}")])
+            }
+        }
+        return mailId
     }
 }

@@ -74,6 +74,10 @@ public class AttachmentRoutes {
                    requiredPerm: "attachment:read:own")
         router.get("/api/attachments/:id", { req: ApiRequest => this.meta(req) },
                    requiredPerm: "attachment:read:own")
+        // ---- FR-ATT-013 降级：手动录入摘要 / 关键词（OCR 不可用时）----
+        router.put("/api/attachments/:id",
+                   { req: ApiRequest => this.updateMeta(req) },
+                   requiredPerm: "attachment:upload:own")
         router.get("/api/attachments/:id/download", { req: ApiRequest => this.download(req) },
                    requiredPerm: "attachment:download:own")
         router.get("/api/attachments/:id/versions", { req: ApiRequest => this.versions(req) },
@@ -139,8 +143,11 @@ public class AttachmentRoutes {
         }
         let itemId: Option<Int64> = if (hasItem) { Some<Int64>(itemIdVal) } else { None }
 
+        let summary = req.queryParam("summary") ?? ""
+        let keywords = req.queryParam("keywords") ?? ""
         let result = this.service.upload(
-            subjectId, itemId, category, title, fileName, req.bodyBytes, operatorId
+            subjectId, itemId, category, title, fileName, req.bodyBytes, operatorId,
+            summary: summary, keywords: keywords
         )
         return ApiResponse.ok(
             "{\"id\":${result.attachmentId},\"dedupHit\":${result.dedupHit},\"status\":${result.status}}",
@@ -180,6 +187,40 @@ public class AttachmentRoutes {
             case Some(a) => return ApiResponse.ok(AttachmentRoutes.toJson(a), req.requestId)
             case None => throw notFound("附件")
         }
+    }
+
+    /**
+     * PATCH /api/attachments/:id —— 更新摘要 / 关键词（FR-ATT-013 降级）。
+     *
+     * 正文为 JSON：{"summary":"...","keywords":"..."}；两字段均可省略（省略即不改）。
+     */
+    private func updateMeta(req: ApiRequest): ApiResponse {
+        let id = RowData.toI64(req.pathParam("id") ?? "")
+        if (id <= 0) {
+            throw validationError("id", "非法的附件 id")
+        }
+        // 先确认附件存在（顺带做归属/权限前置，路由层已按 attachment:upload:own 拦截）
+        match (this.repo.findById(id)) {
+            case Some(_) => ()
+            case None => throw notFound("附件")
+        }
+        let body = match (SimpleJson.parse(req.bodyText())) {
+            case Some(v) => v
+            case None => throw validationError("body", "请求正文不是合法 JSON")
+        }
+        var summary: String = ""
+        var keywords: String = ""
+        match (body.get("summary")) {
+            case Some(s) => summary = s
+            case None => ()
+        }
+        match (body.get("keywords")) {
+            case Some(k) => keywords = k
+            case None => ()
+        }
+        let operatorId = UserRepo.parseId(req.subjectId)
+        this.service.updateMeta(id, summary, keywords, operatorId)
+        return ApiResponse.ok("{\"ok\":true,\"id\":${id}}", req.requestId)
     }
 
     /**
@@ -644,7 +685,9 @@ public class AttachmentRoutes {
         sb.append("\"fileExt\":\"${ApiResponse.escape(a.fileExt)}\",")
         sb.append("\"mimeType\":\"${ApiResponse.escape(a.mimeType)}\",")
         sb.append("\"status\":${a.status},")
-        sb.append("\"downloadCount\":${a.downloadCount}}")
+        sb.append("\"downloadCount\":${a.downloadCount},")
+        sb.append("\"summary\":\"${ApiResponse.escape(a.summary)}\",")
+        sb.append("\"keywords\":\"${ApiResponse.escape(a.keywords)}\"}")
         return sb.toString()
     }
 }

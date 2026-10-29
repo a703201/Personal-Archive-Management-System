@@ -99,7 +99,9 @@ public class AttachmentService {
         fileName: String,
         plain: Array<Byte>,
         operatorId: Int64,
-        dedup!: Bool = true
+        dedup!: Bool = true,
+        summary!: String = "",
+        keywords!: String = ""
     ): UploadResult {
         // ---- 1. 基础校验（FR-ATT-001）----
         if (plain.size > FileTypes.maxFileSize) {
@@ -191,7 +193,7 @@ public class AttachmentService {
         let attId = this.repo.create(
             owner, itemId, category, title, storageKey,
             kv.version, plain.size, ext, mime, fp, dkey,
-            status.toCode(), operatorId
+            status.toCode(), operatorId, summary: summary, keywords: keywords
         )
         this.repo.setWrappedDek(attId, AttachmentService.encodeWrapped(wrapped))
 
@@ -229,6 +231,13 @@ public class AttachmentService {
         }
 
         return UploadResult(attId, false, status.toCode())
+    }
+
+    /**
+     * 更新附件摘要与关键词（FR-ATT-013 降级：OCR 不可用时由用户手动录入）。
+     */
+    public func updateMeta(attachmentId: Int64, summary: String, keywords: String, operatorId: Int64): Bool {
+        return this.repo.updateMeta(attachmentId, summary, keywords, operatorId)
     }
 
     /**

@@ -14,6 +14,8 @@
 //     AMS_HTTP_HOST / AMS_HTTP_PORT
 //     AMS_DB_HOST / AMS_DB_PORT / AMS_DB_NAME / AMS_DB_USER / AMS_DB_PASSWORD
 //     AMS_TOKEN_SECRET   令牌签名密钥（≥ 32 字节，**生产必填**）
+//     AMS_AUTH_MAX_FAILS   账号锁定阈值：连续失败次数达到即锁定（默认 5）
+//     AMS_AUTH_LOCK_SECONDS  账号锁定时长（秒，默认 900）
 // ============================================================
 package ams.server
 
@@ -152,6 +154,18 @@ public class ServerConfig {
     }
 }
 
+// 从环境变量读取整数配置（字符串 → Int64），解析失败或缺失时回退默认值。
+// 仅接受非负十进制整数；含非法字符或空串一律回退，避免把运维拼写错误当成 0。
+func parseIntEnv(raw: String, default: Int64): Int64 {
+    if (raw.isEmpty()) { return default }
+    var n: Int64 = 0
+    for (b in raw.toArray().iterator()) {
+        if (b < 48 || b > 57) { return default }
+        n = n * 10 + Int64(b - 48)
+    }
+    return n
+}
+
 main(): Int64 {
     // ---- 1. 日志 ----
     let log = Log.get()
@@ -225,7 +239,9 @@ main(): Int64 {
     // 而 AuthRoutes 在接口层一开始就注册。下方调度器复用同一实例。
     let configRepo = ConfigRepo(db)
     let emailRepo = EmailRepo(db)
-    let mailer = Mailer(emailRepo, configRepo)
+    // ---- FR-NTF-005：短信 provider（默认 Noop，sms.enabled=true 时启用）----
+    let smsProvider = makeSmsProvider(configRepo)
+    let mailer = Mailer(emailRepo, configRepo, smsProvider: smsProvider)
 
     // ---- 自助找回口令（FR-AUTH-008）：验证码 → 一次性令牌 → 强制下线 ----
     let resetRepo = PasswordResetRepo(db)
@@ -241,12 +257,19 @@ main(): Int64 {
         recorder: auditRecorder
     )
 
+    // ---- FR-AUTH-010：账号锁定策略（阈值与时长可配置，默认 5 次 / 900s）----
+    let authMaxFails = parseIntEnv(getVariable("AMS_AUTH_MAX_FAILS") ?? "5", 5)
+    let authLockSeconds = parseIntEnv(getVariable("AMS_AUTH_LOCK_SECONDS") ?? "900", 900)
     let authService = AuthService(
         userRepo,
         roleRepo,
         hasher,
         tokenService,
-        AuthConfig(kdfIterations: policy.iterations),
+        AuthConfig(
+            kdfIterations: policy.iterations,
+            lockSeconds: authLockSeconds,
+            maxFailedAttempts: authMaxFails
+        ),
         passwordValidator,
         recorder: auditRecorder,
         totpRepo: TotpRepo(db)
@@ -490,7 +513,9 @@ main(): Int64 {
         NotifyRepo(db),
         exportStorage,
         attachmentService,
-        recorder: auditRecorder
+        recorder: auditRecorder,
+        crypto: provider,
+        attachmentRepo: attachmentRepo
     )
     AttachmentImportRoutes(attachmentImportService, userRepo).register(router)
 

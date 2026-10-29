@@ -18,7 +18,7 @@
 ## [未发布] — P1 收口 + P2 启动
 
 P1 需求逐条落地并在 `127.0.0.1:8080` 实跑验证：**34 条中 33 条实现、1 条降级交付、0 条未做**（详见 `docs/12-P1实现状态核对.md`）。
-P2（23 条）累计 **16 条实现 / 7 条未开始**，台账见 `docs/13-P2实现状态核对.md`。
+P2（23 条）累计 **22 条实现 / 1 条评估中（FR-IMP-005，待方案决策）**，台账见 `docs/13-P2实现状态核对.md`。
 
 ### 新增（家庭成员邀请 · FR-ACL-010 · 方案 B）
 
@@ -91,6 +91,19 @@ P2（23 条）累计 **16 条实现 / 7 条未开始**，台账见 `docs/13-P2�
 - `docs/README.md` 索引从 01–10 补齐到 01–15，状态行由「设计阶段（尚未进入编码实现）」改为当前实现进度。
 - `docs/13-P2实现状态核对.md` 的 FR-ACL-010 行补 `docs/15` 指针。
 - **前端文案口径统一落地**：`OverviewView.vue`（自带一份 `CATEGORY_NAMES`）与 `ArchiveView.vue`（自带一份 `CATEGORY_DEFS`）改为统一消费 `composables/useCatalog.ts`，该文件成为分类/状态/来源/敏感度的唯一口径。
+
+### 新增（P2 收口：安全策略 / 通知 / 导入导出 / 档案增强）
+
+> 本轮回填 7 条 P2，含 4 条能力边界降级项；三道闸门实跑：后端 `bash scripts/build.sh ams-server` 0 error、单测 `bash scripts/test.sh` **325 通过 / 0 失败**、前端 `cd web && npm run build` 0 error。端到端（`verify-family.py` 三-B 并发 accept 压测 + 新接口联调）**代码就绪但本环境无法实跑** —— 沙箱拦截 WSL/openGauss，需用户在本地拉起库后复验。
+
+- **账号锁定策略可配置（FR-AUTH-010）**：`AuthConfig` 阈值/时长原硬编码；现读取环境变量 `AMS_AUTH_MAX_FAILS`（默认 5）、`AMS_AUTH_LOCK_SECONDS`（默认 900），在 `main.cj` 装配处具名传入。`auth.cj` 的登录失败原子计数 + 渐进延时 + 锁定 + 管理员人工解锁（`POST /api/users/:id/unlock`，写审计）均已具备。
+- **短信通知降级（FR-NTF-005）**：新增 `SmsProvider` 接口（`Noop` / `Console`）+ `makeSmsProvider`（按 `sms.enabled` / `sms.console` 选择，默认关）。`Mailer.sendAlert` 在邮件基础上，若 `sms.enabled` 且电话非空则补发短信。安全事件走「站内 + 邮件 + 可选短信」双/三通道；密码重置已切到 `sendAlert`。
+- **附件 SM3 指纹去重（FR-IMP-004 附件侧）**：此前 CSV 侧「关键字段判重」已实现，附件指纹侧补齐 —— `AttachmentRepo.listDedupKeys(subjectId)` 一次取该主体未删除/未隔离附件的去重键集合；`AttachmentImportService` 在预检（`buildPlan`）与执行（`runTask`）两阶段均比对 `dedupKeyOf(subjectId, plain)`（SM3 指纹 + 主体前缀），命中则标记跳过，避免每个文件各查一次库。
+- **附件摘要/关键词手动录入（FR-ATT-013 降级）**：`arc_attachments` 新增 `summary` / `keywords`（迁移 `020`），`PUT /api/attachments/:id` + `AttachmentService.updateMeta` + 前端附件面板「摘要」按钮（展示与编辑）。OCR 作为部署侧可选项，隐私显式同意前走人工录入。
+- **缩略图降级（FR-ATT-012 降级）**：`width/height/page_count` 元数据已落库（迁移 001），服务端无图像编解码库，降级为前端按原图 CSS `object-fit: cover` 缩放生成列表缩略图（图片附件预拉取 Blob 固定 48×48 缩放）。
+- **图形验证码降级（FR-AUTH-011 降级）**：无图形库，降级为「同 IP 限流（`rateLimitMiddleware` 300/分钟）+ 登录递增延时 + 失败次数阈值锁定」，与 FR-AUTH-010 合并交付。
+- **导出格式（FR-EXP-005）**：已支持 JSON 包（manifest + HMAC-SM3 签名，FR-EXP-008 回导验签闭环）+ CSV 报告，形态已统一为可携带闭环。
+- **并发 accept 压测就绪（`scripts/ci/verify-family.py` 三-B）**：单条使用邀请（maxUses=1）下 10 个不同账号并发兑换，断言恰好 1 人成功（200）、其余 9 人一律 404，并校验组内仅 +1 新成员 —— 验证 `consumeOnce` 的「单条 UPDATE + WHERE 行锁」原子语义。
 
 ### 新增（P2 第二批）
 

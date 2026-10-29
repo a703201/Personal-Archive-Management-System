@@ -34,6 +34,7 @@ import std.collection.*
 import ams.app.attachment.*
 import ams.app.audit.*
 import ams.core.attachment.*
+import ams.crypto.provider.*
 import ams.data.repo.*
 import ams.kernel.error.*
 import ams.kernel.time.*
@@ -163,6 +164,10 @@ public class AttachmentImportService {
     private let storage: StorageBackend
     private let attachments: AttachmentService
     private let recorder: ?AuditRecorder
+    /** SM3 指纹去重所需（FR-IMP-004 附件侧）；为空则跳过去重比对 */
+    private let crypto: ?CryptoProvider
+    /** 取主体已有去重键集合（FR-IMP-004）；与 crypto 配套 */
+    private let attachmentRepo: AttachmentRepo
 
     /** 分批回写进度 */
     private static let BATCH: Int64 = 20
@@ -189,7 +194,9 @@ public class AttachmentImportService {
         notifyRepo: NotifyRepo,
         storage: StorageBackend,
         attachments: AttachmentService,
-        recorder!: ?AuditRecorder = None
+        recorder!: ?AuditRecorder = None,
+        crypto!: ?CryptoProvider = None,
+        attachmentRepo!: AttachmentRepo
     ) {
         this.itemRepo = itemRepo
         this.userRepo = userRepo
@@ -198,6 +205,8 @@ public class AttachmentImportService {
         this.storage = storage
         this.attachments = attachments
         this.recorder = recorder
+        this.crypto = crypto
+        this.attachmentRepo = attachmentRepo
     }
 
     // ---------------------------------------------------------
@@ -406,6 +415,8 @@ public class AttachmentImportService {
             if (!this.taskRepo.claim(taskId, plan.rows.size)) {
                 return
             }
+            // FR-IMP-004：执行阶段同样按 SM3 指纹跳过主体内已存在的完全相同内容
+            let execDedup = this.existingDedupKeys(subjectId)
             // ---- 先建条目：同一标题只建一次 ----
             let createdItems = HashMap<String, Int64>()
             let createdErr = HashMap<String, String>()
@@ -468,6 +479,17 @@ public class AttachmentImportService {
                 // 取内容（含 CRC 校验）并上传
                 try {
                     let plain = zip.read(entry, FileTypes.maxFileSize)
+                    // FR-IMP-004：主体内已存在完全相同内容 → 跳过，不重复落盘
+                    match (this.dedupKeyOf(subjectId, plain)) {
+                        case Some(k) =>
+                            if (execDedup.contains(k)) {
+                                failed = failed + 1
+                                errSb.append("${row.index},\"${AttachmentImportService.csvCell(row.zipPath)}\"," +
+                                             "${target},skipped,\"与已有附件内容重复（SM3 指纹一致），已跳过\"\n")
+                                continue
+                            }
+                        case None => ()
+                    }
                     let res = this.attachments.upload(
                         subjectId, Some<Int64>(target),
                         AttachmentImportService.DEFAULT_ATT_CATEGORY,
@@ -547,6 +569,9 @@ public class AttachmentImportService {
         let titleIndex = index[0]
         let allIds = index[1]
         let indexTruncated = index[2] == 1
+        // FR-IMP-004（附件侧）：一次性取该主体已有去重键集合，预检时按内存比对，
+        // 避免「每个文件各查一次库」。crypto 为空时退化为不去重（仍按标题匹配）。
+        let existingDedup = this.existingDedupKeys(subjectId)
         // ---- 第一遍：筛出候选文件并归组 ----
         let pending = ArrayList<ZipEntry>()
         let pendingTitle = ArrayList<String>()
@@ -589,7 +614,15 @@ public class AttachmentImportService {
                 // 预检阶段真解一遍：CRC 不符 / 数据损坏在这里就暴露，
                 // 而不是等用户确认完才在报告里出现。
                 try {
-                    zip.read(entry, FileTypes.maxFileSize)
+                    let plain = zip.read(entry, FileTypes.maxFileSize)
+                    // FR-IMP-004：同主体已有完全相同内容 → 标记跳过（不重复落盘）
+                    match (this.dedupKeyOf(subjectId, plain)) {
+                        case Some(k) =>
+                            if (existingDedup.contains(k)) {
+                                skip = "与已有附件内容重复（SM3 指纹一致），已标记为跳过"
+                            }
+                        case None => ()
+                    }
                 } catch (e: Exception) {
                     skip = "内容校验未通过：${AttachmentImportService.oneLine(e.message)}"
                 }
@@ -724,6 +757,33 @@ public class AttachmentImportService {
             }
         }
         return (index, allIds, if (n >= TITLE_INDEX_LIMIT) { 1 } else { 0 })
+    }
+
+    /**
+     * FR-IMP-004：一次性取该主体已有去重键集合（内存比对用）。
+     * crypto 为空（无签名能力）时返回空集 —— 此时无法计算文件指纹，自然不去重。
+     */
+    private func existingDedupKeys(subjectId: Int64): HashSet<String> {
+        match (this.crypto) {
+            case Some(_) => return this.attachmentRepo.listDedupKeys(subjectId)
+            case None => return HashSet<String>()
+        }
+    }
+
+    /**
+     * FR-IMP-004：算明文的 SM3 指纹并拼出去重键（"subjectId:hex"），与上传侧同口径。
+     * 无 crypto 或计算失败返回 None（不阻断导入）。
+     */
+    private func dedupKeyOf(subjectId: Int64, plain: Array<Byte>): Option<String> {
+        match (this.crypto) {
+            case Some(c) =>
+                let cipher = AttachmentCipher(c)
+                match (cipher.fingerprint(plain)) {
+                    case CryptoResult.Ok(fp) => return Some(cipher.dedupKey("${subjectId}", fp))
+                    case CryptoResult.Err(_) => return None
+                }
+            case None => return None
+        }
     }
 
     // ---------------------------------------------------------
