@@ -134,3 +134,10 @@ tools/cangjie.old.*/
 dist/
 .tmpcap/
 dist/
+
+# ---- 运行期数据目录（启动自动生成，不入仓）----
+.tmp/
+data-attachments/
+data-backups/
+data-exports/
+data-quarantine/
