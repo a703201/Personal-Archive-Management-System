@@ -28,14 +28,49 @@ import ams.kernel.error.*
 import ams.kernel.id.*
 import ams.security.authz.*
 import ams.kernel.time.*
+import ams.kernel.util.*
 
 /**
- * 请求体最大读取字节数。
+ * 请求体默认最大读取字节数。
  *
- * 登录 / 注册等接口的请求体都在 KB 级，1 MiB 足够；
- * 大文件走附件上传接口（分片），不走 JSON 接口。
+ * 登录 / 注册等接口的请求体都在 KB 级，1 MiB 足够。
  */
 public const MAX_BODY_BYTES: Int64 = 1048576
+
+/**
+ * 大请求体上限（附件上传 / ZIP 批量导入）。
+ *
+ * 附件域对外承诺单文件 50 MB（FileTypes.maxFileSize），ZIP 批量导入
+ * 还要在一包里装多份附件，故这两个入口单独放宽到 64 MiB。
+ *
+ * 为什么按路径分档而不是全局放到 64 MiB：
+ *   请求体在**鉴权中间件之前**被读入内存，放宽全局上限等于让任何
+ *   未认证请求都能逼服务器分配 64 MiB。只对确实需要大体积的两个
+ *   入口放宽，其余接口维持 1 MiB，把放大倍数控制在必要范围内。
+ *   残余风险（大体积请求仍需在读体后才鉴权）已在 docs/12 记录。
+ */
+public const MAX_LARGE_BODY_BYTES: Int64 = 67108864
+
+/** 单次读取的块大小（64 KiB） */
+private const BODY_CHUNK_BYTES: Int64 = 65536
+
+/**
+ * 按请求路径选请求体上限。
+ *
+ * 前缀匹配而非精确匹配：/api/attachments/12/versions 之类的子路径
+ * 同样需要放宽。
+ */
+public func bodyCapFor(url: String): Int64 {
+    let path = ApiRequest.pathOf(url)
+    // 大体积入口：附件上传 / ZIP 批量导入 / 导出包回导（FR-EXP-008）。
+    // 回导包内含整份条目数据，50000 行可达数 MB，1 MiB 会直接 413。
+    if (path.startsWith("/api/attachments") ||
+        path.startsWith("/api/import/attachments") ||
+        path.startsWith("/api/import/bundle")) {
+        return MAX_LARGE_BODY_BYTES
+    }
+    return MAX_BODY_BYTES
+}
 
 /**
  * 请求上下文（AMS 内部统一抽象）。
@@ -50,6 +85,14 @@ public class ApiRequest {
     public let url: String
     /** 请求体（字节） */
     public let bodyBytes: Array<Byte>
+    /**
+     * 请求体是否超过该路径的上限。
+     *
+     * 不在 fromContext 里直接抛异常：它运行在 stdx 的分发闭包内、位于
+     * 所有 try/catch 之外，抛出去会变成连接层错误而不是 413。故只打标记，
+     * 由 ApiServer.dispatch 在路由前统一转成 PAYLOAD_TOO_LARGE 响应。
+     */
+    public var bodyTooLarge: Bool = false
     /** 请求头（键统一小写） */
     public let headers: HashMap<String, String>
     /** 客户端 IP */
@@ -96,25 +139,83 @@ public class ApiRequest {
                 break
             }
         }
-        // req.body 是 InputStream（非 Option）；读空表示无请求体。
-        // 一次读满缓冲区，够用（登录/注册等接口的请求体都很小）。
-        let buf = Array<Byte>(MAX_BODY_BYTES, repeat: 0u8)
-        var body = Array<Byte>()
+        // 请求体：**循环读到 EOF**。
+        //
+        // 旧实现只 read() 一次、缓冲区 1 MiB，超过 1 MiB 的部分既不报错
+        // 也不返回，直接被丢掉 —— 附件上传声称支持 50 MB，实际 1 MiB 以上
+        // 全部被静默截断（存进去的是半个文件，魔数校验还能通过）。
+        // 这是「看起来能用、数据却是坏的」里最恶劣的一类，故改为循环读，
+        // 并把上限按路径分档（见 bodyCapFor）。
+        let cap = bodyCapFor(req.url.toString())
+        var tooLarge = false
+        let chunks = ArrayList<Array<Byte>>()
+        var total: Int64 = 0
         try {
-            let n = req.body.read(buf)
-            if (n > 0) {
-                body = buf[0..n]
+            let chunk = Array<Byte>(BODY_CHUNK_BYTES, repeat: 0u8)
+            while (true) {
+                let n = req.body.read(chunk)
+                if (n <= 0) {
+                    break
+                }
+                if (total + n > cap) {
+                    tooLarge = true
+                    break
+                }
+                chunks.add(ApiRequest.copyOf(chunk, n))
+                total = total + n
             }
         } catch (e: Exception) {
-            body = Array<Byte>()
+            tooLarge = false
+            chunks.clear()
+            total = 0
         }
-        return ApiRequest(
+        let body = ApiRequest.concat(chunks, total)
+        let out = ApiRequest(
             req.method,
             req.url.toString(),
             body,
             hs,
             req.remoteAddr.toString()
         )
+        out.bodyTooLarge = tooLarge
+        return out
+    }
+
+    /** 合并分块读取结果（一次性分配，避免逐字节扩容）。 */
+    private static func concat(chunks: ArrayList<Array<Byte>>, total: Int64): Array<Byte> {
+        if (total <= 0) {
+            return Array<Byte>()
+        }
+        let flat = Array<Byte>(total, repeat: 0u8)
+        var at: Int64 = 0
+        for (c in chunks) {
+            for (b in c) {
+                flat[at] = b
+                at = at + 1
+            }
+        }
+        return flat
+    }
+
+    /**
+     * 拷贝复用缓冲区的前 n 个字节。
+     *
+     * 【为什么必须显式拷贝，而不是 `chunk[0..n]`】
+     *   分块读取只分配**一个**缓冲区并反复复用。若 `Array<Byte>[Range]`
+     *   返回的是视图而非拷贝，所有分块都会指向同一段内存 —— 循环读完后
+     *   每一块都是「最后一次读到的那 64 KiB」，拼出来的请求体
+     *   **长度正确、内容全错**。这种错误极难看出来：日志里 size 对得上，
+     *   只有解析 ZIP/图片时才会以「中央目录找不到」「魔数不符」的形式暴露。
+     *   一次显式拷贝就把对切片语义的依赖彻底去掉，代价可以忽略。
+     */
+    private static func copyOf(src: Array<Byte>, n: Int64): Array<Byte> {
+        let part = Array<Byte>(n, repeat: 0u8)
+        var i: Int64 = 0
+        while (i < n) {
+            part[i] = src[i]
+            i = i + 1
+        }
+        return part
     }
 
     /**
@@ -134,7 +235,7 @@ public class ApiRequest {
             case Some(v) =>
                 let lower = v.toAsciiLower()
                 if (lower.startsWith("bearer ")) {
-                    return Some(v[7..].trimStart())
+                    return Some(trimSpace(v[7..]))
                 }
                 return None
             case None => return None
@@ -192,10 +293,62 @@ public class ApiRequest {
         for (pair in query.split("&")) {
             let kv = pair.split("=", 2)
             if (kv.size >= 2 && kv[0] == name) {
-                return Some(kv[1])
+                return Some(ApiRequest.percentDecode(kv[1]))
             }
         }
         return None
+    }
+
+    /**
+     * URL 百分号解码（RFC 3986，UTF-8 安全）。
+     *
+     * 【为什么必须补这一步】
+     *   此前 queryParam 直接返回原始片段：浏览器/前端对中文与空格一律
+     *   百分号编码，于是 `?keyword=清华` 在服务端拿到的是
+     *   `%E6%B8%85%E5%8D%8E`，分词器把它当成 ASCII 串切成 e6/b8/85…
+     *   —— 中文关键词检索**永远命中不了**，且排序/过滤里的中文值同样失效。
+     *
+     * 【实现要点】
+     *   在**字节层**解码后一次性 fromUtf8，避免按字节拼接出非法 UTF-8
+     *   （本仓已两次踩到这个坑：盲索引归一化、掩码切分）。
+     *   `+` 不作空格处理：RFC 3986 的查询串里 `+` 是字面量，
+     *   仅 application/x-www-form-urlencoded 的表单提交才需转换。
+     */
+    public static func percentDecode(s: String): String {
+        let src = s.toArray()
+        let out = ArrayList<Byte>()
+        var i: Int64 = 0
+        while (i < src.size) {
+            let b = src[i]
+            if (b == 37 && i + 2 < src.size) {
+                let hi = ApiRequest.hexVal(src[i + 1])
+                let lo = ApiRequest.hexVal(src[i + 2])
+                if (hi >= 0 && lo >= 0) {
+                    out.add(UInt8(hi * 16 + lo))
+                    i = i + 3
+                    continue
+                }
+            }
+            out.add(b)
+            i = i + 1
+        }
+        return String.fromUtf8(out.toArray())
+    }
+
+    /**
+     * 十六进制字符 → 数值（非法返回 -1）。
+     */
+    private static func hexVal(b: Byte): Int64 {
+        if (b >= 48 && b <= 57) {
+            return Int64(b - 48)
+        }
+        if (b >= 97 && b <= 102) {
+            return Int64(b - 87)
+        }
+        if (b >= 65 && b <= 70) {
+            return Int64(b - 55)
+        }
+        return -1
     }
 }
 

@@ -190,8 +190,18 @@ public class KeyManager {
      */
     public func wrap(keyVersion: KeyVersion, plainKey: Array<Byte>): CryptoResult<WrappedKey> {
         let kek = this.kekProvider(keyVersion.keyId)
-        if (kek.size != 16) {
-            return CryptoResult.Err(AppError(AppErrorKind.CryptoFailure, "KEK 长度必须为 16 字节"))
+        // 【为什么从"必须等于 16"放宽为"至少 16"】
+        //   本路径固定走 alg=2（分离派生）：encKey / macKey 都是用
+        //   PBKDF2-HMAC-SM3 从 KEK 派生出来的，KEK 只当"口令"用，
+        //   长度任意，且派生后恒为 16 字节。
+        //   而默认开发用 KEK（AMS_KEK 缺省值）是 35 字符的提示串，
+        //   长度校验卡死后 —— **附件上传与密钥轮换全部报 CRYPTO_FAILURE**，
+        //   即"附件加密"在默认配置下从未真正跑通过。
+        //   保留"至少 16 字节"作为弱密钥下限（等价于 128 bit）。
+        if (kek.size < 16) {
+            return CryptoResult.Err(
+                AppError(AppErrorKind.CryptoFailure, "KEK 长度不足 16 字节（128 bit）")
+            )
         }
 
         let alg = KeyManager.algDerivedSubkeys
@@ -233,7 +243,10 @@ public class KeyManager {
      */
     public func unwrap(wrapped: WrappedKey): CryptoResult<Array<Byte>> {
         let kek = this.kekProvider(wrapped.keyVersion.keyId)
-        if (kek.size != 16) {
+        // 与 wrap 对称：alg=2 时 KEK 只用于派生，长度只需满足下限。
+        // （alg=1 的历史包裹格式会把 KEK 直接当 SM4 密钥用，
+        //   那种情况下 provider 会以明确的 CryptoFailure 拒绝，不在此静默放过。）
+        if (kek.size < 16) {
             return CryptoResult.Err(AppError(AppErrorKind.CryptoFailure, "解包失败"))
         }
 

@@ -26,6 +26,7 @@ package ams.app.scheduler
 
 import std.collection.*
 
+import ams.app.notification.*
 import ams.data.repo.*
 import ams.kernel.log.*
 
@@ -33,17 +34,36 @@ import ams.kernel.log.*
  * 周期任务调度器。
  */
 public class Scheduler {
-    /** 一天（毫秒）—— 到期提醒与回收站清理的执行间隔 */
+    /** 一天（毫秒）—— 到期提醒与回收站清理、审计归档的执行间隔 */
     private static let INTERVAL_DAY: Int64 = 86400000
+    /** 10 分钟 —— 高危告警扫描窗口（高频，配合手动触发幂等） */
+    private static let INTERVAL_ALERT: Int64 = 600000
+    /** 暴力破解判定阈值：同一 IP 登录失败次数 ≥ 此值视为暴力破解 */
+    private static let BRUTE_FORCE_THRESHOLD: Int64 = 5
 
     private let itemRepo: ItemRepo
     private let notifyRepo: NotifyRepo
+    private let auditRepo: AuditRepo
+    private let userRepo: UserRepo
+    private let configRepo: ConfigRepo
+    private let mailer: Mailer
     /** 任务名 → 上次成功执行的时刻（内存记账，重启归零） */
     private let lastRun: HashMap<String, Int64>
 
-    public init(itemRepo: ItemRepo, notifyRepo: NotifyRepo) {
+    public init(
+        itemRepo: ItemRepo,
+        notifyRepo: NotifyRepo,
+        auditRepo: AuditRepo,
+        userRepo: UserRepo,
+        configRepo: ConfigRepo,
+        mailer: Mailer
+    ) {
         this.itemRepo = itemRepo
         this.notifyRepo = notifyRepo
+        this.auditRepo = auditRepo
+        this.userRepo = userRepo
+        this.configRepo = configRepo
+        this.mailer = mailer
         this.lastRun = HashMap<String, Int64>()
     }
 
@@ -72,7 +92,87 @@ public class Scheduler {
         }
         ran = ran + r2
 
+        // FR-AUD-007 高危操作实时告警（高频窗口，可手动即时触发）
+        var r3 = 0
+        if (this.due("audit.alert", Scheduler.INTERVAL_ALERT, now)) {
+            let n = this.auditAlert(now)
+            Log.get().info("task.audit.alert", None, [("alerts", "${n}")])
+            r3 = 1
+        }
+        ran = ran + r3
+
+        // FR-AUD-008 审计留存归档（每日）
+        var r4 = 0
+        if (this.due("audit.retention", Scheduler.INTERVAL_DAY, now)) {
+            let n = this.auditRetention(now)
+            Log.get().info("task.audit.retention", None, [("archived", "${n}")])
+            r4 = 1
+        }
+        ran = ran + r4
+
         return ran
+    }
+
+    // ------------------------------------------------------------
+    // 任务运维接口（FR-NTF-003 / FR-CFG-005）
+    // ------------------------------------------------------------
+
+    /**
+     * 已登记的任务清单（名称、说明、上次执行时刻）。
+     *
+     * @return 每行含 name / description / last_run_ms（未跑过为 0）
+     */
+    public func jobCatalog(): Array<(String, String, Int64)> {
+        let jobs = [
+            ("expiry.reminder", "到期提醒：扫描 30/7/1 天后到期的条目并推送站内通知", this.lastRunOf("expiry.reminder")),
+            ("recycle.purge", "回收站清理：软删除超过留存期的条目", this.lastRunOf("recycle.purge")),
+            ("audit.alert", "高危操作实时告警：扫描暴力破解/批量导出/越权/密钥失败并推送管理员（FR-AUD-007）", this.lastRunOf("audit.alert")),
+            ("audit.retention", "审计留存归档：将超期热表记录复制至冷存 aud_logs_archive（FR-AUD-008）", this.lastRunOf("audit.retention"))
+        ]
+        return jobs
+    }
+
+    /**
+     * 取任务上次执行时刻（毫秒，未执行返回 0）。
+     */
+    public func lastRunOf(name: String): Int64 {
+        match (this.lastRun.get(name)) {
+            case Some(t) => return t
+            case None => return 0
+        }
+    }
+
+    /**
+     * 立即执行指定任务（**跳过时间闸门**）。
+     *
+     * @return 任务产出条数；-1 = 任务名未知
+     */
+    public func runNow(name: String, now: Int64): Int64 {
+        if (name == "expiry.reminder") {
+            let n = this.expiryReminder(now)
+            this.lastRun[name] = now
+            Log.get().info("task.run.now", None, [("job", name), ("pushed", "${n}")])
+            return n
+        }
+        if (name == "recycle.purge") {
+            let n = this.recyclePurge(now)
+            this.lastRun[name] = now
+            Log.get().info("task.run.now", None, [("job", name), ("purged", "${n}")])
+            return n
+        }
+        if (name == "audit.alert") {
+            let n = this.auditAlert(now)
+            this.lastRun[name] = now
+            Log.get().info("task.run.now", None, [("job", name), ("alerts", "${n}")])
+            return n
+        }
+        if (name == "audit.retention") {
+            let n = this.auditRetention(now)
+            this.lastRun[name] = now
+            Log.get().info("task.run.now", None, [("job", name), ("archived", "${n}")])
+            return n
+        }
+        return -1
     }
 
     // ------------------------------------------------------------
@@ -109,6 +209,18 @@ public class Scheduler {
                         Some(now + Scheduler.INTERVAL_DAY * 7)
                     )
                     pushed = pushed + 1
+                    // FR-NTF-004：到期提醒同步发送邮件（若有邮箱）
+                    match (this.userRepo.findById(ownerId)) {
+                        case Some(u) =>
+                            if (!u.email.isEmpty()) {
+                                this.mailer.sendSafe(
+                                    u.email,
+                                    "档案即将到期提醒",
+                                    "《${title}》将于 ${expDate} 到期（还有 ${days} 天），请及时续期或处理。"
+                                )
+                            }
+                        case None => ()
+                    }
                 }
             }
         }
@@ -122,6 +234,80 @@ public class Scheduler {
      */
     public func recyclePurge(now: Int64): Int64 {
         return this.itemRepo.purgeExpired()
+    }
+
+    // ------------------------------------------------------------
+    // FR-AUD-008 审计留存归档
+    // ------------------------------------------------------------
+
+    /**
+     * FR-AUD-008：将超期审计记录复制至冷存 aud_logs_archive。
+     *
+     * 留存天数取自配置 audit.retention_days（默认 180 天，可配置）。
+     * aud_logs 不可篡改，故只「复制归档」不「删除热表」。
+     *
+     * @return 本次归档（复制）的记录数
+     */
+    public func auditRetention(now: Int64): Int64 {
+        let days = this.configRepo.getInt("audit", "retention_days", 180)
+        let effectiveDays = if (days <= 0) { 180 } else { days }
+        let beforeMillis = now - effectiveDays * Scheduler.INTERVAL_DAY
+        return this.auditRepo.archiveExpired(beforeMillis)
+    }
+
+    // ------------------------------------------------------------
+    // FR-AUD-007 高危操作实时告警
+    // ------------------------------------------------------------
+
+    /**
+     * FR-AUD-007：扫描高危操作信号并推送管理员（站内通知 + 邮件）。
+     *
+     * 扫描窗口自上次本任务执行时刻起（首次为近 7 天）。命中后：
+     *   · 给每位管理员推送站内通知（优先级 1）；
+     *   · 若管理员有邮箱，通过 Mailer 入队邮件（FR-NTF-004 异常登录告警等）。
+     *
+     * @return 实际推送的「管理员×风险」条数（0 = 无风险）
+     */
+    public func auditAlert(now: Int64): Int64 {
+        let fromMillis = match (this.lastRun.get("audit.alert")) {
+            case Some(t) => if (t > 0) { t } else { now - 7 * Scheduler.INTERVAL_DAY }
+            case None => now - 7 * Scheduler.INTERVAL_DAY
+        }
+        let risks = this.auditRepo.scanHighRisk(fromMillis)
+        if (risks.isEmpty()) {
+            return 0
+        }
+        let admins = this.userRepo.listAdmins()
+        var sent: Int64 = 0
+        for (risk in risks.all().iterator()) {
+            let rtype = risk.str("risk_type")
+            let ip = risk.str("client_ip")
+            let action = risk.str("action")
+            let cnt = risk.i64("cnt")
+            let title = "高危操作告警：${rtype}"
+            let body = "检测到 ${cnt} 次 ${action}（来源 IP ${ip}，风险类型 ${rtype}）。" +
+                       "请登录审计中心核查。"
+            for (a in admins.all().iterator()) {
+                this.notifyRepo.push(
+                    a.i64("id"),
+                    None,
+                    title,
+                    body,
+                    Some("/admin/audit"),
+                    1,
+                    Some(now + 7 * Scheduler.INTERVAL_DAY)
+                )
+                let email = a.str("email")
+                if (!email.isEmpty()) {
+                    this.mailer.sendSafe(email, title, body)
+                }
+                sent = sent + 1
+            }
+            Log.get().info("audit.alert.risk", None, [
+                ("type", rtype), ("ip", ip), ("action", action), ("cnt", "${cnt}")
+            ])
+        }
+        return sent
     }
 
     // ------------------------------------------------------------

@@ -78,6 +78,17 @@ HAS_DRV=0
 [ -n "$DRV_LIBS" ] && HAS_DRV=1
 
 # 需要 ams-data 时，驱动缺失则自动构建（一次到位，避免手工两步）
+# ⚠️ TARGETS 原在第 111 行才声明，但此处已在 `set -u` 下提前引用，
+#    环境无 TARGETS 变量时会报 "unbound variable"。故在此先完成参数解析。
+CLEAN=0
+TARGETS=()
+for arg in "$@"; do
+    case "$arg" in
+        --clean) CLEAN=1 ;;
+        *) TARGETS+=("$arg") ;;
+    esac
+done
+
 NEEDS_DRV=0
 for t in "${TARGETS[@]:-}"; do
     case "$t" in
@@ -107,15 +118,6 @@ if [ "$NEEDS_DRV" = "1" ] && [ "$HAS_DRV" = "0" ]; then
     fi
 fi
 
-CLEAN=0
-TARGETS=()
-for arg in "$@"; do
-    case "$arg" in
-        --clean) CLEAN=1 ;;
-        *) TARGETS+=("$arg") ;;
-    esac
-done
-
 if [ ! -f "$CJC" ]; then
     echo "[ERROR] 找不到 cjc：$CJC"
     echo "        请先执行：source scripts/envsetup.sh"
@@ -133,13 +135,16 @@ mkdir -p "$BUILD_DIR"
 [ -d "$STDX_DIR" ] && cp "$STDX_DIR"/*.dll "$BUILD_DIR/" 2>/dev/null
 
 # ---- 顶层包顺序（架构 §4.2 分层依赖规则）----
+# ⚠️ 依赖方向：ams.data → ams.core.search（SearchQuery 等），
+#    ams.core 不反向依赖 ams.data。故 ams.core 必须排在 ams.data 之前，
+#    否则增量构建时 ams.data.repo 会用到尚未重编的陈旧 ams.core.search.cjo。
 TOP_ORDER=(
     ams-kernel
     ams-crypto
     ams-storage
+    ams-core
     ams-data
     ams-security
-    ams-core
     ams-app
     ams-api
     ams-server

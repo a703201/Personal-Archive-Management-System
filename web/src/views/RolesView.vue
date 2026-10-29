@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 角色与权限管理（FR-CFG-002 / FR-ACL-002）。
+ * 角色与权限管理（FR-CFG-002 / FR-ACL-002 / FR-ACL-013）。
  *
  * 接口（权限 acl:manage）：
  *   GET    /api/roles                  角色列表
@@ -8,13 +8,19 @@
  *   POST   /api/roles                  新建自定义角色
  *   DELETE /api/roles/:code            删除自定义角色
  *   POST   /api/roles/:code/perms      设置角色权限（整集替换）
+ *   GET    /api/admin/permission-preview?role=<code>[&userId=]  权限预览
  *
  * 说明：后端 assignPerms 为「整集替换」语义，且暂未提供「读角色当前权限」的接口，
  * 因此本页对【自定义角色】采用「整集设置」模式（打开即空选，保存即覆盖），
  * 对【内置角色】仅展示权限目录（只读），避免误清空 org_admin 等系统角色权限。
+ *
+ * 权限预览（FR-ACL-013 · 方案 A）刻意只给**统计口径**：可见条目数、分类分布、
+ * 字段可见上限。不返回任何条目内容 —— 预览是「验证配置」的工具，
+ * 不是「以他人身份浏览数据」的后门。
  */
 import { ref, onMounted, computed } from 'vue'
 import { api } from '../api/client'
+import { categoryName } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
 import AppSheet from '../components/AppSheet.vue'
 
@@ -63,6 +69,30 @@ const savingPerms = ref(false)
 const showDelete = ref(false)
 const deleteTarget = ref<Role | null>(null)
 const deleting = ref(false)
+
+/** 权限预览（FR-ACL-013 · 方案 A） */
+interface PreviewData {
+  role: { code: string; name: string; maxDataLevel: number }
+  scope: string
+  userCount: number
+  subjectCount: number
+  visibleItemCount: number
+  perms: string[]
+  categories: Array<{ category: number; count: number }>
+  fields: {
+    maxDataLevel: number
+    visibleLevels: number[]
+    maskedLevels: number[]
+    policy: string
+  }
+  note: string
+}
+const showPreview = ref(false)
+const previewTarget = ref<Role | null>(null)
+const previewData = ref<PreviewData | null>(null)
+const previewLoading = ref(false)
+const previewError = ref('')
+const previewUserId = ref('')
 
 function isBuiltin(r: Role | null | undefined): boolean {
   if (!r) return false
@@ -154,8 +184,7 @@ function togglePerm(code: string): void {
 function askDelete(r: Role): void {
   deleteTarget.value = r
   showDelete.value = true
-}
-async function confirmDelete(): Promise<void> {
+}async function confirmDelete(): Promise<void> {
   if (!deleteTarget.value) return
   deleting.value = true
   try {
@@ -169,6 +198,47 @@ async function confirmDelete(): Promise<void> {
     deleting.value = false
   }
 }
+
+// ---- 权限预览（FR-ACL-013） ----
+
+function openPreview(r: Role): void {
+  previewTarget.value = r
+  previewUserId.value = ''
+  previewData.value = null
+  previewError.value = ''
+  showPreview.value = true
+  loadPreview()
+}
+
+async function loadPreview(): Promise<void> {
+  if (!previewTarget.value) return
+  previewLoading.value = true
+  previewError.value = ''
+  try {
+    const q = new URLSearchParams({ role: previewTarget.value.code })
+    const uid = previewUserId.value.trim()
+    if (uid) q.set('userId', uid)
+    previewData.value = await api<PreviewData>(`/admin/permission-preview?${q.toString()}`)
+  } catch (e) {
+    previewError.value = (e as Error).message
+    previewData.value = null
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+/** 主体范围的可读说明 */
+function scopeText(d: PreviewData): string {
+  if (d.scope === 'any') return '全机构主体'
+  if (d.scope.startsWith('user:')) return `指定用户（ID ${d.scope.slice(5)}）的可访问主体`
+  return '仅本人范围（该角色不含 archive:*:any，故不猜测他人主体）'
+}
+
+/** 分类分布按数量倒序，只取前 6 个展示 */
+const previewCategories = computed(() => {
+  const list = previewData.value?.categories ?? []
+  return [...list].sort((a, b) => b.count - a.count).slice(0, 6)
+})
 
 onMounted(load)
 </script>
@@ -198,6 +268,7 @@ onMounted(load)
         <div class="role-meta">数据级别上限：{{ r.max_data_level }}</div>
         <div class="role-actions">
           <button class="btn-text" type="button" @click="openPerms(r)">权限</button>
+          <button class="btn-text" type="button" @click="openPreview(r)">预览</button>
           <button
             v-if="!isBuiltin(r)"
             class="btn-text danger"
@@ -289,6 +360,93 @@ onMounted(load)
         >
           {{ savingPerms ? '保存中…' : '保存' }}
         </button>
+      </template>
+    </AppSheet>
+
+    <!-- 权限预览（FR-ACL-013 · 方案 A） -->
+    <AppSheet
+      v-model="showPreview"
+      :title="`权限预览 · ${previewTarget?.name ?? ''}`"
+      size="md"
+    >
+      <div class="notice">
+        预览只统计「能看见多少」，<b>不展示任何条目内容</b>。可见性口径与档案列表页一致：
+        可访问主体内 + 敏感度 ≤ 该角色的数据级别上限。
+      </div>
+
+      <div class="preview-user">
+        <label class="field">
+          <span class="field__label">按某用户的真实主体计算（选填用户 ID）</span>
+          <input
+            v-model="previewUserId"
+            class="field-control"
+            type="text"
+            inputmode="numeric"
+            placeholder="留空则按角色声明的范围统计"
+          />
+        </label>
+        <button class="btn-ghost" type="button" :disabled="previewLoading" @click="loadPreview">
+          重新计算
+        </button>
+      </div>
+
+      <p v-if="previewLoading" class="hint">计算中…</p>
+      <p v-else-if="previewError" class="hint hint--error">{{ previewError }}</p>
+
+      <div v-else-if="previewData" class="preview">
+        <div class="preview-stats">
+          <div class="stat">
+            <span class="stat__num">{{ previewData.visibleItemCount }}</span>
+            <span class="stat__label">可见条目</span>
+          </div>
+          <div class="stat">
+            <span class="stat__num">{{ previewData.subjectCount }}</span>
+            <span class="stat__label">覆盖主体</span>
+          </div>
+          <div class="stat">
+            <span class="stat__num">{{ previewData.userCount }}</span>
+            <span class="stat__label">拥有该角色的用户</span>
+          </div>
+        </div>
+
+        <dl class="kv">
+          <dt>主体范围</dt>
+          <dd>{{ scopeText(previewData) }}</dd>
+          <dt>数据级别上限</dt>
+          <dd>{{ previewData.fields.maxDataLevel }}</dd>
+          <dt>可见敏感度</dt>
+          <dd>{{ previewData.fields.visibleLevels.join(' / ') || '—' }}</dd>
+          <dt>掩码敏感度</dt>
+          <dd>
+            {{ previewData.fields.maskedLevels.join(' / ') || '无（该角色可见全部级别）' }}
+          </dd>
+          <dt>权限点数</dt>
+          <dd>{{ previewData.perms.length }} 项</dd>
+        </dl>
+
+        <h3 class="form__section">可见条目按分类分布</h3>
+        <p v-if="previewCategories.length === 0" class="hint">该范围内没有可见条目。</p>
+        <ul v-else class="cat-list">
+          <li v-for="c in previewCategories" :key="c.category" class="cat-row">
+            <span class="cat-row__name">{{ categoryName(c.category) }}</span>
+            <span class="cat-row__bar">
+              <span
+                class="cat-row__fill"
+                :style="{
+                  width: `${Math.round((c.count / Math.max(1, previewData.visibleItemCount)) * 100)}%`,
+                }"
+              />
+            </span>
+            <span class="cat-row__num">{{ c.count }}</span>
+          </li>
+        </ul>
+
+        <p class="preview-policy">{{ previewData.fields.policy }}</p>
+        <p class="preview-note">{{ previewData.note }}</p>
+      </div>
+
+      <template #footer>
+        <button class="btn-ghost" type="button" @click="showPreview = false">关闭</button>
       </template>
     </AppSheet>
 
@@ -487,10 +645,106 @@ onMounted(load)
   align-self: center;
 }
 
+/* ---- 权限预览（FR-ACL-013） ---- */
+.preview-user {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+.preview-user .field {
+  flex: 1;
+}
+.preview-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-3);
+  background: var(--bg-hover);
+  border-radius: var(--g3-md);
+}
+.stat__num {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.stat__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.cat-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--sp-3);
+  display: grid;
+  gap: var(--sp-2);
+}
+.cat-row {
+  display: grid;
+  grid-template-columns: 96px 1fr 40px;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--font-size-sm);
+}
+.cat-row__name {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cat-row__bar {
+  height: 6px;
+  background: var(--bg-hover);
+  border-radius: var(--g3-pill);
+  overflow: hidden;
+}
+.cat-row__fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--g3-pill);
+}
+.cat-row__num {
+  text-align: right;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-policy,
+.preview-note {
+  margin: 0 0 var(--sp-2);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.preview-note {
+  color: var(--text-muted);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border-subtle);
+}
+
 @media (max-width: 639px) {
   .form-grid,
   .perm-list {
     grid-template-columns: 1fr;
+  }
+  .preview-stats {
+    grid-template-columns: 1fr;
+  }
+  .preview-user {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cat-row {
+    grid-template-columns: 76px 1fr 32px;
   }
 }
 </style>

@@ -7,6 +7,7 @@
  */
 import { ref, onMounted, computed } from 'vue'
 import { api } from '../api/client'
+import { categoryName, formatTime } from '../composables/useCatalog'
 
 interface CategoryStat {
   category: number
@@ -27,21 +28,6 @@ interface Overview {
   unreadNotifications: number
 }
 
-/** 与后端 ArchiveCategory 一致的中文名（1–11） */
-const CATEGORY_NAMES: Record<number, string> = {
-  1: '基本信息',
-  2: '身份证明',
-  3: '教育经历',
-  4: '工作经历',
-  5: '资格证书',
-  6: '联系方式',
-  7: '家庭关系',
-  8: '健康信息',
-  9: '资产信息',
-  10: '影像附件',
-  11: '自定义',
-}
-
 const data = ref<Overview | null>(null)
 const loading = ref(true)
 const error = ref('')
@@ -55,16 +41,11 @@ const topCategories = computed<CategoryStat[]>(() => {
     .slice(0, 8)
 })
 
-function categoryName(code: number): string {
-  return CATEGORY_NAMES[code] ?? `分类 ${code}`
-}
+/** 分类中文名与时间格式化统一取自 `composables/useCatalog`
+ *  —— 此前本页自带一份映射，已与 docs/06 §12.3 漂移
+ *  （「基本信息」应为「个人基本信息」、「身份证明」应为「证件信息」、
+ *   「工作经历」应为「职业经历」、「资格证书」应为「资质证书」）。 */
 
-function formatTime(ms: number): string {
-  if (!ms) return '—'
-  const d = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
 
 async function load(): Promise<void> {
   loading.value = true

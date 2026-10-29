@@ -357,3 +357,74 @@ class AuditTest {
         return out.toArray()
     }
 }
+
+/**
+ * 动作码 / 结果码的反查必须与正向编码严格互逆。
+ *
+ * 背景（真实故障）：链校验重算哈希时走 `fromCode(落库 action).code()`。
+ * 若某动作的 fromCode 与 code() 用词不一致（曾出现 4 个：
+ * acl.share_create / acl.share_access / crypto.key_rotate /
+ * archive.batch_operation），反查会退化为 Unknown("unknown")，
+ * 规范化串随之改变 —— 该条记录被判「被篡改」，
+ * 使 FR-AUD-003 对**应用自己写入的正常记录**大面积误报。
+ *
+ * 同理 AuditResult 的 2=Denied、ActorType 的 3=Service 若在反解时漏判，
+ * 也会退回 0 造成同类误报（实测 result=2 的 20 条记录全部误报）。
+ */
+@Test
+public class AuditCodeRoundTripTest {
+    @TestCase
+    public func testFromCodeIsInverseOfCode() {
+        let actions = [
+            AuditAction.Login, AuditAction.LoginFailed, AuditAction.Logout,
+            AuditAction.LogoutAll, AuditAction.PasswordChange, AuditAction.PasswordReset,
+            AuditAction.RoleAssign, AuditAction.RoleRevoke,
+            AuditAction.GrantCreate, AuditAction.GrantRevoke,
+            AuditAction.ShareCreate, AuditAction.ShareAccess,
+            AuditAction.DataExport, AuditAction.ItemDelete, AuditAction.ItemRestore,
+            AuditAction.KeyRotate, AuditAction.PermChange,
+            AuditAction.ConfigChange, AuditAction.BatchOperation,
+            AuditAction.FieldReveal
+        ]
+        for (a in actions) {
+            let back = AuditAction.fromCode(a.code())
+            // 反查不得退化为 Unknown（Unknown.code() == "unknown"）
+            @Assert(back.code(), a.code())
+        }
+    }
+
+    @TestCase
+    public func testLegacyActionCodesStillResolve() {
+        // 历史数据里的旧码必须仍能反查到同一动作（不能只认新码）
+        @Assert(AuditAction.fromCode("share.create").code(), "acl.share_create")
+        @Assert(AuditAction.fromCode("share.access").code(), "acl.share_access")
+        @Assert(AuditAction.fromCode("kms.key_rotate").code(), "crypto.key_rotate")
+        @Assert(AuditAction.fromCode("archive.batch").code(), "archive.batch_operation")
+        // 新码同样要认
+        @Assert(AuditAction.fromCode("acl.share_create").code(), "acl.share_create")
+        @Assert(AuditAction.fromCode("archive.batch_operation").code(), "archive.batch_operation")
+    }
+
+    @TestCase
+    public func testUnknownActionCodeDegradesToUnknown() {
+        @Assert(AuditAction.fromCode("no.such_action").code(), "unknown")
+        // 空串也不得抛异常
+        @Assert(AuditAction.fromCode("").code(), "unknown")
+    }
+
+    @TestCase
+    public func testResultCodesAreDistinct() {
+        // 0/1/2 三值互不相同，且 Denied 不得与 Success 撞码
+        @Assert(AuditResult.Success.toCode(), 0)
+        @Assert(AuditResult.Failure.toCode(), 1)
+        @Assert(AuditResult.Denied.toCode(), 2)
+    }
+
+    @TestCase
+    public func testActorTypeCodesAreDistinct() {
+        @Assert(ActorType.User.toCode(), 0)
+        @Assert(ActorType.System.toCode(), 1)
+        @Assert(ActorType.Anonymous.toCode(), 2)
+        @Assert(ActorType.Service.toCode(), 3)
+    }
+}

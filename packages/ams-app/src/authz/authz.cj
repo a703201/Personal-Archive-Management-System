@@ -20,6 +20,7 @@ import std.collection.*
 
 import ams.data.repo.*
 import ams.security.authz.*
+import ams.kernel.util.*
 
 /**
  * 授权服务。
@@ -74,7 +75,7 @@ public class AuthzService {
         let raw = r.str("perm_codes")
         if (!raw.isEmpty()) {
             for (p in raw.split(",")) {
-                let t = p.trimStart().trimEnd()
+                let t = trimSpace(p)
                 if (!t.isEmpty()) {
                     perms.add(t)
                 }

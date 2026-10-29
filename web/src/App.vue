@@ -14,11 +14,24 @@ import { ref, computed, onMounted } from 'vue'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import GlobalSearch from './components/GlobalSearch.vue'
 import ToastHost from './components/ToastHost.vue'
+import Onboarding from './components/Onboarding.vue'
 import { useTheme } from './composables/useTheme'
 import { api, getToken } from './api/client'
+import { locale, setLocale, supported } from './i18n'
 
 const route = useRoute()
 const { resolved, mode, setMode, toggle } = useTheme()
+
+/** 顶栏通知铃铛的未读数量（个人名下，权限 notify:read:own） */
+const unread = ref(0)
+async function loadUnread(): Promise<void> {
+  try {
+    const r = await api<{ count: number }>('/notifications/unread')
+    unread.value = Number(r.count ?? 0)
+  } catch {
+    unread.value = 0
+  }
+}
 
 /**
  * 管理类导航按真实权限逐模块显隐（后端仍是权威校验，前端仅决定入口）。
@@ -27,39 +40,55 @@ const { resolved, mode, setMode, toggle } = useTheme()
 const canUsers = ref(false)
 const canRoles = ref(false)
 const canAudit = ref(false)
-const hasAdmin = computed(() => canUsers.value || canRoles.value || canAudit.value)
+const canSystem = ref(false)
+const hasAdmin = computed(
+  () => canUsers.value || canRoles.value || canAudit.value || canSystem.value,
+)
 
 onMounted(async () => {
   if (!getToken()) return
   try {
     const me = await api<{ perms: string[] }>('/me')
     const p = me.perms ?? []
+    loadUnread()
     canUsers.value = p.includes('user:read:any') || p.includes('user:manage')
     canRoles.value = p.includes('acl:manage')
     canAudit.value = p.includes('audit:read')
+    canSystem.value = p.includes('system:admin')
   } catch {
     canUsers.value = false
     canRoles.value = false
     canAudit.value = false
+    canSystem.value = false
   }
 })
 </script>
 
 <template>
   <div v-if="!route.meta.public" class="app-shell">
+    <a class="skip-link" href="#main-content">跳到主内容</a>
     <!-- 侧栏：desktop 及以上显示 -->
     <aside class="sidebar">
       <div class="brand">AMS</div>
-      <nav class="nav">
-        <p class="nav__group">个人</p>
-        <RouterLink class="nav__item" to="/archive">档案</RouterLink>
-        <RouterLink class="nav__item" to="/overview">概览</RouterLink>
-        <RouterLink class="nav__item" to="/profile">个人主页</RouterLink>
+        <nav class="nav">
+          <p class="nav__group">个人</p>
+          <RouterLink class="nav__item" to="/archive">档案</RouterLink>
+          <RouterLink class="nav__item" to="/overview">概览</RouterLink>
+          <RouterLink class="nav__item" to="/notifications">
+            通知
+            <span v-if="unread > 0" class="nav__badge">{{ unread > 99 ? '99+' : unread }}</span>
+          </RouterLink>
+          <RouterLink class="nav__item" to="/import">批量导入</RouterLink>
+          <RouterLink class="nav__item" to="/templates">条目模板</RouterLink>
+          <RouterLink class="nav__item" to="/family">家庭协作</RouterLink>
+          <RouterLink class="nav__item" to="/tags">标签管理</RouterLink>
+          <RouterLink class="nav__item" to="/profile">个人主页</RouterLink>
         <template v-if="hasAdmin">
           <p class="nav__group">管理</p>
           <RouterLink v-if="canUsers" class="nav__item" to="/users">用户管理</RouterLink>
           <RouterLink v-if="canRoles" class="nav__item" to="/roles">角色与权限</RouterLink>
           <RouterLink v-if="canAudit" class="nav__item" to="/audit">审计日志</RouterLink>
+          <RouterLink v-if="canSystem" class="nav__item" to="/system">系统运维</RouterLink>
         </template>
       </nav>
     </aside>
@@ -70,13 +99,29 @@ onMounted(async () => {
         <nav class="nav nav--inline">
           <RouterLink class="nav__item" to="/archive">档案</RouterLink>
           <RouterLink class="nav__item" to="/overview">概览</RouterLink>
+          <RouterLink class="nav__item" to="/notifications">
+            通知
+            <span v-if="unread > 0" class="nav__badge">{{ unread > 99 ? '99+' : unread }}</span>
+          </RouterLink>
+          <RouterLink class="nav__item" to="/import">导入</RouterLink>
+          <RouterLink class="nav__item" to="/templates">模板</RouterLink>
+          <RouterLink class="nav__item" to="/family">家庭</RouterLink>
           <RouterLink class="nav__item" to="/profile">个人主页</RouterLink>
           <RouterLink v-if="canUsers" class="nav__item" to="/users">用户</RouterLink>
           <RouterLink v-if="canRoles" class="nav__item" to="/roles">角色</RouterLink>
           <RouterLink v-if="canAudit" class="nav__item" to="/audit">审计</RouterLink>
+          <RouterLink v-if="canSystem" class="nav__item" to="/system">系统</RouterLink>
         </nav>
 
         <div class="topbar__right">
+          <RouterLink
+            to="/notifications"
+            class="bell"
+            :aria-label="`通知（${unread} 条未读）`"
+          >
+            <span class="bell__icon" aria-hidden="true">🔔</span>
+            <span v-if="unread > 0" class="bell__badge">{{ unread > 99 ? '99+' : unread }}</span>
+          </RouterLink>
           <GlobalSearch />
           <button
             class="theme-btn"
@@ -96,10 +141,18 @@ onMounted(async () => {
             <option value="dark">深色</option>
             <option value="system">跟随系统</option>
           </select>
+          <select
+            class="theme-select"
+            :value="locale"
+            aria-label="语言"
+            @change="setLocale(($event.target as HTMLSelectElement).value as 'zh-CN' | 'en')"
+          >
+            <option v-for="l in supported" :key="l" :value="l">{{ l === 'zh-CN' ? '中文' : 'English' }}</option>
+          </select>
         </div>
       </header>
 
-      <main class="app-main">
+      <main id="main-content" tabindex="-1" class="app-main">
         <RouterView />
       </main>
     </div>
@@ -108,6 +161,7 @@ onMounted(async () => {
     <RouterView />
   </div>
   <ToastHost />
+  <Onboarding />
 </template>
 
 <style scoped>
@@ -185,6 +239,63 @@ onMounted(async () => {
 }
 .nav__item:hover {
   background: var(--bg-hover);
+}
+
+/* 导航未读徽标 */
+.nav__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: var(--sp-1);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: var(--danger);
+  border-radius: var(--g3-pill);
+}
+
+/* 顶栏通知铃铛 */
+.bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.bell:hover {
+  background: var(--bg-hover);
+}
+.bell__icon {
+  font-size: 16px;
+  line-height: 1;
+}
+.bell__badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: #fff;
+  background: var(--danger);
+  border: 2px solid var(--bg-surface);
+  border-radius: var(--g3-pill);
 }
 .nav__item.router-link-active {
   background: var(--bg-selected);

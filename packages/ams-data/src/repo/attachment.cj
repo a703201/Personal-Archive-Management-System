@@ -379,6 +379,202 @@ public class AttachmentRepo {
         }
     }
 
+    /**
+     * 统计若干主体下的附件总字节数（FR-ATT-011 存储配额用）。
+     *
+     * @return 总字节；无附件或主体为空时返回 0
+     */
+    public func totalBytesInSubjects(subjectIds: Array<String>): Int64 {
+        if (subjectIds.isEmpty()) {
+            return 0
+        }
+        let c = this.db.connect()
+        try {
+            let sb = StringBuilder()
+            sb.append(
+                "SELECT COALESCE(SUM(file_size), 0) AS total FROM arc_attachments " +
+                "WHERE deleted_at IS NULL AND subject_id IN ("
+            )
+            for (i in 0..subjectIds.size) {
+                if (i > 0) { sb.append(", ") }
+                sb.append("?")
+            }
+            sb.append(")")
+            let st = c.prepareStatement(sb.toString())
+            for (i in 0..subjectIds.size) {
+                st.set(i, subjectIds[i])
+            }
+            match (readRows(st.query()).first()) {
+                case Some(r) => return r.i64("total")
+                case None => return 0
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    // ------------------------------------------------------------
+    // FR-ATT-009 版本对比 / FR-ATT-010 批量操作
+    // ------------------------------------------------------------
+
+    /**
+     * 取「当前版本」的存储键。
+     *
+     * 附件主记录的 storage_key 记的是**首版**对象；切换版本后必须按
+     * current_version_id 反查真实对象，否则「切换版本」只是改了个标记，
+     * 下载拿到的还是第一版内容（FR-ATT-004 的实际缺口）。
+     */
+    public func currentVersionStorageKey(attachmentId: Int64): Option<String> {
+        let sql = "SELECT storage_key FROM arc_attachment_versions " +
+                  "WHERE attachment_id = ? AND is_current = TRUE " +
+                  "ORDER BY version_no DESC LIMIT 1"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, attachmentId)
+            match (readRows(st.query()).first()) {
+                case Some(r) => return Some(r.str("storage_key"))
+                case None => return None
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 取单个版本明细（版本对比用）。
+     *
+     * @return 版本行；不属于该附件时返回 None
+     */
+    public func findVersion(attachmentId: Int64, versionId: Int64): ?RowData {
+        let sql = "SELECT id, version_no, storage_key, file_size, " +
+                  "COALESCE(file_ext, '') AS file_ext, COALESCE(mime_type, '') AS mime_type, " +
+                  "encode(sm3_fingerprint, 'hex') AS fp_hex, is_current, status, " +
+                  "COALESCE(change_note, '') AS change_note, uploaded_by, " +
+                  "CAST(COALESCE(EXTRACT(EPOCH FROM uploaded_at) * 1000, 0) AS BIGINT) AS uploaded_ms " +
+                  "FROM arc_attachment_versions WHERE attachment_id = ? AND id = ?"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, attachmentId)
+            st.set(1, versionId)
+            match (readRows(st.query()).first()) {
+                case Some(r) => return Some(r)
+                case None => return None
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 给附件打标签（幂等：已存在则不重复写）。
+     *
+     * @return true = 本次真正新增了关联
+     */
+    public func addTag(attachmentId: Int64, tagId: Int64, operatorId: Int64): Bool {
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(
+                "INSERT INTO arc_attachment_tags (id, attachment_id, tag_id, created_by, created_at) " +
+                "SELECT ?, ?, ?, ?, CURRENT_TIMESTAMP " +
+                "WHERE NOT EXISTS (SELECT 1 FROM arc_attachment_tags " +
+                "WHERE attachment_id = ? AND tag_id = ?)"
+            )
+            st.set(0, Ids.next())
+            st.set(1, attachmentId)
+            st.set(2, tagId)
+            st.set(3, operatorId)
+            st.set(4, attachmentId)
+            st.set(5, tagId)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 软删除附件（批量删除用）。
+     *
+     * 只改 status 不够：列表查询过滤的是 deleted_at，
+     * 所以必须真正打上删除时间，否则「删了还在列表里」（实测踩到）。
+     */
+    public func softDelete(id: Int64, operatorId: Int64): Bool {
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(
+                "UPDATE arc_attachments SET deleted_at = CURRENT_TIMESTAMP, status = 9, " +
+                "updated_at = CURRENT_TIMESTAMP, updated_by = ? " +
+                "WHERE id = ? AND deleted_at IS NULL"
+            )
+            st.set(0, operatorId)
+            st.set(1, id)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /** 取消附件上的某个标签 */
+    public func removeTag(attachmentId: Int64, tagId: Int64): Bool {        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(
+                "DELETE FROM arc_attachment_tags WHERE attachment_id = ? AND tag_id = ?"
+            )
+            st.set(0, attachmentId)
+            st.set(1, tagId)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /** 附件的标签列表 */
+    public func listTagsOf(attachmentId: Int64): RowSet {
+        let sql = "SELECT t.id AS id, t.name AS name, COALESCE(t.color, '') AS color " +
+                  "FROM arc_tags t JOIN arc_attachment_tags l ON l.tag_id = t.id " +
+                  "WHERE l.attachment_id = ? ORDER BY t.name"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, attachmentId)
+            return readRows(st.query())
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /** 标签是否存在（批量打标签时先校验，避免写出悬挂关联） */
+    public func tagExists(tagId: Int64): Bool {
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement("SELECT CAST(COUNT(1) AS BIGINT) AS n FROM arc_tags WHERE id = ?")
+            st.set(0, tagId)
+            match (readRows(st.query()).first()) {
+                case Some(r) => return r.i64("n") > 0
+                case None => return false
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
     // ------------------------------------------------------------
 
     private static func collect(rows: RowSet): ArrayList<AttachmentRecord> {

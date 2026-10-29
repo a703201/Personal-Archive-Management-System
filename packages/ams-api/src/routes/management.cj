@@ -49,6 +49,7 @@ import ams.kernel.error.*
 import ams.kernel.id.*
 import ams.kernel.log.*
 import ams.security.authn.*
+import ams.kernel.util.*
 
 /**
  * 管理类接口处理器集合。
@@ -125,10 +126,15 @@ public class ManagementRoutes {
         router.get("/api/grants", { req: ApiRequest => this.listGrants(req) }, requiredPerm: "acl:read:own")
 
         // ---- 标签 ----
+        // 注意顺序：/api/tags/stats 与 /api/tags/:id 段数相同（3 段），
+        // 而 Router 是「先注册先匹配」，故静态路径必须在参数化路径之前。
+        router.get("/api/tags/stats", { req: ApiRequest => this.tagStats(req) }, requiredPerm: "tag:read:own")
         router.get("/api/tags", { req: ApiRequest => this.listTags(req) }, requiredPerm: "tag:read:own")
         router.post("/api/tags", { req: ApiRequest => this.createTag(req) }, requiredPerm: "tag:write:own")
+        router.put("/api/tags/:id/parent", { req: ApiRequest => this.moveTag(req) }, requiredPerm: "tag:write:own")
         router.put("/api/tags/:id", { req: ApiRequest => this.updateTag(req) }, requiredPerm: "tag:write:own")
         router.delete("/api/tags/:id", { req: ApiRequest => this.deleteTag(req) }, requiredPerm: "tag:write:own")
+        router.post("/api/tags/:id/merge", { req: ApiRequest => this.mergeTag(req) }, requiredPerm: "tag:write:own")
         router.post("/api/items/:id/tags", { req: ApiRequest => this.attachTag(req) }, requiredPerm: "tag:write:own")
         router.delete("/api/items/:id/tags/:tagId", { req: ApiRequest => this.detachTag(req) }, requiredPerm: "tag:write:own")
 
@@ -333,10 +339,90 @@ public class ManagementRoutes {
 
     // ==================== 标签 ====================
 
+    /**
+     * 标签列表。
+     *
+     * `?tree=1` 时额外给出每个标签的 `depth` 与 `childCount`（FR-TAG-005）：
+     * 前端渲染树只需要这两个数。让前端自己从扁平列表推层级，等于把
+     * 「环 / 深度超限」这类数据问题变成前端的渲染崩溃，判定应当只在服务端做一次。
+     *
+     * 默认仍返回扁平全字段（旧前端与新调用方不受影响）。
+     */
     private func listTags(req: ApiRequest): ApiResponse {
         let ownerId = ManagementRoutes.subjectId(req)
         let rows = this.tagRepo.list(ownerId)
-        return ApiResponse.ok(ManagementRoutes.rowsToJson(rows, "total", "${rows.size()}"), req.requestId)
+        let wantTree = match (req.queryParam("tree")) {
+            case Some(v) => v == "1" || v == "true"
+            case None => false
+        }
+        if (!wantTree) {
+            return ApiResponse.ok(ManagementRoutes.rowsToJson(rows, "total", "${rows.size()}"), req.requestId)
+        }
+        let edges = this.tagRepo.parentEdges(ownerId)
+        let sb = StringBuilder()
+        sb.append("{\"items\":[")
+        var first = true
+        for (r in rows.all().iterator()) {
+            if (!first) {
+                sb.append(",")
+            }
+            first = false
+            let id = r.i64("id")
+            var childCount: Int64 = 0
+            for ((_cid, pid) in edges) {
+                if (pid == id) {
+                    childCount = childCount + 1
+                }
+            }
+            sb.append("{\"id\":\"${id}\",\"name\":\"${ApiResponse.escape(r.str("name"))}\",")
+            sb.append("\"color\":\"${ApiResponse.escape(r.str("color"))}\",")
+            sb.append("\"category\":${r.i64("category")},")
+            sb.append("\"usageCount\":${r.i64("usage_count")},")
+            sb.append("\"parentId\":\"${r.i64("parent_id")}\",")
+            sb.append("\"depth\":${tagDepthOf(edges, id)},\"childCount\":${childCount},")
+            sb.append("\"lastUsedAt\":\"${r.i64("last_used_at_ms")}\"}")
+        }
+        sb.append("],\"total\":${rows.size()},\"maxDepth\":${TAG_MAX_DEPTH}}")
+        return ApiResponse.ok(sb.toString(), req.requestId)
+    }
+
+    /**
+     * 标签使用统计（FR-TAG-004）。
+     *
+     * 返回 `{total, used, unused, totalUsage, lastUsedAt}`：
+     * 「未使用标签」是清理入口的依据（长期 0 次的标签多半是手滑建错），
+     * `lastUsedAt` 让用户判断这个标签还活着没有。
+     */
+    private func tagStats(req: ApiRequest): ApiResponse {
+        let rows = this.tagRepo.stats(ManagementRoutes.subjectId(req))
+        if (rows.isEmpty()) {
+            return ApiResponse.ok(
+                "{\"total\":0,\"used\":0,\"unused\":0,\"totalUsage\":0,\"lastUsedAt\":\"0\"}",
+                req.requestId
+            )
+        }
+        let r = rows.at(0)
+        return ApiResponse.ok(
+            "{\"total\":${r.i64("total")},\"used\":${r.i64("used")},\"unused\":${r.i64("unused")}," +
+            "\"totalUsage\":${r.i64("total_usage")},\"lastUsedAt\":\"${r.i64("last_used_at_ms")}\"}",
+            req.requestId
+        )
+    }
+
+    /**
+     * 移动标签（FR-TAG-005）：`PUT /api/tags/:id/parent`，body `{parentId}`，
+     * 缺省或 0 表示提升为顶层。环路 / 深度超限由 `TagRepo.move` 拦（400）。
+     */
+    private func moveTag(req: ApiRequest): ApiResponse {
+        let id = ManagementRoutes.pathId(req, "id")
+        let json = ManagementRoutes.body(req)
+        let pid = ManagementRoutes.intFrom(json, "parentId", 0)
+        let parent: Option<Int64> = if (pid > 0) { Some<Int64>(pid) } else { None }
+        let ok = this.tagRepo.move(ManagementRoutes.subjectId(req), id, parent)
+        if (!ok) {
+            throw notFound("标签")
+        }
+        return ApiResponse.ok("{\"moved\":true,\"parentId\":\"${pid}\"}", req.requestId)
     }
 
     private func createTag(req: ApiRequest): ApiResponse {
@@ -387,6 +473,24 @@ public class ManagementRoutes {
             throw notFound("标签")
         }
         return ApiResponse.ok("{\"deleted\":true}", req.requestId)
+    }
+
+    /**
+     * 合并标签（FR-TAG-003）：把 :id（源）合并进请求体里的 targetId（目标）后删除源。
+     */
+    private func mergeTag(req: ApiRequest): ApiResponse {
+        let sourceId = ManagementRoutes.pathId(req, "id")
+        let json = ManagementRoutes.body(req)
+        let targetId = ManagementRoutes.intFrom(json, "targetId", 0)
+        if (targetId <= 0) {
+            throw validationError("targetId", "请指定目标标签")
+        }
+        if (targetId == sourceId) {
+            throw validationError("targetId", "不能合并到自身")
+        }
+        let ownerId = ManagementRoutes.subjectId(req)
+        let moved = this.tagRepo.merge(ownerId, sourceId, targetId, ownerId)
+        return ApiResponse.ok("{\"merged\":true,\"moved\":${moved}}", req.requestId)
     }
 
     private func attachTag(req: ApiRequest): ApiResponse {
@@ -761,7 +865,7 @@ public class ManagementRoutes {
                     // 简化解析：["a","b"]
                     let inner = v[1..v.size - 1]
                     for (part in inner.split(",")) {
-                        let t = part.trimStart().trimEnd()
+                        let t = trimSpace(part)
                         if (!t.isEmpty()) {
                             out.add(SimpleJson.unquotePublic(t))
                         }
@@ -769,7 +873,7 @@ public class ManagementRoutes {
                 } else {
                     // 逗号分隔：a,b,c
                     for (part in v.split(",")) {
-                        let t = part.trimStart().trimEnd()
+                        let t = trimSpace(part)
                         if (!t.isEmpty()) {
                             out.add(t)
                         }
@@ -805,7 +909,7 @@ public class ManagementRoutes {
             if (rb > lb) {
                 let inner = seg[lb + 1..rb]
                 for (part in inner.split(",")) {
-                    let t = part.trimStart().trimEnd()
+                    let t = trimSpace(part)
                     if (!t.isEmpty()) {
                         out.add(SimpleJson.unquotePublic(t))
                     }
@@ -821,7 +925,7 @@ public class ManagementRoutes {
                 if (q2 >= 0) {
                     let val = rest2[0..q2]
                     for (part in val.split(",")) {
-                        let t = part.trimStart().trimEnd()
+                        let t = trimSpace(part)
                         if (!t.isEmpty()) {
                             out.add(t)
                         }
@@ -846,7 +950,7 @@ public class ManagementRoutes {
      * 标签名规范化（去空格 + 转小写）。
      */
     private static func normalize(name: String): String {
-        return name.trimStart().trimEnd().toAsciiLower()
+        return trimSpace(name).toAsciiLower()
     }
 
     /**

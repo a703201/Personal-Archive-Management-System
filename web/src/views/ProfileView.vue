@@ -63,7 +63,208 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(load)
+// ---------------------------------------------------------------
+// 双因子（FR-AUTH-009）
+// ---------------------------------------------------------------
+const twofa = ref<{ bound: boolean; enabled: boolean }>({ bound: false, enabled: false })
+const twofaBusy = ref(false)
+const twofaMsg = ref('')
+const twofaErr = ref('')
+const totpSecret = ref('')
+const totpUrl = ref('')
+const totpCode = ref('')
+
+async function load2fa(): Promise<void> {
+  try {
+    twofa.value = await api<{ bound: boolean; enabled: boolean }>('/me/2fa')
+  } catch {
+    /* 未登录等场景由全局拦截处理，这里静默 */
+  }
+}
+
+async function setup2fa(): Promise<void> {
+  twofaErr.value = ''
+  twofaMsg.value = ''
+  twofaBusy.value = true
+  try {
+    const res = await api<{ secret: string; otpauthUrl: string }>('/me/2fa/setup', {
+      method: 'POST',
+      body: {},
+    })
+    totpSecret.value = res.secret
+    totpUrl.value = res.otpauthUrl
+    twofaMsg.value = '密钥已生成，请用验证器录入后输入动态码完成绑定'
+  } catch (e) {
+    twofaErr.value = (e as Error).message || '生成密钥失败'
+  } finally {
+    twofaBusy.value = false
+  }
+}
+
+/**
+ * enable / disable 的请求体是**纯文本动态码**（后端 req.bodyText()），
+ * 故不能走 api() 的 JSON 封装，这里直接用 fetch。
+ */
+async function postCode(path: string, code: string): Promise<{ ok: boolean; msg: string }> {
+  const token = sessionStorage.getItem('ams.accessToken') ?? ''
+  const res = await fetch(`/api${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain', Authorization: `Bearer ${token}` },
+    body: code,
+  })
+  const j = await res.json().catch(() => ({}))
+  return { ok: res.ok, msg: j.message ?? '' }
+}
+
+async function enable2fa(): Promise<void> {
+  twofaErr.value = ''
+  twofaMsg.value = ''
+  if (!/^\d{6}$/.test(totpCode.value.trim())) {
+    twofaErr.value = '请输入 6 位动态码'
+    return
+  }
+  twofaBusy.value = true
+  try {
+    const r = await postCode('/me/2fa/enable', totpCode.value.trim())
+    if (!r.ok) {
+      twofaErr.value = r.msg || '启用失败'
+      return
+    }
+    twofaMsg.value = '双因子已启用，下次登录需输入动态码'
+    totpSecret.value = ''
+    totpUrl.value = ''
+    totpCode.value = ''
+    await load2fa()
+  } finally {
+    twofaBusy.value = false
+  }
+}
+
+async function disable2fa(): Promise<void> {
+  twofaErr.value = ''
+  twofaMsg.value = ''
+  const code = window.prompt('请输入当前 6 位动态码以停用双因子')
+  if (!code) return
+  twofaBusy.value = true
+  try {
+    const r = await postCode('/me/2fa/disable', code.trim())
+    if (!r.ok) {
+      twofaErr.value = r.msg || '停用失败'
+      return
+    }
+    twofaMsg.value = '双因子已停用'
+    await load2fa()
+  } finally {
+    twofaBusy.value = false
+  }
+}
+
+onMounted(() => {
+  void load()
+  void loadSessions()
+  void load2fa()
+  void loadNotifyPrefs()
+})
+
+// ---------------------------------------------------------------
+// 会话与设备（FR-AUTH-007）
+// ---------------------------------------------------------------
+
+interface SessionRow {
+  sid: string
+  ip: string
+  userAgent: string
+  createdAt: number | string
+  lastActiveAt: number | string
+  current: boolean | string
+}
+
+const sessions = ref<SessionRow[]>([])
+const sessionBusy = ref('')
+
+async function loadSessions(): Promise<void> {
+  try {
+    const res = await api<{ sessions: SessionRow[] }>('/me/sessions')
+    sessions.value = res.sessions ?? []
+  } catch {
+    sessions.value = []
+  }
+}
+
+async function kick(s: SessionRow): Promise<void> {
+  sessionBusy.value = s.sid
+  try {
+    await api(`/me/sessions/${encodeURIComponent(s.sid)}`, { method: 'DELETE' })
+    toast.success('该设备已登出')
+    await loadSessions()
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    sessionBusy.value = ''
+  }
+}
+
+async function kickOthers(): Promise<void> {
+  sessionBusy.value = '__others'
+  try {
+    const res = await api<{ revoked: number }>('/me/sessions', { method: 'DELETE' })
+    toast.success(`已登出其他 ${res.revoked} 台设备`)
+    await loadSessions()
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    sessionBusy.value = ''
+  }
+}
+
+function fmtTime(ms: number | string | undefined): string {
+  const n = Number(ms ?? 0)
+  if (!n) return '—'
+  return new Date(n).toLocaleString('zh-CN', { hour12: false })
+}
+
+// ---------------------------------------------------------------
+// 通知偏好中心（FR-NTF-006 / FR-NTF-007）
+// ---------------------------------------------------------------
+interface NotifyPrefs {
+  dndEnabled: boolean
+  dndStart: string
+  dndEnd: string
+  channelInApp: boolean
+  channelEmail: boolean
+  freq: string
+}
+
+const notifyPrefs = ref<NotifyPrefs>({
+  dndEnabled: false,
+  dndStart: '22:00',
+  dndEnd: '08:00',
+  channelInApp: true,
+  channelEmail: false,
+  freq: 'realtime',
+})
+const notifyBusy = ref(false)
+
+async function loadNotifyPrefs(): Promise<void> {
+  try {
+    const r = await api<NotifyPrefs>('/notify/prefs')
+    notifyPrefs.value = { ...notifyPrefs.value, ...r }
+  } catch {
+    /* 静默：使用默认值 */
+  }
+}
+
+async function saveNotifyPrefs(): Promise<void> {
+  notifyBusy.value = true
+  try {
+    await api('/notify/prefs', { method: 'PUT', body: { ...notifyPrefs.value } })
+    toast.success('通知偏好已保存')
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    notifyBusy.value = false
+  }
+}
 
 // ---------------------------------------------------------------
 // 编辑资料
@@ -204,6 +405,164 @@ async function changePassword(): Promise<void> {
           <dd>{{ Number(me.status) === 0 ? '正常' : '已停用' }}</dd>
         </dl>
         <p class="hint">联系方式默认掩码展示，完整值需在各自业务场景中按权限查看。</p>
+      </div>
+
+      <h2 class="section-title">安全设置</h2>
+      <div class="card">
+        <div class="sec-row">
+          <div>
+            <div class="sec-row__title">
+              双因子认证（TOTP）
+              <span class="sec-row__tag" :class="{ 'sec-row__tag--on': twofa.enabled }">
+                {{ twofa.enabled ? '已启用' : '未启用' }}
+              </span>
+            </div>
+            <div class="sec-row__sub">
+              {{
+                twofa.enabled
+                  ? '登录时除口令外还需输入验证器上的 6 位动态码'
+                  : '建议启用：口令泄露时仍有一道动态码保护'
+              }}
+            </div>
+          </div>
+          <button
+            v-if="twofa.enabled"
+            class="btn-text btn-text--danger"
+            type="button"
+            :disabled="twofaBusy"
+            @click="disable2fa"
+          >
+            停用
+          </button>
+          <button
+            v-else
+            class="btn-ghost"
+            type="button"
+            :disabled="twofaBusy"
+            @click="setup2fa"
+          >
+            开始绑定
+          </button>
+        </div>
+
+        <div v-if="totpSecret" class="sec-setup">
+          <p class="hint">
+            ① 在验证器 App（如 Microsoft Authenticator / Google Authenticator）中手动添加密钥：
+          </p>
+          <code class="sec-setup__secret">{{ totpSecret }}</code>
+          <p class="hint">② 录入后输入 App 显示的 6 位动态码完成绑定：</p>
+          <div class="sec-setup__row">
+            <input
+              v-model="totpCode"
+              class="sec-setup__input"
+              type="text"
+              inputmode="numeric"
+              maxlength="6"
+              placeholder="000000"
+            />
+            <button class="btn-ghost" type="button" :disabled="twofaBusy" @click="enable2fa">
+              确认启用
+            </button>
+          </div>
+          <p class="hint sec-setup__url">{{ totpUrl }}</p>
+        </div>
+
+        <p v-if="twofaMsg" class="hint sec-msg">{{ twofaMsg }}</p>
+        <p v-if="twofaErr" class="hint hint--error">{{ twofaErr }}</p>
+      </div>
+
+      <h2 class="section-title">
+        会话与设备（{{ sessions.length }}）
+        <button
+          v-if="sessions.length > 1"
+          class="btn-text section-title__action"
+          type="button"
+          :disabled="sessionBusy === '__others'"
+          @click="kickOthers"
+        >
+          {{ sessionBusy === '__others' ? '处理中…' : '登出其他设备' }}
+        </button>
+      </h2>
+      <div class="card">
+        <p v-if="sessions.length === 0" class="hint">没有活跃会话。</p>
+        <div v-for="s in sessions" :key="s.sid" class="sess">
+          <div class="sess__main">
+            <div class="sess__title">
+              {{ s.userAgent || '未知设备' }}
+              <span v-if="s.current === true || s.current === 'true'" class="sess__tag">当前</span>
+            </div>
+            <div class="sess__sub">{{ s.ip }} · 最近活动 {{ fmtTime(s.lastActiveAt) }}</div>
+          </div>
+          <button
+            v-if="!(s.current === true || s.current === 'true')"
+            class="btn-text btn-text--danger"
+            type="button"
+            :disabled="sessionBusy === s.sid"
+            @click="kick(s)"
+          >
+            {{ sessionBusy === s.sid ? '处理中…' : '登出' }}
+          </button>
+        </div>
+      </div>
+
+      <h2 class="section-title">通知偏好</h2>
+      <div class="card notify">
+        <div class="sec-row">
+          <div>
+            <div class="sec-row__title">免打扰（静默时段）</div>
+            <div class="sec-row__sub">在设定的时间段内不推送通知（按类别静默）</div>
+          </div>
+          <label class="switch">
+            <input v-model="notifyPrefs.dndEnabled" type="checkbox" />
+            <span class="switch__track" />
+          </label>
+        </div>
+        <div v-if="notifyPrefs.dndEnabled" class="notify__times">
+          <label class="field field--inline">
+            <span class="field__label">开始</span>
+            <input v-model="notifyPrefs.dndStart" class="field-control" type="time" />
+          </label>
+          <label class="field field--inline">
+            <span class="field__label">结束</span>
+            <input v-model="notifyPrefs.dndEnd" class="field-control" type="time" />
+          </label>
+        </div>
+
+        <div class="sec-row">
+          <div>
+            <div class="sec-row__title">接收渠道</div>
+            <div class="sec-row__sub">选择希望接收通知的方式</div>
+          </div>
+        </div>
+        <div class="notify__channels">
+          <label class="chk">
+            <input v-model="notifyPrefs.channelInApp" type="checkbox" />
+            <span>站内信</span>
+          </label>
+          <label class="chk">
+            <input v-model="notifyPrefs.channelEmail" type="checkbox" />
+            <span>邮件</span>
+          </label>
+        </div>
+
+        <div class="sec-row">
+          <div>
+            <div class="sec-row__title">推送频率</div>
+            <div class="sec-row__sub">合并通知以降低打扰</div>
+          </div>
+          <select v-model="notifyPrefs.freq" class="field-control notify__freq">
+            <option value="realtime">实时</option>
+            <option value="digest_daily">每日汇总</option>
+            <option value="digest_weekly">每周汇总</option>
+            <option value="off">关闭</option>
+          </select>
+        </div>
+
+        <div class="sheet-actions">
+          <button class="btn-primary" type="button" :disabled="notifyBusy" @click="saveNotifyPrefs">
+            {{ notifyBusy ? '保存中…' : '保存偏好' }}
+          </button>
+        </div>
       </div>
 
       <h2 class="section-title">权限点（{{ me.perms.length }}）</h2>
@@ -456,5 +815,149 @@ async function changePassword(): Promise<void> {
     width: 100%;
     justify-content: flex-end;
   }
+}
+
+/* 双因子卡片 */
+.sec-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.sec-row__title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.sec-row__tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.sec-row__tag--on {
+  background: rgba(22, 163, 74, 0.14);
+  color: var(--success);
+}
+.sec-row__sub {
+  margin-top: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.sec-setup {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--border-subtle);
+}
+.sec-setup__secret {
+  display: inline-block;
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  letter-spacing: 1px;
+  word-break: break-all;
+}
+.sec-setup__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sec-setup__input {
+  width: 120px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 15px;
+  letter-spacing: 4px;
+  text-align: center;
+}
+.sec-setup__url {
+  margin-top: 8px;
+  word-break: break-all;
+  font-size: 11px;
+}
+.sec-msg {
+  margin-top: var(--sp-2);
+  color: var(--accent);
+}
+
+/* 通知偏好 */
+.notify {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.notify__times {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+.field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.field--inline .field__label {
+  margin: 0;
+}
+.notify__channels {
+  display: flex;
+  gap: var(--sp-4);
+}
+.chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+}
+.notify__freq {
+  width: auto;
+}
+
+/* 开关（toggle） */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+.switch__track {
+  position: absolute;
+  inset: 0;
+  background: var(--border-strong, #cbd5e1);
+  border-radius: 999px;
+  transition: background var(--ease-apple) 0.2s;
+}
+.switch__track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform var(--ease-apple) 0.2s;
+}
+.switch input:checked + .switch__track {
+  background: var(--accent, #2563eb);
+}
+.switch input:checked + .switch__track::after {
+  transform: translateX(20px);
 }
 </style>

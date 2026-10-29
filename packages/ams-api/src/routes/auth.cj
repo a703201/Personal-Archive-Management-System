@@ -21,6 +21,7 @@ import ams.api.http.*
 import ams.app.auth.*
 import ams.kernel.error.*
 import ams.kernel.log.*
+import ams.kernel.util.*
 
 /**
  * 极简 JSON 解析。
@@ -47,6 +48,20 @@ public class SimpleJson {
     }
 
     /**
+     * 遍历全部键值（顺序不保证）。
+     *
+     * 供「键名本身带信息」的场景使用：如附件批量导入用 `r.<目录名>` 表示
+     * 该目录指定的目标条目，键是数据的一部分，无法用固定字段名取。
+     */
+    public func entries(): ArrayList<(String, String)> {
+        let out = ArrayList<(String, String)>()
+        for ((k, v) in this.fields) {
+            out.add((k, v))
+        }
+        return out
+    }
+
+    /**
      * 解析扁平整数字符串对象。
      *
      * 解析失败返回 None（调用方按缺字段处理）。
@@ -57,7 +72,10 @@ public class SimpleJson {
      *   该字段值被截断，并可能让后续字段错位。
      */
     public static func parse(text: String): Option<SimpleJson> {
-        let t = text.trimStart().trimEnd()
+        // trimSpace 而非 trimStart()/trimEnd()：后者在本 SDK 是空实现，
+        // 请求体末尾带换行（如 `{...}\n`）时会因 endsWith("}") 失败而整包丢弃，
+        // 表现为「用户名与口令不能为空」这类莫名其妙的校验错误。
+        let t = trimSpace(text)
         if (t.size < 2 || !t.startsWith("{") || !t.endsWith("}")) {
             return None
         }
@@ -76,7 +94,7 @@ public class SimpleJson {
      */
     public static func splitTopLevel(text: String): ArrayList<String> {
         let out = ArrayList<String>()
-        let t = text.trimStart().trimEnd()
+        let t = trimSpace(text)
         if (t.size < 2 || !t.startsWith("{") || !t.endsWith("}")) {
             return out
         }
@@ -121,19 +139,51 @@ public class SimpleJson {
      * 解析一段 "key":value 并写入对象（键必为无逗号/冒号的标识符）。
      */
     private static func putPair(obj: SimpleJson, part: String): Unit {
-        let p = part.trimStart().trimEnd()
+        let p = trimSpace(part)
         if (p.isEmpty()) {
             return
         }
-        let kv = p.split(":", 2)
-        if (kv.size < 2) {
+        // 自己找「字符串外的第一个冒号」，不用 split(":", 2)：
+        //   split 的 limit 语义在不同 SDK 版本上不一致，实测标准 JSON 的
+        //   `"csv": "a,b"`（冒号后带空格）会被切错，导致值被截断/丢失。
+        //   扫描式定位只依赖「引号内不切分」这一条规则，行为可预测。
+        let idx = SimpleJson.firstColon(p)
+        if (idx < 0) {
             return
         }
-        let k = SimpleJson.unquote(kv[0].trimStart().trimEnd())
-        let v = SimpleJson.unquote(kv[1].trimStart().trimEnd())
+        let k = SimpleJson.unquote(trimSpace(p[0..idx]))
+        let v = SimpleJson.unquote(trimSpace(p[idx + 1..]))
         if (!k.isEmpty()) {
             obj.fields[k] = v
         }
+    }
+
+    /**
+     * 返回字符串外的第一个 `:` 的**字节**下标；不存在返回 -1。
+     */
+    private static func firstColon(s: String): Int64 {
+        let bytes = s.toArray()
+        var inStr = false
+        var escaped = false
+        var i: Int64 = 0
+        while (i < bytes.size) {
+            let b = bytes[i]
+            if (inStr) {
+                if (escaped) {
+                    escaped = false
+                } else if (b == 92) {
+                    escaped = true
+                } else if (b == 34) {
+                    inStr = false
+                }
+            } else if (b == 34) {
+                inStr = true
+            } else if (b == 58) {
+                return i
+            }
+            i = i + 1
+        }
+        return -1
     }
 
     /**
@@ -146,12 +196,93 @@ public class SimpleJson {
         return SimpleJson.unquote(s)
     }
 
-    private static func unquote(s: String): String {
-        if (s.size >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
-            let inner = s[1..s.size - 1]
-            return inner.replace("\\\"", "\"").replace("\\\\", "\\")
+    private static func unquote(raw: String): String {
+        // 先裁空白：调用方普遍传 ` "v"`（冒号后带空格）。本 SDK 的
+        // String.trimStart()/trimEnd() 是空实现，若依赖调用方裁剪，
+        // 引号判断会失败、值里残留空格与引号；故在此统一兜住。
+        let s = trimSpace(raw)
+        if (!(s.size >= 2 && s.startsWith("\"") && s.endsWith("\""))) {
+            return s
         }
-        return s
+        let inner = s[1..s.size - 1]
+        // 没有任何反斜杠 → 原样返回（绝大多数请求走这条路，避免无谓拷贝）
+        if (!inner.contains("\\")) {
+            return inner
+        }
+        let runes = ArrayList<Rune>()
+        for (r in inner.runes()) {
+            runes.add(r)
+        }
+        let sb = StringBuilder()
+        var i: Int64 = 0
+        while (i < runes.size) {
+            let ch = runes[i].toString()
+            if (ch == "\\" && i + 1 < runes.size) {
+                let nx = runes[i + 1].toString()
+                if (nx == "n") {
+                    sb.append("\n")
+                    i = i + 2
+                } else if (nx == "r") {
+                    sb.append("\r")
+                    i = i + 2
+                } else if (nx == "t") {
+                    sb.append("\t")
+                    i = i + 2
+                } else if (nx == "b") {
+                    sb.append("\u{0008}")
+                    i = i + 2
+                } else if (nx == "f") {
+                    sb.append("\u{000C}")
+                    i = i + 2
+                } else if (nx == "\"") {
+                    sb.append("\"")
+                    i = i + 2
+                } else if (nx == "\\") {
+                    sb.append("\\")
+                    i = i + 2
+                } else if (nx == "/") {
+                    sb.append("/")
+                    i = i + 2
+                } else if (nx == "u" && i + 5 < runes.size) {
+                    // \uXXXX（BMP）；代理对按单个码位处理（本系统一律 UTF-8 直传，
+                    // 该分支只用于兼容标准 JSON 客户端）
+                    var cp: Int64 = 0
+                    var k: Int64 = 0
+                    while (k < 4) {
+                        cp = cp * 16 + SimpleJson.hexOf(runes[i + 2 + k].toString())
+                        k = k + 1
+                    }
+                    sb.append(Rune(UInt32(cp)).toString())
+                    i = i + 6
+                } else {
+                    // 未知转义：保留反斜杠本身（宁可多一个字符，也不吞用户输入）
+                    sb.append(ch)
+                    i = i + 1
+                }
+            } else {
+                sb.append(ch)
+                i = i + 1
+            }
+        }
+        return sb.toString()
+    }
+
+    /** 十六进制字符 → 数值（非法返回 0） */
+    private static func hexOf(c: String): Int64 {
+        if (c.size != 1) {
+            return 0
+        }
+        let b = c.toArray()[0]
+        if (b >= 48 && b <= 57) {
+            return Int64(b) - 48
+        }
+        if (b >= 65 && b <= 70) {
+            return Int64(b) - 55
+        }
+        if (b >= 97 && b <= 102) {
+            return Int64(b) - 87
+        }
+        return 0
     }
 }
 
@@ -160,9 +291,17 @@ public class SimpleJson {
  */
 public class AuthRoutes {
     private let authService: AuthService
+    /**
+     * 自助找回服务（FR-AUTH-008）。
+     *
+     * 可选：未装配时相关路由返回 501 语义的内部错误，
+     * 不影响登录/刷新等主链路（便于裁剪部署与单测）。
+     */
+    private let resetService: ?PasswordResetService
 
-    public init(authService: AuthService) {
+    public init(authService: AuthService, resetService!: ?PasswordResetService = None) {
         this.authService = authService
+        this.resetService = resetService
     }
 
     /**
@@ -175,6 +314,10 @@ public class AuthRoutes {
         router.post("/api/auth/logout-all", { req: ApiRequest => this.logoutAll(req) })
         // 自助注册（FR-AUTH-001）：公开接口，不要求令牌；captcha 为 P1 暂未接入
         router.post("/api/auth/register", { req: ApiRequest => this.register(req) }, isPublic: true)
+        // 自助找回口令（FR-AUTH-008）：三步链路，均公开
+        router.post("/api/auth/password/forgot", { req: ApiRequest => this.forgotPassword(req) }, isPublic: true)
+        router.post("/api/auth/password/verify", { req: ApiRequest => this.verifyResetCode(req) }, isPublic: true)
+        router.post("/api/auth/password/reset", { req: ApiRequest => this.resetPassword(req) }, isPublic: true)
     }
 
     /**
@@ -198,12 +341,82 @@ public class AuthRoutes {
         let username = json.get("username") ?? ""
         let password = json.get("password") ?? ""
         let ua = req.header("user-agent") ?? ""
-        let result = this.authService.login(username, password, req.remoteAddr, ua)
+        // FR-AUTH-009：已启用双因子的账号必须带 totpCode
+        let totpCode = json.get("totpCode") ?? ""
+        let result = this.authService.login(username, password, req.remoteAddr, ua, totpCode: totpCode)
         let data = "{\"accessToken\":\"${ApiResponse.escape(result.accessToken)}\"," +
             "\"refreshToken\":\"${ApiResponse.escape(result.refreshToken)}\"," +
             "\"sid\":\"${ApiResponse.escape(result.sid)}\"," +
             "\"expiresAt\":${result.expiresAt}}"
         return ApiResponse.ok(data, req.requestId)
+    }
+
+    /**
+     * POST /api/auth/password/forgot —— 索取重置验证码（FR-AUTH-008）。
+     */
+    private func forgotPassword(req: ApiRequest): ApiResponse {
+        let json = match (SimpleJson.parse(req.bodyText())) {
+            case Some(j) => j
+            case None => throw validationError("body", "请求体不是合法的 JSON 对象")
+        }
+        let svc = this.reset()
+        let account = json.get("account") ?? ""
+        let ua = req.header("user-agent") ?? ""
+        let r = svc.request(account, req.remoteAddr, ua)
+        let data = "{\"sent\":${if (r.sent) { "true" } else { "false" }}," +
+            "\"channel\":\"${ApiResponse.escape(r.channel)}\"," +
+            "\"masked\":\"${ApiResponse.escape(r.masked)}\"," +
+            "\"expiresIn\":${r.expiresIn}," +
+            "\"notice\":\"${ApiResponse.escape(r.notice)}\"}"
+        return ApiResponse.ok(data, req.requestId)
+    }
+
+    /**
+     * POST /api/auth/password/verify —— 校验验证码，换取一次性重置令牌。
+     */
+    private func verifyResetCode(req: ApiRequest): ApiResponse {
+        let json = match (SimpleJson.parse(req.bodyText())) {
+            case Some(j) => j
+            case None => throw validationError("body", "请求体不是合法的 JSON 对象")
+        }
+        let svc = this.reset()
+        let account = json.get("account") ?? ""
+        let code = json.get("code") ?? ""
+        let ua = req.header("user-agent") ?? ""
+        let ticket = svc.verify(account, code, req.remoteAddr, ua)
+        let data = "{\"resetToken\":\"${ApiResponse.escape(ticket.token)}\"," +
+            "\"expiresIn\":${ticket.expiresIn}}"
+        return ApiResponse.ok(data, req.requestId)
+    }
+
+    /**
+     * POST /api/auth/password/reset —— 凭令牌重置口令并强制下线全部会话。
+     */
+    private func resetPassword(req: ApiRequest): ApiResponse {
+        let json = match (SimpleJson.parse(req.bodyText())) {
+            case Some(j) => j
+            case None => throw validationError("body", "请求体不是合法的 JSON 对象")
+        }
+        let svc = this.reset()
+        let token = json.get("resetToken") ?? ""
+        let newPassword = json.get("newPassword") ?? ""
+        let ua = req.header("user-agent") ?? ""
+        let username = svc.reset(token, newPassword, req.remoteAddr, ua)
+        return ApiResponse.ok(
+            "{\"reset\":true,\"username\":\"${ApiResponse.escape(username)}\"}",
+            req.requestId
+        )
+    }
+
+    /**
+     * 取查找回服务（未装配时给出明确的内部错误，而不是空指针崩溃）。
+     */
+    private func reset(): PasswordResetService {
+        let svc = match (this.resetService) {
+            case Some(s) => s
+            case None => throw AppError(AppErrorKind.Internal, "自助找回功能未装配")
+        }
+        return svc
     }
 
     /**

@@ -24,6 +24,7 @@ import ams.app.search.*
 import ams.core.search.*
 import ams.data.repo.*
 import ams.kernel.error.*
+import ams.kernel.util.*
 
 /**
  * 检索接口。
@@ -44,6 +45,18 @@ public class SearchRoutes {
                    requiredPerm: "archive:read:own")
         router.post("/api/search/reveal", { req: ApiRequest => this.reveal(req) },
                     requiredPerm: "archive:read_sensitive")
+        router.get("/api/search/suggest", { req: ApiRequest => this.suggest(req) },
+                   requiredPerm: "archive:read:own")
+        router.get("/api/search/views", { req: ApiRequest => this.listViews(req) },
+                   requiredPerm: "archive:read:own")
+        router.post("/api/search/views", { req: ApiRequest => this.createView(req) },
+                    requiredPerm: "archive:read:own")
+        router.delete("/api/search/views/:id", { req: ApiRequest => this.deleteView(req) },
+                      requiredPerm: "archive:read:own")
+        router.get("/api/search/history", { req: ApiRequest => this.listHistory(req) },
+                   requiredPerm: "archive:read:own")
+        router.delete("/api/search/history", { req: ApiRequest => this.clearHistory(req) },
+                      requiredPerm: "archive:read:own")
     }
 
     // ---------------------------------------------------------
@@ -79,6 +92,10 @@ public class SearchRoutes {
         let issuedTo = SearchRoutes.queryOrEmpty(req, "issuedTo")
         let expiresFrom = SearchRoutes.queryOrEmpty(req, "expiresFrom")
         let expiresTo = SearchRoutes.queryOrEmpty(req, "expiresTo")
+        let createdFrom = SearchRoutes.queryOrEmpty(req, "createdFrom")
+        let createdTo = SearchRoutes.queryOrEmpty(req, "createdTo")
+        // FR-SRC-010：来源系统筛选（0=不限）
+        let source = SearchRoutes.intOfQuery(req, "source", 0)
 
         let sort = SearchRoutes.parseSort(req)
         let size = SearchRoutes.intOfQuery(req, "size", 20)
@@ -120,10 +137,15 @@ public class SearchRoutes {
             [],
             sort,
             pageSize,
-            cursor
+            cursor,
+            source: source,
+            createdFrom: createdFrom,
+            createdTo: createdTo
         )
 
         let rows = this.service.search(q)
+        // FR-SRC-009：记录搜索历史（空关键词忽略，由 service 判定）
+        this.service.recordSearch(uid, keyword)
         let all = rows.all()
         let hasMore = all.size > pageSize
         let take = if (hasMore) { pageSize } else { all.size }
@@ -151,6 +173,37 @@ public class SearchRoutes {
             sb.append(",\"nextCursor\":\"\"")
         }
         sb.append("}")
+        return ApiResponse.ok(sb.toString(), req.requestId)
+    }
+
+    /**
+     * GET /api/search/suggest —— 搜索建议（FR-SRC-007）。
+     *
+     * 查询参数：q=关键词前缀（可选，空串时返回热点标签/机构）
+     * 返回：{"query":"...","tags":["..."],"orgs":["..."]}
+     */
+    private func suggest(req: ApiRequest): ApiResponse {
+        let qRaw = SearchRoutes.queryOrEmpty(req, "q")
+        let q = trimSpace(qRaw)
+        let uid = UserRepo.parseId(req.subjectId)
+        let subjects = this.userRepo.listAccessibleSubjectIds(uid).toArray()
+        let (tags, orgs) = this.service.suggest(q, uid, subjects)
+        let sb = StringBuilder()
+        sb.append("{\"query\":\"${ApiResponse.escape(q)}\",\"tags\":[")
+        var first = true
+        for (t in tags) {
+            if (!first) { sb.append(",") }
+            first = false
+            sb.append("\"${ApiResponse.escape(t)}\"")
+        }
+        sb.append("],\"orgs\":[")
+        first = true
+        for (o in orgs) {
+            if (!first) { sb.append(",") }
+            first = false
+            sb.append("\"${ApiResponse.escape(o)}\"")
+        }
+        sb.append("]}")
         return ApiResponse.ok(sb.toString(), req.requestId)
     }
 
@@ -183,6 +236,98 @@ public class SearchRoutes {
             "\"value\":\"${ApiResponse.escape(plain)}\"}",
             req.requestId
         )
+    }
+
+    // ---------------------------------------------------------
+    // 保存的筛选视图（FR-SRC-008）
+    // ---------------------------------------------------------
+
+    /**
+     * GET /api/search/views —— 列出当前用户的命名视图（置顶优先）。
+     */
+    private func listViews(req: ApiRequest): ApiResponse {
+        let uid = UserRepo.parseId(req.subjectId)
+        let rows = this.service.listViews(uid)
+        let sb = StringBuilder()
+        sb.append("{\"views\":[")
+        var first = true
+        for (r in rows.all().iterator()) {
+            if (!first) { sb.append(",") }
+            first = false
+            let pinned = if (r.str("is_pinned") == "t") { "true" } else { "false" }
+            sb.append("{\"id\":\"${r.str("id")}\",")
+            sb.append("\"name\":\"${ApiResponse.escape(r.str("name"))}\",")
+            sb.append("\"queryJson\":\"${ApiResponse.escape(r.str("query_json"))}\",")
+            sb.append("\"isPinned\":${pinned},")
+            sb.append("\"updatedAt\":${r.i64("updated_at_ms")}}")
+        }
+        sb.append("]}")
+        return ApiResponse.ok(sb.toString(), req.requestId)
+    }
+
+    /**
+     * POST /api/search/views —— 保存命名视图（FR-SRC-008）。
+     */
+    private func createView(req: ApiRequest): ApiResponse {
+        let json = match (SimpleJson.parse(req.bodyText())) {
+            case Some(j) => j
+            case None => throw validationError("body", "请求体不是合法的 JSON 对象")
+        }
+        let name = json.get("name") ?? ""
+        if (trimSpace(name).isEmpty()) {
+            throw validationError("name", "视图名不能为空")
+        }
+        let queryJson = json.get("queryJson") ?? "{}"
+        let pinned = json.get("isPinned") == "true"
+        let uid = UserRepo.parseId(req.subjectId)
+        let id = this.service.saveView(uid, name, queryJson, pinned)
+        return ApiResponse.ok("{\"id\":${id}}", req.requestId)
+    }
+
+    /**
+     * DELETE /api/search/views/:id —— 删除视图（FR-SRC-008）。
+     */
+    private func deleteView(req: ApiRequest): ApiResponse {
+        let id = UserRepo.parseId(req.pathParam("id") ?? "")
+        let uid = UserRepo.parseId(req.subjectId)
+        let ok = this.service.deleteView(uid, id)
+        return ApiResponse.ok("{\"deleted\":${if (ok) { "true" } else { "false" }}}", req.requestId)
+    }
+
+    // ---------------------------------------------------------
+    // 搜索历史（FR-SRC-009）
+    // ---------------------------------------------------------
+
+    /**
+     * GET /api/search/history —— 个人搜索历史（最近使用优先）。
+     */
+    private func listHistory(req: ApiRequest): ApiResponse {
+        let uid = UserRepo.parseId(req.subjectId)
+        let limit = SearchRoutes.intOfQuery(req, "limit", 20)
+        let lim = if (limit < 1) { 20 } else if (limit > 100) { 100 } else { limit }
+        let rows = this.service.listSearchHistory(uid, lim)
+        let sb = StringBuilder()
+        sb.append("{\"history\":[")
+        var first = true
+        for (r in rows.all().iterator()) {
+            if (!first) { sb.append(",") }
+            first = false
+            sb.append("{\"id\":\"${r.str("id")}\",")
+            sb.append("\"query\":\"${ApiResponse.escape(r.str("query"))}\",")
+            sb.append("\"hitCount\":${r.i64("hit_count")},")
+            sb.append("\"lastUsedAt\":${r.i64("last_used_at_ms")}}")
+        }
+        sb.append("]}")
+        return ApiResponse.ok(sb.toString(), req.requestId)
+    }
+
+    /**
+     * DELETE /api/search/history —— 清除个人搜索历史（FR-SRC-009，GDPR 友好）。
+     */
+    private func clearHistory(req: ApiRequest): ApiResponse {
+        let uid = UserRepo.parseId(req.subjectId)
+        let n = this.service.clearSearchHistory(uid)
+        return ApiResponse.ok("{\"cleared\":${n}}", req.requestId)
     }
 
     // ---------------------------------------------------------
@@ -274,7 +419,7 @@ public class SearchRoutes {
             case Some(v) =>
                 if (!v.isEmpty()) {
                     for (p in v.split(",")) {
-                        let t = p.trimStart().trimEnd()
+                        let t = trimSpace(p)
                         if (!t.isEmpty()) {
                             out.add(RowData.toI64(t))
                         }
@@ -294,7 +439,7 @@ public class SearchRoutes {
             case Some(v) =>
                 if (!v.isEmpty()) {
                     for (p in v.split(",")) {
-                        let t = p.trimStart().trimEnd()
+                        let t = trimSpace(p)
                         if (!t.isEmpty()) {
                             out.add(t)
                         }

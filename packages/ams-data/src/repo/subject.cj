@@ -99,6 +99,30 @@ public class SubjectRepo {
     }
 
     /**
+     * 列出全部未删除主体 ID。
+     *
+     * 用途：FR-ACL-013 权限预览 —— 角色具备 `archive:read:any` 时，
+     * 可见范围是「全机构主体」，需要一次拿到全集做计数。
+     */
+    public func listAllIds(): ArrayList<String> {
+        let sql = "SELECT id FROM arc_subjects WHERE deleted_at IS NULL"
+        let out = ArrayList<String>()
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            let rs = readRows(st.query())
+            for (r in rs.all().iterator()) {
+                out.add(r.str("id"))
+            }
+            return out
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
      * 统计用户名下的主体数（未删除）。
      *
      * 用途：懒建「本人」主体前判断是否已有主体（自愈存量账号）。
@@ -246,6 +270,97 @@ public class SubjectRepo {
         } finally {
             c.close()
         }
+    }
+
+    /**
+     * 授予「代管（只读）」权限（FR-ACL-010 · 主体级共享）。
+     *
+     * `custodian_ids` 这一列与它的读路径（`user.cj` 的
+     * `? = ANY(custodian_ids)`、`subject.cj` 的列表过滤）早就存在，
+     * 但**全仓没有任何写入入口** —— 于是「主体级共享」只是纸面能力。
+     * 这里补上写入口，它是三种授权粒度里成本最低的一档。
+     *
+     * 语义约束（必须写死在这里，不能只写在注释里）：
+     *   · 只有主体**所有者本人**能授予（WHERE 里带 owner_id）；
+     *   · 代管是**只读**：`Authorizer` 只在归属判定里用 custodian，
+     *     写操作一律要求 owner_id 命中，故这里不涉及任何写权限；
+     *   · 幂等：已代管时不重复追加（否则数组会无限膨胀，
+     *     且 `array_remove` 只能一次删一个，撤销会变得不可控）。
+     *
+     * @return true = 本次新授予；false = 已存在或无权
+     */
+    public func grantCustodian(subjectId: Int64, ownerId: Int64, custodianId: Int64): Bool {
+        let sql = "UPDATE arc_subjects SET " +
+                  "custodian_ids = array_append(COALESCE(custodian_ids, ARRAY[]::bigint[]), ?), " +
+                  "updated_at = CURRENT_TIMESTAMP, version = version + 1 " +
+                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL " +
+                  "AND NOT (? = ANY(COALESCE(custodian_ids, ARRAY[]::bigint[])))"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, custodianId)
+            st.set(1, subjectId)
+            st.set(2, ownerId)
+            st.set(3, custodianId)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 撤销代管（FR-ACL-010）。
+     *
+     * 与授予对称：只有所有者能撤销，且从数组里精确移除该用户。
+     * 撤销立刻生效 —— 可访问主体集合是**每次请求现算**的，没有缓存。
+     */
+    public func revokeCustodian(subjectId: Int64, ownerId: Int64, custodianId: Int64): Bool {
+        let sql = "UPDATE arc_subjects SET " +
+                  "custodian_ids = array_remove(COALESCE(custodian_ids, ARRAY[]::bigint[]), ?), " +
+                  "updated_at = CURRENT_TIMESTAMP, version = version + 1 " +
+                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL " +
+                  "AND ? = ANY(COALESCE(custodian_ids, ARRAY[]::bigint[]))"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, custodianId)
+            st.set(1, subjectId)
+            st.set(2, ownerId)
+            st.set(3, custodianId)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 列出某主体的代管人 ID（不含所有者）。
+     *
+     * 用途：前端「这个档案我授权给了谁」的反向展示，
+     * 以及移除成员时判断是否需要回收代管关系。
+     */
+    public func listCustodianIds(subjectId: Int64): ArrayList<Int64> {
+        let out = ArrayList<Int64>()
+        let sql = "SELECT unnest(COALESCE(custodian_ids, ARRAY[]::bigint[])) AS uid " +
+                  "FROM arc_subjects WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, subjectId)
+            let rows = readRows(st.query())
+            for (r in rows.all().iterator()) {
+                out.add(r.i64("uid"))
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+        return out
     }
 
     /**

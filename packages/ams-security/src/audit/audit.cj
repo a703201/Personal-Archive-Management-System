@@ -76,6 +76,7 @@ public enum AuditAction {
     | Logout           // 登出
     | LogoutAll        // 全局登出
     | PasswordChange   // 口令修改
+    | PasswordReset    // 自助找回口令（验证码 → 令牌 → 改密）
     | RoleAssign       // 角色分配
     | RoleRevoke       // 授权撤销
     | GrantCreate      // 创建授权
@@ -91,6 +92,24 @@ public enum AuditAction {
     | BatchOperation   // 数据批量操作
     | FieldReveal      // 展开敏感字段
     /**
+     * 查询审计（FR-AUD-009 自审计）。
+     *
+     * 「谁看了审计」本身必须留痕：否则审计员/管理员翻看敏感操作记录
+     * 这一行为没有任何证据，审计链的可信度在这里断掉。
+     */
+    | AuditQuery       // 查询审计日志
+    // ---- 家庭协作（FR-ACL-010）：docs/14 §8 的 10 个动作码 ----
+    | FamilyGroupCreate   // 创建家庭组
+    | FamilyGroupDissolve // 解散家庭组
+    | FamilyInviteCreate  // 创建邀请
+    | FamilyInviteRevoke  // 撤销邀请
+    | FamilyInviteAccept  // 接受邀请入组
+    | FamilyInviteFail    // 邀请码错误（失败计数）
+    | FamilyMemberRemove  // 移除成员（含级联撤销授权）
+    | FamilyGrantCreate   // 组内授权创建
+    | FamilyGrantRevoke   // 组内授权撤销
+    | FamilyAccessDenied  // 越权访问家庭数据被拒
+    /**
      * 未知动作（历史遗留或新增动作尚未同步到此枚举）。
      *
      * 审计动作是封闭枚举，但审计表可能存有旧版本写入的码。
@@ -104,6 +123,20 @@ public enum AuditAction {
      * 动作码 → AuditAction（反查，用于链校验时重建条目）。
      *
      * 未知码归为 Unknown。
+     *
+     * ⚠️ 必须与 code() **严格互逆**，否则哈希链校验必然误报：
+     *    写入时 record_hash 用的是 `code()` 的返回值，校验时用
+     *    `fromCode(落库值).code()` 重算 —— 若某个码不被 fromCode 接受，
+     *    会退化为 Unknown（code() = "unknown"），规范化串随之改变，
+     *    该条记录被判「被篡改」。
+     *
+     *    下列 4 个动作历史上 code() 与 fromCode 的用词不一致
+     *    （写入用前一种、反查只认后一种），已造成真实误报：
+     *      ShareCreate     写入 acl.share_create      反查只认 share.create
+     *      ShareAccess     写入 acl.share_access      反查只认 share.access
+     *      KeyRotate       写入 crypto.key_rotate     反查只认 kms.key_rotate
+     *      BatchOperation  写入 archive.batch_operation 反查只认 archive.batch
+     *    现**两种码都接受**：既兼容历史数据，也保证与当前 code() 互逆。
      */
     public static func fromCode(code: String): AuditAction {
         match (code) {
@@ -112,20 +145,36 @@ public enum AuditAction {
             case "auth.logout" => return AuditAction.Logout
             case "auth.logout_all" => return AuditAction.LogoutAll
             case "auth.password_change" => return AuditAction.PasswordChange
+            case "auth.password_reset" => return AuditAction.PasswordReset
             case "acl.role_assign" => return AuditAction.RoleAssign
             case "acl.role_revoke" => return AuditAction.RoleRevoke
             case "acl.grant_create" => return AuditAction.GrantCreate
             case "acl.grant_revoke" => return AuditAction.GrantRevoke
+            case "acl.share_create" => return AuditAction.ShareCreate
             case "share.create" => return AuditAction.ShareCreate
+            case "acl.share_access" => return AuditAction.ShareAccess
             case "share.access" => return AuditAction.ShareAccess
             case "archive.export" => return AuditAction.DataExport
             case "archive.item_delete" => return AuditAction.ItemDelete
             case "archive.item_restore" => return AuditAction.ItemRestore
+            case "crypto.key_rotate" => return AuditAction.KeyRotate
             case "kms.key_rotate" => return AuditAction.KeyRotate
             case "acl.perm_change" => return AuditAction.PermChange
             case "cfg.change" => return AuditAction.ConfigChange
+            case "archive.batch_operation" => return AuditAction.BatchOperation
             case "archive.batch" => return AuditAction.BatchOperation
             case "archive.field_reveal" => return AuditAction.FieldReveal
+            case "audit.query" => return AuditAction.AuditQuery
+            case "family.group.create" => return AuditAction.FamilyGroupCreate
+            case "family.group.dissolve" => return AuditAction.FamilyGroupDissolve
+            case "family.invite.create" => return AuditAction.FamilyInviteCreate
+            case "family.invite.revoke" => return AuditAction.FamilyInviteRevoke
+            case "family.invite.accept" => return AuditAction.FamilyInviteAccept
+            case "family.invite.fail" => return AuditAction.FamilyInviteFail
+            case "family.member.remove" => return AuditAction.FamilyMemberRemove
+            case "family.grant.create" => return AuditAction.FamilyGrantCreate
+            case "family.grant.revoke" => return AuditAction.FamilyGrantRevoke
+            case "family.access.denied" => return AuditAction.FamilyAccessDenied
             case _ => return AuditAction.Unknown
         }
     }
@@ -140,6 +189,7 @@ public enum AuditAction {
             case AuditAction.Logout => return "auth.logout"
             case AuditAction.LogoutAll => return "auth.logout_all"
             case AuditAction.PasswordChange => return "auth.password_change"
+            case AuditAction.PasswordReset => return "auth.password_reset"
             case AuditAction.RoleAssign => return "acl.role_assign"
             case AuditAction.RoleRevoke => return "acl.role_revoke"
             case AuditAction.GrantCreate => return "acl.grant_create"
@@ -154,6 +204,17 @@ public enum AuditAction {
             case AuditAction.ConfigChange => return "cfg.change"
             case AuditAction.BatchOperation => return "archive.batch_operation"
             case AuditAction.FieldReveal => return "archive.field_reveal"
+            case AuditAction.AuditQuery => return "audit.query"
+            case AuditAction.FamilyGroupCreate => return "family.group.create"
+            case AuditAction.FamilyGroupDissolve => return "family.group.dissolve"
+            case AuditAction.FamilyInviteCreate => return "family.invite.create"
+            case AuditAction.FamilyInviteRevoke => return "family.invite.revoke"
+            case AuditAction.FamilyInviteAccept => return "family.invite.accept"
+            case AuditAction.FamilyInviteFail => return "family.invite.fail"
+            case AuditAction.FamilyMemberRemove => return "family.member.remove"
+            case AuditAction.FamilyGrantCreate => return "family.grant.create"
+            case AuditAction.FamilyGrantRevoke => return "family.grant.revoke"
+            case AuditAction.FamilyAccessDenied => return "family.access.denied"
             case AuditAction.Unknown => return "unknown"
         }
     }

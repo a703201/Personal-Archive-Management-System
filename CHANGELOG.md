@@ -15,6 +15,146 @@
 
 ---
 
+## [未发布] — P1 收口 + P2 启动
+
+P1 需求逐条落地并在 `127.0.0.1:8080` 实跑验证：**34 条中 33 条实现、1 条降级交付、0 条未做**（详见 `docs/12-P1实现状态核对.md`）。
+P2（23 条）累计 **16 条实现 / 7 条未开始**，台账见 `docs/13-P2实现状态核对.md`。
+
+### 新增（家庭成员邀请 · FR-ACL-010 · 方案 B）
+
+按 `docs/15` 的推荐结论完整落地：**主体 + 条目两级授权**（分类降级为「同主体内按分类收窄」）、**不做**邀请审批流、**3 批**推进。
+
+- **迁移 `019_family_collaboration.sql`**：4 张新表 `fam_groups`（组）、`fam_members`（成员，含 `my_role` / `removed_at` / `removed_by`）、`fam_invites`（邀请，只落 code/token 摘要）、`fam_grants`（授权 → 组 的**侧表**）。种子权限 `family:manage` / `family:invite` 授予 `owner` 与 `curator`（规则：能建/改自己主体的人才能建组；`user` 角色在本系统不存在，曾误写导致除 `owner` 外谁都建不了组，详见下方「修复」）。
+  > **为什么加侧表而不是给 `acl_grants` 加一列 `group_id`**：openGauss **不支持** `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`（实测 `ERROR: syntax error at or near "NOT EXISTS"`）。项目约定「每个迁移必须可反复执行」（`scripts/db.py exec` 与 CI 都依赖这一点），该 ALTER 无法写成幂等语句。用侧表既保住幂等，也不让核心 ACL 表承担可选能力的新列。理由写进了迁移文件头。
+- **`ams.core.family`（纯逻辑，零 IO）**：`InviteCode`（32 字符表 `23456789A-HJ-NP-Z`、8 位 = 40 bit 熵、掩码取低 5 bit 而非取模以避免偏置、`normalize` 去空白/连字符/下划线并转大写、`isWellFormed` **在查库前**先拒乱输）、`InviteState`（Usable/Revoked/Expired/Exhausted/TooManyFails，判定顺序 **撤销 > 失败超限 > 过期 > 用尽**）、`InviteLimits`（默认 15 分钟 / 1 次 / 5 次失败；上限 1440 分钟 / 10 次）、`InviteSnapshot.stateAt()`（三个入口共用同一判定，避免「列表显示有效但接受时报无效」）、`FamilyRole`（未知角色**降级为 Member**；Manager 不能移除 Manager/Owner，否则被提升的人可以把管理层踢空再独吞）、`GrantScope`、`PermSubset`。
+- **`ams.data.repo` 四个 Repo**：`FamGroupRepo` / `FamMemberRepo` / `FamInviteRepo` / `FamGrantRepo`。两处原子性设计：
+  - `consumeOnce` 把「未撤销 + 未过期 + 次数未用尽 + 失败未超限」四个条件压进**一条 UPDATE 的 WHERE**，由行锁保证「并发 accept 10 次只成功 1 次」；
+  - `bumpFail` 复用共享链接同款「自增 + 判定 + 撤销」一条语句（用更新前的值判定），避免进程在自增与撤销之间被杀而白送一次尝试。
+  - 成员视角只读出口 `listSharedItems` / `countSharedItems` / `canReadItem` 共用同一个 `sharedPredicate()`，三处逐字一致（否则分页会错乱）。
+- **`ams.app.family.FamilyService`**：建组（立刻写入 owner 成员行，否则组变孤儿）、创建邀请（`prov.randomBytes(24)`：前 8 字节给 code、后 16 字节给 token；**邀请不能直接产出第二个 owner**，`targetRole=owner` 降为 `manager`）、接受邀请（token 定位 → 状态有效 → code 正确 → **原子 consumeOnce** → join；已入组走**幂等分支且不消耗次数**）、公开落地页元数据（失效时 `valid=false` 且**不返回组名**）、建授权（三重校验：组内 owner/manager + 必须拥有该主体 + 被授权人必须是组成员；条目级还要校验条目确属该主体）、移除成员（级联撤销授权）。
+- **`FamilyRoutes`（15 条路由）**：公开 1 条（`GET /api/family/invites/:token`）、登录即可 6 条、`family:manage` 4 条、`family:invite` 5 条。
+  > **`/api/family/shared-items` 为什么不挂功能权限**：新注册账号默认无任何角色（默认拒绝是刻意设计），而 `docs/14 §3 T3` 又明确「入组不改变全局权限」。若这条只读出口也要求 `archive:read:own`，家人必须先找管理员开角色才看得到东西 —— 功能等于不可用；若为此自动写 `sys_user_roles`，就违背了 T3。故单开一条「只认 `acl_grants`、不认角色」的通道：一条多余的数据也读不到，且**不提供任何写/删/导出/分享操作**。
+  > 审计 detail **只写 ID 与计数，绝不写 code/token 明文**。
+- **`ItemRepo.list/count` 授权下推（B2，`docs/15` §6 标记的全局风险点）**：新增 `granteeId` 参数，把授权范围下推为 SQL 条件 `EXISTS (SELECT 1 FROM acl_grants g WHERE g.grantee_id = ? AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > CURRENT_TIMESTAMP) AND (g.item_id = arc_items.id OR (g.item_id IS NULL AND g.subject_id = arc_items.subject_id AND (g.category IS NULL OR g.category = 0 OR g.category = arc_items.category))))` —— **与 `Grant.covers()` 逐条对齐**，不允许「列表能看到、详情打不开」这类两套口径。
+  - **新增独立 `subjectFilter` 形参（防绕过）**：主体筛选必须作为**独立 WHERE 条件**（`subject_id = ?`），不能靠缩窄「可访问主体集合」实现 —— 因为一旦 `granteeId > 0`，谓词里还有一条「被授权的条目」分支，缩窄主体集合只会让「自有」那半边变小，被授权分支依然全量命中，于是 `subjectId=99999999` 这类越权筛选会把别人的共享条目带出来。端到端脚本已固化此回归（`subjectFilter` 不绕过断言）。
+- **`SubjectRepo.grantCustodian / revokeCustodian`**：`custodian_ids` 此前**全库只有读路径、没有写入口**，是设计文档里长期存在的空档。现补上 `array_append` / `array_remove` 两个对称写入口（均带 `owner_id` 归属校验与 `NOT (? = ANY(...))` 幂等判定）与 `listCustodianIds`。
+- **审计**：`AuditAction` 新增 10 个动作码（`family.group.create/dissolve`、`family.invite.create/revoke/accept/fail`、`family.member.remove`、`family.grant.create/revoke`、`family.access.denied`），枚举成员 / `fromCode` / `code()` 三处同步。审计落痕在路由层（与 `ExportRoutes` / `SystemRoutes` 同策略），写失败只 WARN 不改业务结果。
+- **前端**：新增 `/family` 页（两个顶层视图：我的家庭组 / 共享给我的；组详情为 Sheet + 成员·授权·邀请三个子页；三级粒度授权表单：整个主体 / 某分类 / 单条条目；新建邀请的 **code 与链接只显示一次**并明确提示，关闭后只能撤销重发）、公开落地页 `/invite/:token`（先展示组名与邀请人昵称供**核对**，再要求登录并输 8 位码；失效邀请渲染成正常页面的「已失效」态而不是接口报错）。导航在桌面与移动端各加「家庭协作 / 家庭」入口。能力位（canInvite/canGrant/canDissolve）**直接读后端组详情**，不在前端重新推导角色 —— 两边各写一套判断必然漂移。
+
+### 变更（部署形态：一个进程、一个端口）
+
+此前「后端 8080 + 前端另起静态服务器」被改成**前后端同时部署、同时启动**：
+
+- **`packages/ams-api/src/server/static.cj`**（新增）：`StaticFiles` + `StaticHandler` + `ApiPath`。三条规则：① `/api/` 前缀**永不接管**（未匹配的接口返回 JSON 404，形状与 `ApiResponse.error` 一致，否则前端 `JSON.parse` 拿到 HTML 会报极具误导性的语法错）；② SPA history 回落**仅对无扩展名路径**生效（带扩展名却缺失必须真 404，否则缺 js 会被 HTML 掩盖）；③ 拒绝 `..` / `\` / `:` / 空字节。`/assets/` 给 `public, max-age=31536000, immutable`，其余 `no-cache`；统一加 `nosniff` / `referrer-policy: no-referrer` / `x-frame-options: DENY`。目录探测顺序 `web/dist → web → ../web/dist`，可用 `AMS_WEB_DIR` 覆盖。
+- **`ParamDistributor` 新增 `setFallback()`**：SPA 路由无法逐一注册，静态托管作为兜底，同时保持「精确匹配 > 参数匹配 > 最长模式优先」的既有语义不变。
+- **`ApiServer.init` 新增 `staticDir` 入参**，并在 `main.cj` 读 `AMS_WEB_DIR`、`server.ready` 日志带上 `webDir`；未找到前端目录时打 `http.static.disabled`（WARN，只有接口可用）。
+- **`scripts/package.sh`**：新增前端构建步骤（`npm run build`，含 `vue-tsc` 类型检查，类型漂移不允许进交付物）与 `web/` 目录落包；`config/application.env` 增 `AMS_WEB_DIR`；`start.cmd` / `start.sh` 在缺 `web/index.html` 时给出明确 WARN；`healthcheck.*` 增加第二项检查 —— **根路径必须返回前端页面**（专门发现「接口通但前端产物没带上」的半残部署）；`DEPLOY.md` 改写为「一个进程一个端口」并补路由分流表。顺带修掉一个既有缺陷：`DEPLOY.md` 的 heredoc 用了引号定界符（`<<'DEPLOYEOF'`），导致 `${VERSION}` `${PKG_NAME}` 从未被展开、标题里一直是字面量。
+
+### 新增（P2 第三批）
+
+- **条目模板（FR-ARCH-012 · 方案 C：条目骨架 + 字段默认值）**：新增表 `arc_item_templates`（迁移 `017`）+ `ItemTemplateRepo` + `ItemTemplateRoutes`（`GET/POST /api/item-templates`、`PUT/DELETE /:id`、`POST /:id/apply`）。模板 = 骨架（分类/标题/状态/敏感度/签发机构/备注）+ `extra` JSON 默认值 + `expires_offset_days`。两条关键取舍：① **存偏移不存绝对日期** —— 模板会长期复用，绝对日期第二次套用就批量产出「已过期」档案；② 标题序号展开抽为纯函数 `TemplatePlan`（`{n}` 占位替换、无占位且 N>1 时追加 ` (i)`，否则列表里是 N 行无法区分的同名记录），15 条单测覆盖占位/多条/零条/闰年边界/超限钳制。套用上限 50 条（再大应走 CSV 导入，那边有预检与错误报告）。所有读写以 `owner_id` 为界。前端新增 `/templates` 页：列表 + 新建/编辑（标题实时预览 + JSON 对象校验）+ 套用 + 删除。
+- **共享链接（FR-ACL-011 / FR-ACL-012 · 方案 A：条目级）**：新增表 `arc_share_links`（迁移 `018`）+ `ShareLinkRepo` + `ShareRoutes`。公开入口 `GET/POST /api/share/:token`（`isPublic`），所有者 `POST/GET /api/share-links` + `DELETE /:id`。安全要点：
+  - token 由**密钥 HMAC-SM3** 从「条目+用户+时间+两次雪花 ID」派生（雪花 ID 单调可推，裸用可猜邻近 token）；
+  - 密码只存**加盐 HMAC-SM3 摘要**，比较走 `provider.constantTimeEquals`（定时无关，复用系统内实现而非本地重复一份）；
+  - `fail_count / max_fails` 落库 → 计数跨进程、跨重启有效；**「自增 + 判定 + 撤销」合并为一条 UPDATE**（`fail_count + 1 >= max_fails` 用更新前的值），避免进程在自增与撤销之间被杀而白送一次尝试；
+  - 不存在 / 已撤销 / 已过期 / 条目已删 **一律 404 同一话术**（区分原因即等于确认 token 存在）；
+  - 公开响应**只含展示字段**，不含条目标识/归属主体/扩展字段/附件；`sensitivity >= 3` 连签发机构与备注都不给；其余掩码复用 `Masker.mask`，与列表页同口径（两套掩码规则是最典型的越权旁路）；
+  - 缺加密提供者或签名密钥时**失败关闭**（抛错），绝不降级成「弱 token」或「带密码却存空摘要 → 静默变公开链接」。
+  前端：条目详情面板内嵌「共享」区（创建 / 复制 / 撤销 / 浏览数与错误数），新增公开页 `/share/:token`（密码保护时首屏不含任何条目信息）。
+- **权限预览（FR-ACL-013 · 方案 A：仅统计口径）**：`GET /api/admin/permission-preview?role=<code>[&userId=]`（权限 `acl:manage`），返回角色元数据、主体范围（`any` / `own` / `user:<id>`）、`userCount/subjectCount/visibleItemCount`、按分类分布、字段可见上限与掩码级别、权限点清单。**不返回任何条目内容** —— 预览是「验证 RBAC 配置」的工具，不是「以他人身份浏览数据」的后门。角色不含 `archive:*:any` 时默认「仅本人范围」，**不猜测他人主体集合**。前端角色卡片新增「预览」：统计卡 + 分类条形分布 + 可选用户 ID 精算。
+- **家庭成员邀请 · 安全设计（FR-ACL-010）**：交付 `docs/14-家庭成员邀请设计.md`（10 项安全原则、`fam_groups/fam_members/fam_invites` 数据模型、邀请码 vs 二维码取舍、14 项威胁模型 T1–T14、10 个审计动作码、完整 API 草案、统一错误语义、F1–F4 分批计划）。当时三处待定项（§6 授权粒度、§13 R6 审批流、§14 批次范围）已在 `docs/15` 给出推荐结论，后续按该结论完整落地，详见上方「新增（家庭成员邀请 · FR-ACL-010 · 方案 B）」。
+- **前端字典统一**：新增 `web/src/composables/useCatalog.ts`。分类中文名此前在 `ArchiveView` 与 `OverviewView` 各写一份且已出现漂移（分类 2 一处叫「证件信息」、另一处叫「身份证明」），现以 `docs/06 §12.3` 为唯一口径。
+
+### 修复
+
+- **邀请码生成把字符写成 ASCII 码（单测发现）**：`InviteCode.generate` 里 `sb.append(ALPHABET[idx])` —— 仓颉的 `String` 下标取回的是 **UTF-8 字节（`Byte`）**，不是 `Rune`，于是命中了 `StringBuilder.append(Int64)` 重载，把 `'2'`(=50) 写成字符串 `"50"`。产出变成 `"5051525354555657"` 这种 16 位数字串，`isWellFormed` 必然不过 → `createInvite` 恒抛 `Internal: 邀请码生成失败`，**功能完全不可用**。改为 `sb.append(Rune(Int32(ALPHABET[idx])))`（与同文件 `normalize` 的写法一致）。这条是靠「给定字节 → 确定字符串」的确定性单测抓出来的 —— 纯随机生成 + 人工点一遍根本发现不了。
+- **`static.cj` 的 `String.indexOf` / `lastIndexOf` 返回 `Option<Int64>`**：初版直接与 `0` 比较（`if (q >= 0)`），编译报 `invalid binary operator '>=' on type 'Enum-Option<Int64>'`。改用 `match` 解包。同时 `Byte(x)` 这种「构造调用」在仓颉不成立，数值转换一律走 `UInt8(...)`。
+- **块注释里的 `/api/*` 会吞掉半个文件**：`ServerConfig.webDir` 的文档注释里写了 `/api/` 加星号，而**仓颉的块注释支持嵌套** —— 那个星号与斜杠组成新的注释起始符，注释一路吞到文件末尾，报出 `unclosed delimiter '{'` 并指向 `class ServerConfig {`，完全指错地方。已在注释里写清这个坑。
+- **`acceptInvite` 恒报「HMAC 密钥不能为空」（端到端发现）**：`FamInviteRepo.findByTokenHash` 的 SELECT 只取了判定状态所需字段，**漏掉 `code_hash` / `code_salt`**；`RowData.str()` 对不存在的列返回空串，于是 `hmacHex("", ...)` 直接抛 `CRYPTO_FAILURE`。诡异之处在于**公开落地页完全正常**（它不需要这两列），只有接受邀请必挂，报错信息还指向密钥配置 —— 与真实原因（少选两列）相差十万八千里。已补齐两列，并在 `FamilyService.acceptInvite` 加「数据完整性自检」：缺摘要属于内部缺陷，抛 `Internal` 而不是伪装成「邀请码错误」去扣用户仅有的 5 次机会。
+- **权限种子授给了不存在的角色（迁移静默失效）**：`019` 把 `family:manage` / `family:invite` 授给 `r.code = 'user'`，而系统实际角色是 `owner / curator / family / org_admin / auditor` —— 那两条 `INSERT ... SELECT` 匹配 0 行，**不报错**，表现是「迁移成功、跑完没异常，但除 `owner` 外谁都建不了家庭组」。现改为 `owner` + `curator`（规则：能建/改自己主体的人才能建组），并加一条「除零即报错」的单语句断言防止再次静默。之所以不用 `DO $$ ... $$`：`scripts/db.py exec` 按分号切语句，PL/pgSQL 块体内的分号会被切断。
+- **已用尽的邀请对成员报「邀请不存在」**：`acceptInvite` 原顺序是「token → 状态 → code → 成员」，而默认 `maxUses = 1` —— 家人第二次点同一链接时邀请刚好被他自己用尽，于是看到「邀请不存在」，明明已经在组里。已把**成员身份判定提到状态判定之前**：持 token 已具备凭据，而「你在不在这个组」对本人不是秘密；非成员仍统一 404。
+- **`FamilyRole` / `AppErrorKind` 不能用 `==` 比较**：仓颉自定义枚举没有内建 `operator func ==`，`target == FamilyRole.Member` 与 `e.kind == AppErrorKind.Forbidden` 都编译不过，改成嵌套 `match`。
+- **`let (_, _) = f()` 用在非 tuple 返回值上**：`revokeAllByGroup` / `memberRepo.remove` / `requireRole` 四处报 `initializer isn't a tuple to match tuple pattern`，删掉解构直接调用。
+- **共享链接恒失败（配置回落拿到空密钥）**：`main.cj` 中 `exportSignKey = AMS_EXPORT_SIGN_KEY ?? AMS_TOKEN_SECRET ?? ""` 在未显式配置环境变量时得到**空串** —— 因为 `AMS_TOKEN_SECRET` 的本地默认值只落在上文的局部变量里，这里重新读环境变量拿到的是 `None`。后果是本地开发下「导出包无法签名 / 回导验签恒失败 / 共享链接报 HMAC 密钥不能为空」，且报错信息指向不明。已改为回落到 `config.tokenSecret`（已含默认值），并把空密钥的报错改为点名配置项。
+- `packages/ams-data/src/repo` 新增文件缺 `std.database.sql.*` 与 `ams.data.db.*` 导入，导致 `Database` / `toDbError` 未声明（`ams.data.repo` 构建失败）。
+- **新手引导盖住公开页**：`Onboarding.vue` 只判断 `localStorage` 是否看过，但它挂在 App 外壳之外 —— 于是登录页、找回口令页、以及新增的共享页（`/share/:token`，接收方根本没有账号）都会被引导层蒙住。共享页尤其致命：内容被盖住，接收方会以为链接坏了。现改为同时满足「未看过 + 已登录 + 非 `meta.public`」才展示。
+- **`.kv` 键值列表在多数页面退化成默认缩进**：该样式此前只定义在 `ArchiveView` 的 `scoped` 里，`RolesView`（权限预览）与 `ProfileView` 使用 `class="kv"` 时拿不到样式，`dd` 回落到浏览器默认的 40px 左缩进并换行 —— 表现为「标签一行、值另起一行且右移」。已将 `.kv` 提升为 `styles/theme.css` 全局类（含窄屏单列适配），并删除 ArchiveView 里的局部副本。
+- `scripts/build.sh`：`TARGETS` 在参数解析之前被引用（`set -u` 下报 unbound variable）；且 `TOP_ORDER` 把 `ams-data` 排在 `ams-core` 之前，导致 `ams.data.repo` 用旧 `ams.core.search.cjo` 编译、`SearchQuery` 新字段报「member not found」。已调整参数解析顺序并修正拓扑序（`ams-core` 先于 `ams-data`）。
+- **分类中文名后端与前端不一致**：`ArchiveCategory.displayName()`（后端唯一出中文名的地方，导出 CSV / 详情报文都走它）沿用早期草稿的「身份证明 / 工作经历 / 资格证书」，与 `docs/06 §12.3` 的字典表（证件信息 / 职业经历 / 资质证书）不符，也与前端 `useCatalog.ts` 不符 —— 同一份档案在网页和导出文件里叫两个名字。现已把后端 `displayName()` 对齐字典表，并更新枚举成员注释与文件头说明。
+
+### 文档与许可证（P2 第三批）
+
+- **新增 `docs/15-家庭成员邀请方案评估.md`**：针对 FR-ACL-010 三处待定项（§6 授权粒度 / §13 R6 审批流 / §14 分批范围）各出 A/B/C 三案 + 推荐 + 成本表，结论为 **§6 采方案 B（主体 + 条目两级，分类降级为同主体内收窄）**、**§13 R6 不做（邀请本身即双人确认）**、**§14 由 4 批压缩为 3 批**。评估前先做了一次**代码现状审计**，5 条硬事实推翻了设计文档里的若干隐含假设：① `acl_grants.subject_id` 是 `NOT NULL`（分类级授权无法表达「不限主体」）；② `Grant.covers()` 连分类授权也要求主体一致（跨主体分类授权恒不命中）；③ `ItemRepo.list/count` 完全不查 `acl_grants`，FR-ACL-008 只是「详情能用、列表/检索/导出仍全量」的半成品；④ `custodian_ids` 有列有读路径但**全库无写路径**（主体级共享反而最便宜）；⑤ 列表下推要改 6 个入口，必须先收敛出统一 `AccessScope`。
+- `docs/14-家庭成员邀请设计.md` 在 §6.1 字段级说明后、§13 R6 行、§14 门槛说明后、结语共 4 处加了指向 `docs/15` 的指针，避免读者按未定稿的粒度直接开工。
+- **新增 `README.md`**（项目门面）：目录 / 这是什么 / 当前状态（P0 54/54、P1 33+1 降级、P2 15/23，附工程面统计：115 个 `.cj` 3.76 万行、29 个 vue-ts 1.24 万行、19 个迁移、152 条路由、272 条单测）/ 功能一览 / 技术栈与九层单向依赖图 / 安全设计要点（国密落地实况：SM3 ✅、SM4-CBC/CTR ✅、SM4-GCM ❌ 已改 EtM 等价构造、SM2 ❌ 未实现）/ 快速开始 / 常用脚本 / 目录结构 / 文档索引 01–15 / 已知限制 / 参与开发 / 许可证。
+- **采用 Apache-2.0**：新增 `LICENSE`（全文与官方文本逐字一致，仅填入 `Copyright 2026 何宇翔 (a703201)`），`web/package.json` 补 `license` 字段。选 Apache-2.0 而非 MIT 的唯一决定项是**第 3 条明示专利授权**：本项目含国密实现与权限模型等可能被主张专利的部分，MIT 对此完全沉默，Apache-2.0 能让使用方获得明确的专利许可、并以第 3 条终止条款对冲专利诉讼风险。
+- `docs/README.md` 索引从 01–10 补齐到 01–15，状态行由「设计阶段（尚未进入编码实现）」改为当前实现进度。
+- `docs/13-P2实现状态核对.md` 的 FR-ACL-010 行补 `docs/15` 指针。
+- **前端文案口径统一落地**：`OverviewView.vue`（自带一份 `CATEGORY_NAMES`）与 `ArchiveView.vue`（自带一份 `CATEGORY_DEFS`）改为统一消费 `composables/useCatalog.ts`，该文件成为分类/状态/来源/敏感度的唯一口径。
+
+### 新增（P2 第二批）
+
+- **导出包回导（FR-EXP-008）**：`POST /api/import/bundle/precheck` 与 `/api/import/bundle`。回导侧从**原始文本**按括号配平切出 `manifest` / `items` 两段，校验 **HMAC-SM3（或 SHA-256）签名**与 `manifest.segments[].sha256` 指纹 —— 签名针对原始字节，故不重新序列化（多一个空格就对不上）。任一不匹配即拒绝，**一个字节都不落库**；验签通过后按 `source=5` 回导入库，复用导入任务表 / 进度 / 错误报告 / 取消语义。`bodyCapFor` 将该入口放宽到 64 MiB。新增 5 条单测（合法包 / 篡改 / 错密钥 / 缺签名 / 不支持算法）。
+- **来源与创建时间筛选（FR-SRC-010）**：`arc_items.source` 此前恒为 0、无写入方，来源筛选无从谈起。现打通写入枚举（0 手动 / 1 CSV / 2 克隆 / 3 OCR / 4 附件 / 5 回导），`ItemRepo.list/count`、`SearchQuery`、`GET /api/items`、`GET /api/search` 均接受 `source` 与 `createdFrom/createdTo`；前端档案页工具栏新增来源下拉与创建日期区间，条目卡显示来源标签。
+- **通知偏好中心与免打扰（FR-NTF-006 / FR-NTF-007）**：`GET/PUT /api/notify/prefs`（`NotifyRoutes`），按 `req.subjectId` 隔离，存于配置中心（`scope=notify`，key=`u:<userId>:<field>`），不新增表。免打扰开关 + 起止时间 + 渠道（站内信 / 邮件）+ 频率（实时 / 每日 / 每周 / 关闭）；写入按白名单字段增量 upsert。个人主页新增「通知偏好」卡片。
+- **多语言框架（FR-CFG-009）**：后端 `GET /api/i18n/locales` 声明默认 `zh-CN` 与支持列表；前端**零依赖** i18n 模块（`web/src/i18n`：`locale` + 文案目录 + localStorage 持久化 + 同步 `<html lang>`），顶栏语言切换、登录页标题/副标题接入。P2 定位为「框架预留」，未做全量翻译（避免为引 `vue-i18n` 增加依赖与网络安装成本）。
+
+### 新增（P2 第一批）
+
+- **标签使用统计（FR-TAG-004）**：`TagRepo.stats()` 一条 SQL 出 `total/used/unused/totalUsage/lastUsedAt`，`GET /api/tags/stats`。顺带修掉口径错误：原先**摘标签**也会把 `last_used_at` 推后，导致「最近使用」被清理动作污染；现只在打标时刷新。前端标签页顶部统计卡。
+- **标签层级（FR-TAG-005）**：`arc_tags.parent_id` 早有列但无维护入口。新增 `TagRepo.move()`：写库前用 `tagMoveWouldCycle()` / `tagDepthOf()` 做**环路检测**（自引用结构一旦成环，递归渲染与级联删除都会死循环）与深度上限 `TAG_MAX_DEPTH = 5`；`PUT /api/tags/:id/parent`、`GET /api/tags?tree=1`（返回 `depth` / `childCount`）。两个纯函数有 7 条单测，含「互相引用成环」的终止判定。前端新增 `/tags` 页（树形表格 + 移动/改名/删除 + 新建时选父级）。
+- **自审计（FR-AUD-009）**：新增 `AuditAction.AuditQuery`（`audit.query`）；`/api/audit`、`/api/audit/verify-chain`、`/api/audit/report` 三个入口都调用 `selfAudit()` 落痕（IP / UA / requestId）。「谁看了审计」此前没有任何证据，审计链在这里是断的。`record()` 是写不是查，不递归。
+- **登录页定制（FR-CFG-008）**：新增 `BrandingRoutes`，`GET /api/branding` 为**公开只读**（登录页渲染时还没有令牌），返回 `brandName/logoUrl/notice/footerText/icpNo`；写入沿用 `PUT /api/admin/config?scope=branding`（权限与审计已由配置中心覆盖），不另开写接口。前端登录页渲染 Logo / 公告 / 页脚 + 备案号，接口失败静默降级为默认值 —— 登录本身比品牌展示重要，不能因为配置接口挂了就白屏。
+- **批量编辑（FR-ARCH-013）**：`POST /api/items/batch/edit`，`{ids, category?, expiresAt?, tagIds?}` 三个字段均可省略，**打补丁语义**（不传的字段不动 —— 批量场景下用缺省值覆盖未填字段一次就能毁掉几十条记录）。`ItemRepo.batchEdit()` 的 WHERE 同时带 id 列表与**可访问主体列表**，越权条目根本不会被更新，响应的 `updated` 与 `requested` 不一致即为信号；`TagRepo.attachMany()` 幂等打标（已有关系不重复计数，`usage_count` 不会虚增）。前端档案页批量栏新增改分类 / 有效期 / 加标签。
+
+### 新增（P1 收口）
+
+- **ZIP 批量导入附件（FR-IMP-002）**：上轮标注的「SDK 无 zip 解包」被证伪 —— `stdx.compress.zlib` 的 `WrapType.DeflateFormat` 探针实测就是 **RFC 1951 裸 deflate**（ZIP 条目正是这个格式）。手写 `zipreader.cj`（EOCD/中央目录/本地头 + store/deflate）与 `gbk.cj`（87×94 GBK 码表，由 `scripts/gen-gbk-table.py` 生成），解决中文 Windows 打包「GBK 文件名 + bit 11 未置位」这一最常见坑（UTF-8/GBK 双解码 + 可信度打分）。两阶段接口：`POST /api/import/attachments/precheck` 出映射预览（**真解一遍验 CRC**，不写库）→ `POST /api/import/attachments/tasks` 用户确认后异步落库；标题不存在自动新建条目（同标题只建一次），同名条目 ≥2 列为冲突必须手动指定（未指定直接 409 并点名目录）。安全闸门：路径穿越/绝对路径/盘符、ZIP64、加密位、deflate64/bzip2、CRC 损坏、解压炸弹（边解边计数，50 MB/文件、2000 条目）。前端新增 `/import` 页（ZIP/CSV 双 Tab、统计卡、映射预览表、冲突下拉、任务进度轮询、错误报告下载）。
+- **自助找回口令（FR-AUTH-008）**：`sys_password_reset` 表 + `PasswordResetRepo` + `PasswordResetService`；`POST /api/auth/password/{forgot,verify,reset}` 三步链路（6 位验证码 10 分钟 / 5 次尝试 / 60 秒冷却 → 一次性重置令牌 15 分钟 → 改哈希并**吊销全部会话**）。验证码与令牌只存 SM3 摘要（验证码以 user_id 作盐）。前端新增 `/forgot` 三步向导。
+- **双因子 TOTP（FR-AUTH-009）**：自写 `Sha1`/`Base32`/`Totp`（标准库无 SHA-1；启动跑 RFC 6238 附录 B 自检），`sys_user_totp` + `TotpRepo`（`last_step` 防重放），`/api/me/2fa{,/setup,/enable,/disable}`，登录在口令通过后、签发令牌前强制校验；个人主页新增绑定卡片，登录页按需展开动态码输入。
+- **附件版本（FR-ATT-004 补齐）**：`POST /api/attachments/:id/versions` 上传新版本（复用附件 DEK、版本号自增、`att_<id>_v<n>.bin`），下载改为按 `is_current` 反查存储键 —— 之前「切换版本」只改标记、下载永远是首版。
+- **版本元数据对比（FR-ATT-009）**：`GET /api/attachments/:id/versions/compare?from=&to=`，返回两侧元数据 + `diff{contentChanged,sizeDelta,ext/mime/status/noteChanged,fields[]}`。
+- **附件批量操作（FR-ATT-010）**：`/api/attachments/batch/{download,tag,delete}`；自写 ZIP 写入器（store + CRC32 + UTF‑8 名标志 + 可选 ZipCrypto 口令，因 SDK 无 zip）；新表 `arc_attachment_tags` 支持附件维度打标签（幂等）；删除走软删。前端新增 `AttachmentPanel.vue`（上传/预览/版本对比/批量栏）。
+- **动态水印（FR-ATT-008，降级）**：`GET /api/attachments/:id/watermark` 签发「访问者 + 服务端时间 + 8 位追踪号」并写审计，前端斜向平铺覆盖；**无法烧进像素**（SDK 无图像/PDF 渲染库）。
+- **审计动作扩展**：`AuditAction.PasswordReset`（`auth.password_reset`），找回流程六类结果均落库。
+- **邮件控制台投递**：配置 `mail.console=true` 时把邮件正文打进日志（等价 Django console backend），便于本地联调验证码类流程；默认关闭。
+- **链校验分段模式（FR-AUD-003 补充）**：`GET /api/audit/verify-chain?mode=segment` 在段首无前驱（链头归档 / 历史断层）时，以段首自身 `prev_hash` 为锚点证明**段内**连续且未改动，响应明示 `anchored=false`、`checked=N`；默认 `strict` 行为不变。
+- **审计链独立校验器**：`scripts/verify-audit-chain.py` 按同一套规范化规则用 Python 复算 SM3 并与落库 `record_hash` 比对，不依赖 `ams-server` 与被测代码（可交叉验证「tampered」是真是假），输出哈希/衔接/断层三类结论与退出码。
+
+### 修复
+
+- **请求体 1 MiB 以上被静默截断**：附件上传声明上限 50 MB，但 `api.http` 只做**一次** `read()`，超过 1 MiB 的部分直接丢弃，而魔数校验看的是前几个字节 —— 表现是「上传成功但文件残缺」。两层修复：① `ServerBuilder.maxRequestBodySize(64 MB)`（stdx 在传输层就返回 413 `The content too large.`，我们的读循环根本没跑到）；② 读循环改为分块累积，按路径分级限额（附件与批量导入 64 MB，其余 1 MB），超限返回 `PAYLOAD_TOO_LARGE` 而不是截断。
+- **导入任务报告的失败数恒为 0（影响 FR-IMP-001 与 FR-IMP-002）**：`markSuccess()` 先把 `status` 置 2 并把 `failed_count` 清零，随后的 `updateProgress()` 因 `WHERE status = 1` 成了**空操作**。新增 `ExportTaskRepo.finish()` 用**一条** UPDATE 写全 `total/done/failed/result_path/expires_at`，两个导入器改用它。实测同一夹具由 `failed=0` 变为 `failed=2`，与报告里的 skipped 行数一致。
+- **批量导入附件会静默丢文件**：`attachments.upload()` 的去重命中分支会复用已有附件行、不建新的条目归属，导入时该文件看起来「成功」却没挂到任何条目。新增 `dedup!: Bool = true` 形参，批量导入传 `false`。
+- **请求体分块拼接依赖切片语义**：`ApiRequest.fromContext` 复用同一个 64 KiB 缓冲区循环读，分块用 `chunk[0..n]` 累积。若 `Array<Byte>[Range]` 返回视图而非拷贝，所有分块会指向同一段内存，拼出的请求体「长度正确、内容全错」——现场表现为「几十个条目的 ZIP 解析失败，单个小包却正常」。改为显式逐字节拷贝（`ApiRequest.copyOf`），从语义上消除该依赖。
+- **预检接口残留诊断开关**：`POST /api/import/attachments/precheck?debug=1` 会把收到的字节数与指纹回显在错误消息里（早期为定位请求体损坏临时加的）。已移除；同时预检改用与提交相同的 `splitFramed`，裸 ZIP 与封帧体都能解析，避免「预检能过、确认提交报 400」的分叉。
+- **导入页未拦超大包**：后端对 `/api/import/attachments` 的请求体上限是 64 MiB（`MAX_LARGE_BODY_BYTES`），但前端不校验包大小，用户要把几十 MB 的包传完才拿到 413。现在选包时即按 64 MiB 拦截并提示拆包，页内说明也标注了「单个压缩包 ≤ 64MB」。
+- **导入分类范围写死 1–6**：字段模板与前端字典都是 1–11，导入却把 7–11（家庭关系/健康/资产/影像附件/自定义）判为非法。两处校验统一放宽到 1–11。
+- **附件归属错挂**：`POST /api/attachments` 曾把「当前用户 ID」当 `subject_id` 落库，导致附件主体级鉴权必然失败；改为按 `itemId` 反查条目主体，主体级附件要求显式 `subjectId`。
+- **附件行级越权缺口**：单条下载只校验权限码、不校验行归属；批量入口统一补上「附件主体是否在调用者可访问集合内」校验。
+- **`wrapped_dek` 列缺失**：`008_attachment_dek.sql` 用的 `ADD COLUMN IF NOT EXISTS` 在 openGauss 5.0 上不生效且被静默忽略，附件上传/列表直接 `DATABASE_FAILURE`；已补列并记录该语法限制。
+- **`db/migrations/015`**：`sys_password_reset` 增加 `created_ms/consumed_ms`（冷却期在 SQL 里做数值比较，避免 TIMESTAMPTZ 转换）。
+- **审计哈希链大面积误报「被篡改」（FR-AUD-002/003）**：收尾自检发现 `GET /api/audit/verify-chain` 对应用自己写入的正常记录报 tampered。用「Python 独立复算 + 解析探针 + 端到端复现」三层定位，实为 4 处反查/还原缺陷：
+  - `String.trimStart()/trimEnd()` 在本机仓颉 SDK 1.0.5 上是**空实现**（`"  abc  ".trimStart().size == 7`），`jsonToDetail` 因此把 `{"k": "v"}` 还原成 ` "k"= "v"`。新增 `ams.kernel.util.trimSpace()`（按字节裁剪，不切断 UTF-8），全仓替换 16 处误用；`jsonToDetail` 改为扫描式解析（值内含逗号/冒号不截断，支持 `\" \\ \n \uXXXX` 及代理对），`detailToJson` 按 JSON 规范转义。
+  - `AuditAction.fromCode` 与 `code()` 有 4 个动作用词不一致（`share.create`↔`acl.share_create`、`share.access`↔`acl.share_access`、`kms.key_rotate`↔`crypto.key_rotate`、`archive.batch`↔`archive.batch_operation`），反查退化为 `unknown` 导致哈希不符；`fromCode` 改为新旧码都接受。
+  - `toResult(2)` 误返回 `Success`（应为 `Denied`），全部 `result=2` 的记录误报（实测 20 条）；`toActorType(3)` 漏处理（防御性补齐）。
+- **服务重启后旧令牌返回裸 500**：`MemorySessionStore.get()` 用 `HashMap[sid]` 直接读，键缺失时仓颉 `[]` **抛 `NoneValueException`**（不返回 Option），异常穿透中间件。改为先 `contains` 再取，恢复为 `401 令牌无效或已过期`。
+- **带空格 JSON 解析失败**（同一 trim 根因）：`{"username": "tester"}` 曾报「用户名与口令不能为空」；现与紧凑 JSON 行为一致。
+
+### 文档
+
+- 新增 `db/migrations/015_password_reset.sql`、`016_attachment_tags.sql`。
+- `docs/12-P1实现状态核对.md` 更新为收口状态（含每条实测证据与唯一降级项的说明），新增 §2.6.1 记录审计哈希链复核的 5 处缺陷、定位方法与验证证据；§2.7.1 记录 ZIP 批量导入的可行性探针、实现要点与 7 个夹具的验收结果；同时修正 §1 摘要与全表统计不一致（20/14 → 33/1/0）。
+- 新增 `scripts/gen-gbk-table.py`：从 Python `gbk` 编解码器生成 87×94 GBK→Unicode 码表（仓颉侧 `gbk.cj`）。
+- 新增 `scripts/verify-audit-chain.py`：审计链离线独立校验（不信任服务端）。
+
+### 已知限制
+
+- FR-ATT-008 水印为「可视覆盖 + 审计可追溯」，非像素级烧写（SDK 无图像编解码/PDF 内容流库，能力边界）。
+- ZIP 批量导入的**单个压缩包 ≤ 64 MiB**、单批 ≤ 500 个文件。请求体在鉴权之前就被读入内存，故上限按路径分档放宽（附件与批量导入 64 MiB，其余 1 MiB），不做流式入库；超出需拆包分批（前端已在选包时拦截并提示）。
+
+---
+
 ## [0.2.0] — 2026-10-27
 
 P0 需求全量落地（54 已实现 / 0 部分 / 0 未实现），并以单元测试套件全绿（214 通过 / 0 失败）收口。

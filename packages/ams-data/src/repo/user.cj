@@ -836,6 +836,34 @@ public class UserRepo {
     }
 
     /**
+     * 列出全部「管理员」用户（接收安全告警的接收人，FR-AUD-007）。
+     *
+     * 判定：拥有 system:admin 权限的用户（含 org_admin 角色与 owner 角色，
+     * 二者均在 007 迁移中挂了 system:admin）。仅取启用(status=0)且未删除者。
+     *
+     * 返回行：id, email, nickname
+     */
+    public func listAdmins(): RowSet {
+        let sql = "SELECT DISTINCT u.id, u.email, u.nickname " +
+                  "FROM sys_users u " +
+                  "JOIN sys_user_roles ur ON ur.user_id = u.id " +
+                  "  AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP) " +
+                  "JOIN sys_roles r ON r.id = ur.role_id AND r.deleted_at IS NULL " +
+                  "JOIN sys_role_perms rp ON rp.role_id = r.id " +
+                  "JOIN sys_perms p ON p.id = rp.perm_id " +
+                  "WHERE p.code = 'system:admin' AND u.deleted_at IS NULL AND u.status = 0"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            return readRows(st.query())
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
      * 查询距上次修改口令已过的毫秒数（从未改过返回 0）。
      *
      * 用于 FR-AUTH-004 的「两次修改间隔 ≥ N 小时」校验。
@@ -943,6 +971,32 @@ public class RoleRepo {
                   "JOIN sys_perms p ON p.id = rp.perm_id " +
                   "WHERE r.code = ? AND r.deleted_at IS NULL"
         return this.queryStrings(sql, roleCode)
+    }
+
+    /**
+     * 统计持有某角色（且未过期）的用户数。
+     *
+     * 用途：FR-ACL-013 权限预览 —— 让管理员知道这条预览覆盖多少人。
+     */
+    public func countUsersByRole(roleCode: String): Int64 {
+        let sql = "SELECT COUNT(*) AS n FROM sys_user_roles ur " +
+                  "JOIN sys_roles r ON r.id = ur.role_id AND r.deleted_at IS NULL " +
+                  "WHERE r.code = ? " +
+                  "AND (ur.expires_at IS NULL OR ur.expires_at > CURRENT_TIMESTAMP)"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, roleCode)
+            let rows = readRows(st.query())
+            match (rows.first()) {
+                case Some(r) => return r.i64("n")
+                case None => return 0
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
     }
 
     /**

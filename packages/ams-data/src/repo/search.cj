@@ -31,6 +31,7 @@ import stdx.encoding.hex.*
 import ams.core.search.*
 import ams.data.db.*
 import ams.kernel.error.*
+import ams.kernel.id.*
 
 /**
  * 检索执行层仓储。
@@ -60,6 +61,15 @@ public class SearchRepo {
 
     /**
      * 建立/更新某条目的检索索引（幂等 upsert）。
+     *
+     * 【两个坑，此前导致索引恒为空、关键词检索永不命中】
+     *   ① `tokens` 是 TEXT[] 列。直接 `st.set(i, Array<String>)`
+     *      驱动无法绑定数组类型，抛 "SqlException: not supported type"。
+     *      → 改为拼成 PG 数组字面量（{"a","b"}）后以字符串绑定，
+     *        再由 SQL 侧 CAST 成 TEXT[]。
+     *   ② `ON CONFLICT (item_id) DO UPDATE` 在 openGauss 不支持
+     *      （SQLSTATE 42601，与 itemfield.cj 同一处坑）。
+     *      → 改为「先 UPDATE，未命中再 INSERT」。
      */
     public func upsertIndex(
         itemId: Int64,
@@ -69,28 +79,85 @@ public class SearchRepo {
         content: String,
         tokens: Array<String>
     ): Unit {
-        let sql = "INSERT INTO arc_search_index " +
-                  "(item_id, subject_id, category, title_norm, content, tokens, updated_at) " +
-                  "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) " +
-                  "ON CONFLICT (item_id) DO UPDATE SET " +
-                  "subject_id = EXCLUDED.subject_id, category = EXCLUDED.category, " +
-                  "title_norm = EXCLUDED.title_norm, content = EXCLUDED.content, " +
-                  "tokens = EXCLUDED.tokens, updated_at = CURRENT_TIMESTAMP"
+        let setClause = "subject_id = ?, category = ?, title_norm = ?, " +
+                        "content = ?, tokens = CAST(? AS TEXT[]), updated_at = CURRENT_TIMESTAMP"
+        let insCols = "item_id, subject_id, category, title_norm, content, tokens, updated_at"
+        let insVals = "?, ?, ?, ?, ?, CAST(? AS TEXT[]), CURRENT_TIMESTAMP"
         let c = this.db.connect()
         try {
-            let st = c.prepareStatement(sql)
-            st.set(0, itemId)
-            st.set(1, subjectId)
-            st.set(2, category)
-            st.set(3, titleNorm)
-            st.set(4, content)
-            st.set(5, tokens)
-            st.update()
+            let upd = c.prepareStatement(
+                "UPDATE arc_search_index SET " + setClause + " WHERE item_id = ?"
+            )
+            SearchRepo.bindIndex(upd, 0, subjectId, category, titleNorm, content, tokens)
+            upd.set(5, itemId)
+            if (upd.update().rowCount > 0) {
+                return
+            }
+            let ins = c.prepareStatement(
+                "INSERT INTO arc_search_index (" + insCols + ") VALUES (" + insVals + ")"
+            )
+            ins.set(0, itemId)
+            SearchRepo.bindIndex(ins, 1, subjectId, category, titleNorm, content, tokens)
+            ins.update()
         } catch (e: Exception) {
             throw toDbError(e)
         } finally {
             c.close()
         }
+    }
+
+    /** 绑定索引写入的公共参数（从 start 起连续 5 个）。 */
+    private static func bindIndex(
+        st: Statement,
+        start: Int64,
+        subjectId: Int64,
+        category: Int64,
+        titleNorm: String,
+        content: String,
+        tokens: Array<String>
+    ): Unit {
+        st.set(start, subjectId)
+        st.set(start + 1, category)
+        st.set(start + 2, titleNorm)
+        st.set(start + 3, content)
+        st.set(start + 4, SearchRepo.toPgTextArray(tokens))
+    }
+
+    /**
+     * 字符串数组 → PostgreSQL/openGauss 的数组字面量：{"a","b"}。
+     *
+     * 规则：元素含 `"` `\` `{` `}` `,` 或空白时加双引号，
+     * 并把 `"` 转义为 `\"`、`\` 转义为 `\\`。
+     */
+    private static func toPgTextArray(items: Array<String>): String {
+        let sb = StringBuilder()
+        sb.append("{")
+        var first = true
+        for (it in items) {
+            if (!first) {
+                sb.append(",")
+            }
+            first = false
+            sb.append(SearchRepo.pgQuote(it))
+        }
+        sb.append("}")
+        return sb.toString()
+    }
+
+    /**
+     * 数组元素引号化。
+     */
+    private static func pgQuote(s: String): String {
+        if (s.isEmpty()) {
+            return "\"\""
+        }
+        let escaped = s.replace("\\", "\\\\").replace("\"", "\\\"")
+        let needsQuote = s.contains("\"") || s.contains("\\") || s.contains("{") ||
+                         s.contains("}") || s.contains(",") || s.contains(" ")
+        if (needsQuote) {
+            return "\"" + escaped + "\""
+        }
+        return escaped
     }
 
     /**
@@ -210,6 +277,23 @@ public class SearchRepo {
         if (!q.expiresTo.isEmpty()) {
             sb.append("AND i.expires_at <= CAST(? AS DATE) ")
             params.add(SqlParam.Str(q.expiresTo))
+        }
+
+        // ---- 创建时间范围（FR-SRC-010）----
+        if (!q.createdFrom.isEmpty()) {
+            sb.append("AND i.created_at >= CAST(? AS TIMESTAMP) ")
+            params.add(SqlParam.Str(q.createdFrom))
+        }
+        if (!q.createdTo.isEmpty()) {
+            sb.append("AND i.created_at <= CAST(? AS TIMESTAMP) ")
+            params.add(SqlParam.Str(q.createdTo))
+        }
+
+        // ---- 来源系统筛选（FR-SRC-010）----
+        // 0 视为「不过滤」：手动录入的来源也是 0，故只有显式指定 ≥1 才加条件。
+        if (q.source > 0) {
+            sb.append("AND i.source = ? ")
+            params.add(SqlParam.Num(q.source))
         }
 
         // ---- 标签（FR-SRC-002）----
@@ -337,6 +421,213 @@ public class SearchRepo {
                 case SqlParam.Nul => st.setNull(i)
             }
             i = i + 1
+        }
+    }
+
+    /**
+     * 搜索建议（FR-SRC-007）：匹配 query 的标签名（按使用频次排序）。
+     */
+    public func suggestTags(q: String, ownerId: Int64): ArrayList<String> {
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(
+                "SELECT name FROM arc_tags WHERE owner_id = ? AND deleted_at IS NULL " +
+                "AND name ILIKE ? ORDER BY usage_count DESC, name LIMIT 10"
+            )
+            st.set(0, ownerId)
+            st.set(1, "%${q}%")
+            let out = ArrayList<String>()
+            for (r in readRows(st.query()).all().iterator()) {
+                out.add(r.str("name"))
+            }
+            return out
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 搜索建议（FR-SRC-007）：匹配 query 的颁发机构（去重）。
+     */
+    public func suggestOrgs(q: String, subjectIds: Array<String>): ArrayList<String> {
+        if (subjectIds.isEmpty()) {
+            return ArrayList<String>()
+        }
+        let c = this.db.connect()
+        try {
+            let sb = StringBuilder()
+            sb.append(
+                "SELECT DISTINCT issuer FROM arc_items WHERE deleted_at IS NULL " +
+                "AND issuer ILIKE ? AND issuer IS NOT NULL AND issuer <> '' AND subject_id IN ("
+            )
+            for (i in 0..subjectIds.size) {
+                if (i > 0) {
+                    sb.append(", ")
+                }
+                sb.append("?")
+            }
+            sb.append(") ORDER BY issuer LIMIT 10")
+            let st = c.prepareStatement(sb.toString())
+            st.set(0, "%${q}%")
+            for (i in 0..subjectIds.size) {
+                st.set(i + 1, subjectIds[i])
+            }
+            let out = ArrayList<String>()
+            for (r in readRows(st.query()).all().iterator()) {
+                out.add(r.str("issuer"))
+            }
+            return out
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    // ------------------------------------------------------------
+    // 保存的筛选视图（FR-SRC-008）
+    // ------------------------------------------------------------
+
+    /**
+     * 保存命名视图。
+     */
+    public func saveView(ownerId: Int64, name: String, queryJson: String, pinned: Bool): Int64 {
+        let id = Ids.next()
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(
+                "INSERT INTO arc_saved_views (id, owner_id, name, query_json, is_pinned, " +
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+            st.set(0, id)
+            st.set(1, ownerId)
+            st.set(2, name)
+            st.set(3, queryJson)
+            st.set(4, pinned)
+            st.update()
+            return id
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 列出某用户的视图（置顶优先、最近更新优先）。
+     */
+    public func listViews(ownerId: Int64): RowSet {
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(
+                "SELECT id, owner_id, name, query_json, is_pinned, " +
+                "(EXTRACT(EPOCH FROM updated_at) * 1000)::bigint AS updated_at_ms " +
+                "FROM arc_saved_views WHERE owner_id = ? AND deleted_at IS NULL " +
+                "ORDER BY is_pinned DESC, updated_at DESC"
+            )
+            st.set(0, ownerId)
+            return readRows(st.query())
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 软删除视图。
+     */
+    public func deleteView(ownerId: Int64, id: Int64): Bool {
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(
+                "UPDATE arc_saved_views SET deleted_at = CURRENT_TIMESTAMP, " +
+                "updated_at = CURRENT_TIMESTAMP WHERE id = ? AND owner_id = ? AND deleted_at IS NULL"
+            )
+            st.set(0, id)
+            st.set(1, ownerId)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    // ------------------------------------------------------------
+    // 搜索历史（FR-SRC-009）
+    // ------------------------------------------------------------
+
+    /**
+     * 记录一次搜索：同一 owner+query 则命中计数 +1、刷新时间；否则新建。
+     */
+    public func recordSearch(ownerId: Int64, query: String): Unit {
+        let c = this.db.connect()
+        try {
+            let upd = c.prepareStatement(
+                "UPDATE arc_search_history SET hit_count = hit_count + 1, " +
+                "last_used_at = CURRENT_TIMESTAMP WHERE owner_id = ? AND query = ? AND deleted_at IS NULL"
+            )
+            upd.set(0, ownerId)
+            upd.set(1, query)
+            if (upd.update().rowCount > 0) {
+                return
+            }
+            let ins = c.prepareStatement(
+                "INSERT INTO arc_search_history (id, owner_id, query, hit_count, " +
+                "last_used_at, created_at) VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+            ins.set(0, Ids.next())
+            ins.set(1, ownerId)
+            ins.set(2, query)
+            ins.update()
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 列出个人搜索历史（最近使用优先）。
+     */
+    public func listSearchHistory(ownerId: Int64, limit: Int64): RowSet {
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(
+                "SELECT id, owner_id, query, hit_count, " +
+                "(EXTRACT(EPOCH FROM last_used_at) * 1000)::bigint AS last_used_at_ms " +
+                "FROM arc_search_history WHERE owner_id = ? AND deleted_at IS NULL " +
+                "ORDER BY last_used_at DESC LIMIT ?"
+            )
+            st.set(0, ownerId)
+            st.set(1, limit)
+            return readRows(st.query())
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 清除个人搜索历史（软删除）。返回清除条数。
+     */
+    public func clearSearchHistory(ownerId: Int64): Int64 {
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(
+                "UPDATE arc_search_history SET deleted_at = CURRENT_TIMESTAMP " +
+                "WHERE owner_id = ? AND deleted_at IS NULL"
+            )
+            st.set(0, ownerId)
+            return st.update().rowCount
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 }

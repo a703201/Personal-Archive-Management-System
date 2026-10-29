@@ -6,17 +6,61 @@
  * 账号/密码校验交给后端（弱口令字典、长度、字符类别等策略在 AuthService 侧）；
  * 前端只做非空提示。
  */
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { api, setToken } from '../api/client'
+import { t } from '../i18n'
 
 const router = useRouter()
 const route = useRoute()
+
+/**
+ * 登录页定制（FR-CFG-008）：Logo / 公告 / 页脚 / 备案号由服务端配置下发。
+ *
+ * 这是个**公开**接口（登录页渲染时还没有令牌），所以只取展示用字段。
+ * 拉取失败一律静默降级为默认值 —— 登录页是全局入口，不能因为「品牌配置
+ * 接口挂了」就白屏，登录这件事本身比品牌展示重要得多。
+ */
+interface Branding {
+  brandName: string
+  logoUrl: string
+  notice: string
+  footerText: string
+  icpNo: string
+}
+
+const branding = ref<Branding>({
+  brandName: 'AMS',
+  logoUrl: '',
+  notice: '',
+  footerText: '',
+  icpNo: '',
+})
+
+/** 标题：品牌名优先（FR-CFG-008），否则用当前语言文案（FR-CFG-009）。 */
+const titleText = computed(() =>
+  branding.value.brandName && branding.value.brandName !== 'AMS'
+    ? branding.value.brandName
+    : t('login.title', '个人档案管理系统'),
+)
+const subtitleText = computed(() => t('login.subtitle', '请登录以继续'))
+
+onMounted(async () => {
+  try {
+    const b = await api<Branding>('/branding', { auth: false })
+    branding.value = { ...branding.value, ...b }
+  } catch {
+    /* 静默降级为默认品牌信息 */
+  }
+})
 
 const username = ref('')
 const password = ref('')
 const error = ref('')
 const submitting = ref(false)
+/** 双因子动态码（FR-AUTH-009）：默认收起，被后端拒绝后再展开 */
+const totpCode = ref('')
+const needTotp = ref(false)
 
 async function onSubmit(): Promise<void> {
   error.value = ''
@@ -29,13 +73,22 @@ async function onSubmit(): Promise<void> {
     const res = await api<{ accessToken: string }>('/auth/login', {
       method: 'POST',
       auth: false,
-      body: { username: username.value, password: password.value },
+      body: {
+        username: username.value,
+        password: password.value,
+        totpCode: totpCode.value.trim(),
+      },
     })
     setToken(res.accessToken)
     const redirect = (route.query.redirect as string) || '/overview'
     router.replace(redirect)
   } catch (e) {
-    error.value = (e as Error).message || '登录失败，请重试'
+    const msg = (e as Error).message || '登录失败，请重试'
+    error.value = msg
+    // 「请输入 6 位动态码」「动态码不正确」「动态码已使用」都说明该账号启用了双因子
+    if (msg.includes('双因子') || msg.includes('动态码')) {
+      needTotp.value = true
+    }
   } finally {
     submitting.value = false
   }
@@ -45,9 +98,15 @@ async function onSubmit(): Promise<void> {
 <template>
   <div class="login-wrap">
     <div class="login-card">
-      <div class="brand">AMS</div>
-      <h1 class="title">个人档案管理系统</h1>
-      <p class="subtitle">请登录以继续</p>
+      <div class="brand">
+        <img v-if="branding.logoUrl" :src="branding.logoUrl" :alt="branding.brandName" class="brand__logo" />
+        <span v-else>{{ branding.brandName }}</span>
+      </div>
+      <h1 class="title">{{ titleText }}</h1>
+      <p class="subtitle">{{ subtitleText }}</p>
+
+      <!-- 公告（FR-CFG-008）：有配置才显示 -->
+      <p v-if="branding.notice" class="notice">{{ branding.notice }}</p>
 
       <form class="form" @submit.prevent="onSubmit">
         <label class="field">
@@ -72,7 +131,20 @@ async function onSubmit(): Promise<void> {
           />
         </label>
 
-        <p v-if="error" class="error">{{ error }}</p>
+        <label v-if="needTotp" class="field">
+          <span class="field__label">动态码</span>
+          <input
+            v-model="totpCode"
+            class="field__input field__input--code"
+            type="text"
+            inputmode="numeric"
+            maxlength="6"
+            autocomplete="one-time-code"
+            placeholder="6 位动态码"
+          />
+        </label>
+
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
 
         <button class="submit" type="submit" :disabled="submitting">
           {{ submitting ? '登录中…' : '登录' }}
@@ -80,8 +152,15 @@ async function onSubmit(): Promise<void> {
       </form>
 
       <p class="switch">
-        还没有账号？<RouterLink to="/register">立即注册</RouterLink>
+        <RouterLink to="/forgot">忘记口令？</RouterLink>
       </p>
+      <p class="switch">还没有账号？<RouterLink to="/register">立即注册</RouterLink></p>
+
+      <!-- 页脚与备案号（FR-CFG-008） -->
+      <footer v-if="branding.footerText || branding.icpNo" class="login-foot">
+        <span v-if="branding.footerText">{{ branding.footerText }}</span>
+        <span v-if="branding.icpNo">{{ branding.icpNo }}</span>
+      </footer>
     </div>
   </div>
 </template>
@@ -116,6 +195,31 @@ async function onSubmit(): Promise<void> {
   font-size: 24px;
   color: var(--accent, #2563eb);
   text-align: center;
+}
+.brand__logo {
+  max-height: 44px;
+  max-width: 180px;
+  object-fit: contain;
+}
+.notice {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border-radius: var(--g3-sm, 10px);
+  background: var(--bg-hover, #f3f4f6);
+  color: var(--text-secondary, #4b5563);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.login-foot {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle, #e5e7eb);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted, #9ca3af);
 }
 .title {
   font-size: 18px;
@@ -155,6 +259,11 @@ async function onSubmit(): Promise<void> {
   outline: none;
   border-color: var(--accent, #2563eb);
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+.field__input--code {
+  letter-spacing: 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 .error {
   margin: 0;

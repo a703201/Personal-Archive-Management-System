@@ -33,6 +33,7 @@ import ams.kernel.log.*
 import ams.kernel.time.*
 import ams.security.audit.*
 import ams.security.authn.*
+import ams.security.totp.*
 
 /**
  * 认证配置。
@@ -102,6 +103,12 @@ public class AuthService {
      * 可选：未装配时**不影响**认证功能（便于单元测试与工具场景）。
      */
     private let recorder: ?AuditRecorder
+    /**
+     * TOTP 仓储（FR-AUTH-009）。
+     *
+     * 可选：未装配时退化为「口令单因子」，便于测试与工具场景。
+     */
+    private let totpRepo: ?TotpRepo
 
     public init(
         userRepo: UserRepo,
@@ -110,7 +117,8 @@ public class AuthService {
         tokenService: TokenService,
         config: AuthConfig,
         passwordValidator: PasswordValidator,
-        recorder!: ?AuditRecorder = None
+        recorder!: ?AuditRecorder = None,
+        totpRepo!: ?TotpRepo = None
     ) {
         this.userRepo = userRepo
         this.roleRepo = roleRepo
@@ -119,6 +127,7 @@ public class AuthService {
         this.config = config
         this.passwordValidator = passwordValidator
         this.recorder = recorder
+        this.totpRepo = totpRepo
     }
 
     /**
@@ -169,7 +178,8 @@ public class AuthService {
         username: String,
         password: String,
         ip: String,
-        userAgent: String
+        userAgent: String,
+        totpCode!: String = ""
     ): LoginResult {
         if (username.isEmpty() || password.isEmpty()) {
             throw validationError("username", "用户名与口令不能为空")
@@ -210,8 +220,11 @@ public class AuthService {
             throw unauthorized(message: "用户名或口令错误")
         }
 
-        // 4) 成功路径
+        // 3.5) 双因子（FR-AUTH-009）：口令正确后、签发令牌前校验
         let u = maybeUser.getOrThrow()
+        this.checkTotp(u.id, username, totpCode, ip, userAgent)
+
+        // 4) 成功路径
         this.userRepo.recordLoginSuccess(u.id, ip)
 
         // 5) 取角色与权限点
@@ -259,6 +272,44 @@ public class AuthService {
     /**
      * 登录失败处理：计数 + 达阈值锁定 + 渐进延迟。
      */
+    /**
+     * 双因子校验（FR-AUTH-009）。
+     *
+     * 只在「已绑定且已验证」时生效：用户若只跑过 setup 没完成确认，
+     * 登录不受影响（否则半成品绑定会把人锁在门外）。
+     *
+     * 重放保护：同一 30 秒时间步只允许成功一次（touchStep 条件更新）。
+     */
+    private func checkTotp(userId: Int64, username: String, code: String, ip: String, ua: String): Unit {
+        let repo = match (this.totpRepo) {
+            case Some(r) => r
+            case None => return
+        }
+        let rec = match (repo.find(userId)) {
+            case Some(r) => r
+            case None => return
+        }
+        if (!rec.bool("verified")) {
+            return
+        }
+        if (code.trimAscii().isEmpty()) {
+            this.audit("${userId}", AuditAction.LoginFailed, "user", username,
+                       AuditResult.Denied, "TOTP_REQUIRED", ip, ua)
+            throw AppError(AppErrorKind.Unauthorized, "该账号已启用双因子，请输入 6 位动态码")
+        }
+        let step = Totp.verify(rec.str("secret_b32"), code, Times.nowMillis(), 1)
+        if (step < 0) {
+            this.audit("${userId}", AuditAction.LoginFailed, "user", username,
+                       AuditResult.Failure, "TOTP_INVALID", ip, ua)
+            throw AppError(AppErrorKind.Unauthorized, "动态码不正确或已过期")
+        }
+        if (!repo.touchStep(userId, step)) {
+            this.audit("${userId}", AuditAction.LoginFailed, "user", username,
+                       AuditResult.Denied, "TOTP_REPLAY", ip, ua)
+            throw AppError(AppErrorKind.Unauthorized, "该动态码已使用，请等待下一次刷新")
+        }
+    }
+
     private func onLoginFailed(userId: Int64, username: String): Unit {
         if (userId > 0) {
             this.userRepo.recordLoginFailure(userId, this.config.maxFailedAttempts, this.config.lockSeconds)

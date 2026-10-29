@@ -34,11 +34,37 @@ public class ParamDistributor <: HttpRequestDistributor {
     private let registered: HashSet<String>
     /** 锁（register/distribute 可能跨线程） */
     private let lock: Mutex
+    /**
+     * 兜底处理器（所有模式都未命中时使用）。
+     *
+     * 用途：前端静态资源托管（`ams.api.server.static`）。
+     * 没有它就没法在同一个端口上同时提供 SPA 与 /api —— 因为
+     * SPA 的路径（/family、/share/xxx）是**任意**的，无法逐一注册。
+     */
+    private var fallback: ?HttpRequestHandler
 
     public init() {
         this.handlers = HashMap<String, ArrayList<HttpRequestHandler>>()
         this.registered = HashSet<String>()
         this.lock = Mutex()
+        this.fallback = None
+    }
+
+    /**
+     * 设置兜底处理器。
+     *
+     * 只允许设置一次：多次覆盖会让「到底哪段代码在接请求」变得不可知，
+     * 而这类问题在日志里只表现为「返回内容不对」。
+     */
+    public func setFallback(handler: HttpRequestHandler): Unit {
+        this.lock.lock()
+        try {
+            if (this.fallback.isNone()) {
+                this.fallback = Some(handler)
+            }
+        } finally {
+            this.lock.unlock()
+        }
     }
 
     /**
@@ -96,6 +122,10 @@ public class ParamDistributor <: HttpRequestDistributor {
                 }
             }
             match (best) {
+                case Some(h) => return h
+                case None => ()
+            }
+            match (this.fallback) {
                 case Some(h) => return h
                 case None => return ParamDistributor.notFoundHandler()
             }

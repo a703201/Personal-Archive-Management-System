@@ -194,11 +194,32 @@ public class ExportService {
     /**
      * 敏感明文掩码：保留首字符、中间打码。
      */
+    /**
+     * 敏感明文掩码：保留首字符、中间打码。
+     *
+     * 【必须按「字符」而非「字节」处理】仓颉的 String.size 是字节数，
+     * `s[0..1]` 切出的是单个字节；中文签发机关（「市公安局」）会被切碎成
+     * 非法 UTF-8，抛 `Invalid utf8 byte sequence` 导致整次导出 500。
+     */
     private func mask(s: String): String {
-        if (s.size <= 2) {
+        if (s.isEmpty()) {
             return s
         }
-        return "${s[0..1]}***"
+        var first = ""
+        var n: Int64 = 0
+        for (ch in s.runes()) {
+            if (n == 0) {
+                first = ch.toString()
+            }
+            n = n + 1
+            if (n > 2) {
+                break
+            }
+        }
+        if (n <= 2) {
+            return s
+        }
+        return "${first}***"
     }
 
     private func audit(

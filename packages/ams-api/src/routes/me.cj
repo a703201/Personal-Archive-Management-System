@@ -46,8 +46,14 @@ public class MeRoutes {
     private let policy: ?PasswordPolicy
     /** 认证服务（改口令后吊销全部会话） */
     private let authService: ?AuthService
+    /** 会话存储（FR-AUTH-007 会话管理与设备列表） */
+    private let sessions: ?SessionStore
     /** PBKDF2 迭代次数（新建口令时落库的 kdf_cost） */
     private let kdfIterations: Int64
+    /** 附件仓储（FR-ATT-011 存储配额统计） */
+    private let attachmentRepo: AttachmentRepo
+    /** 配置仓储（FR-ATT-011 全局默认配额） */
+    private let configRepo: ConfigRepo
 
     public init(
         userRepo: UserRepo,
@@ -57,7 +63,10 @@ public class MeRoutes {
         passwordValidator!: ?PasswordValidator = None,
         policy!: ?PasswordPolicy = None,
         authService!: ?AuthService = None,
-        kdfIterations!: Int64 = 600000
+        sessions!: ?SessionStore = None,
+        kdfIterations!: Int64 = 600000,
+        attachmentRepo!: AttachmentRepo,
+        configRepo!: ConfigRepo
     ) {
         this.userRepo = userRepo
         this.itemRepo = itemRepo
@@ -66,7 +75,10 @@ public class MeRoutes {
         this.passwordValidator = passwordValidator
         this.policy = policy
         this.authService = authService
+        this.sessions = sessions
         this.kdfIterations = kdfIterations
+        this.attachmentRepo = attachmentRepo
+        this.configRepo = configRepo
     }
 
     public func register(router: Router): Unit {
@@ -79,6 +91,13 @@ public class MeRoutes {
         // 否则只有 subject 权限的角色就无法改自己的口令。
         router.put("/api/me", { req: ApiRequest => this.updateMe(req) })
         router.post("/api/me/password", { req: ApiRequest => this.changePassword(req) })
+        // FR-AUTH-007 会话管理与设备列表
+        router.get("/api/me/sessions", { req: ApiRequest => this.listSessions(req) })
+        router.delete("/api/me/sessions/:sid", { req: ApiRequest => this.revokeSession(req) })
+        router.delete("/api/me/sessions", { req: ApiRequest => this.revokeOthers(req) })
+        // FR-ATT-011 存储配额（按服务端算出的可访问主体聚合用量）
+        router.get("/api/me/storage", { req: ApiRequest => this.storage(req) },
+                   requiredPerm: "archive:read:own")
     }
 
     // ---------------------------------------------------------
@@ -124,18 +143,26 @@ public class MeRoutes {
 
         let total = this.itemRepo.count(subjects, 0, -1, "")
 
-        // 分类分布：11 个内置分类逐个计数（数据量小，直接查即可）
+        // 分类分布：一条 GROUP BY 取回全部分类计数，缺失的分类补 0。
+        // （原先对 11 个内置分类逐个 COUNT(*)，单请求 12 条查询，
+        //   首屏因此要占用 13 条数据库连接。）
+        var counts = Array<Int64>(12, repeat: 0)
+        for (r in this.itemRepo.countByCategory(subjects).all().iterator()) {
+            let cat = r.i64("category")
+            if (cat >= 0 && cat <= 11) {
+                counts[cat] = r.i64("n")
+            }
+        }
         let sb = StringBuilder()
         sb.append("{\"total\":${total},\"categories\":[")
         var first = true
         var c: Int64 = 1
         while (c <= 11) {
-            let n = this.itemRepo.count(subjects, c, -1, "")
             if (!first) {
                 sb.append(",")
             }
             first = false
-            sb.append("{\"category\":${c},\"count\":${n}}")
+            sb.append("{\"category\":${c},\"count\":${counts[c]}}")
             c = c + 1
         }
         sb.append("],")
@@ -305,6 +332,98 @@ public class MeRoutes {
         }
         return ApiResponse.ok(
             "{\"updated\":true,\"revokedSessions\":${revoked},\"reloginRequired\":true}",
+            req.requestId
+        )
+    }
+
+    // ---------------------------------------------------------------
+    // FR-AUTH-007 会话管理与设备列表
+    // ---------------------------------------------------------------
+
+    /**
+     * GET /api/me/sessions —— 我的活跃会话（设备 / IP / 最近活动）。
+     *
+     * 只列**未吊销**的会话：已登出的设备对用户无意义，
+     * 且 sid 属于敏感标识，能少暴露就少暴露。
+     */
+    private func listSessions(req: ApiRequest): ApiResponse {
+        let store = match (this.sessions) {
+            case Some(s) => s
+            case None => throw AppError(AppErrorKind.Internal, "会话服务未配置")
+        }
+        let sb = StringBuilder()
+        sb.append("{\"sessions\":[")
+        var first = true
+        for (s in store.listByUser(req.subjectId)) {
+            if (s.revoked) {
+                continue
+            }
+            if (!first) {
+                sb.append(",")
+            }
+            first = false
+            sb.append("{\"sid\":\"${ApiResponse.escape(s.sid)}\",")
+            sb.append("\"ip\":\"${ApiResponse.escape(s.ip)}\",")
+            sb.append("\"userAgent\":\"${ApiResponse.escape(s.userAgent)}\",")
+            sb.append("\"createdAt\":${s.createdAt},")
+            sb.append("\"lastActiveAt\":${s.lastActiveAt},")
+            sb.append("\"current\":${s.sid == req.sid}}")
+        }
+        sb.append("]}")
+        return ApiResponse.ok(sb.toString(), req.requestId)
+    }
+
+    /**
+     * DELETE /api/me/sessions/:sid —— 踢出指定设备。
+     *
+     * 归属校验在 SessionStore 内部完成（比对 uid），
+     * 因此猜到别人的 sid 也踢不掉。
+     */
+    private func revokeSession(req: ApiRequest): ApiResponse {
+        let store = match (this.sessions) {
+            case Some(s) => s
+            case None => throw AppError(AppErrorKind.Internal, "会话服务未配置")
+        }
+        let sid = req.pathParam("sid") ?? ""
+        if (sid.isEmpty()) {
+            throw validationError("sid", "会话 ID 不能为空")
+        }
+        if (!store.revoke(sid, req.subjectId)) {
+            throw notFound("会话")
+        }
+        return ApiResponse.ok("{\"revoked\":true}", req.requestId)
+    }
+
+    /**
+     * DELETE /api/me/sessions —— 踢出**其他**设备（保留当前会话）。
+     */
+    private func revokeOthers(req: ApiRequest): ApiResponse {
+        let store = match (this.sessions) {
+            case Some(s) => s
+            case None => throw AppError(AppErrorKind.Internal, "会话服务未配置")
+        }
+        let n = store.revokeOthersByUser(req.subjectId, req.sid)
+        return ApiResponse.ok("{\"revoked\":${n}}", req.requestId)
+    }
+
+    /**
+     * GET /api/me/storage —— 存储配额与用量（FR-ATT-011）。
+     *
+     * 用量按**服务端算出的可访问主体**聚合（FR-ACL-006），前端无法扩大范围。
+     * 配额：优先全局默认（cfg_settings scope=storage key=default_quota_bytes），
+     * 未配则兜底 5 GiB。接近阈值（≥ 90%）置 thresholdReached。
+     */
+    private func storage(req: ApiRequest): ApiResponse {
+        let uid = UserRepo.parseId(req.subjectId)
+        let subjects = this.userRepo.listAccessibleSubjectIds(uid).toArray()
+        let used = this.attachmentRepo.totalBytesInSubjects(subjects)
+        let defaultQuota = this.configRepo.getInt("storage", "default_quota_bytes", 5368709120)
+        let quota = if (defaultQuota <= 0) { 5368709120 } else { defaultQuota }
+        let reached = used >= quota
+        let pct = if (quota > 0) { (used * 100) / quota } else { 0 }
+        return ApiResponse.ok(
+            "{\"usedBytes\":${used},\"quotaBytes\":${quota}," +
+            "\"usedPercent\":${pct},\"thresholdReached\":${if (reached) { "true" } else { "false" }}}",
             req.requestId
         )
     }

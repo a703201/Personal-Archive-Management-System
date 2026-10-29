@@ -26,6 +26,7 @@ import ams.core.search.*
 import ams.data.repo.*
 import ams.kernel.error.*
 import ams.kernel.log.*
+import ams.kernel.util.*
 
 /**
  * 字段定义接口（FR-ARCH-003）。
@@ -426,8 +427,8 @@ public class ItemFieldRoutes {
         for (part in SimpleJson.splitTopLevel(text).iterator()) {
             let kv = part.split(":", 2)
             if (kv.size >= 2) {
-                let k = SimpleJson.unquotePublic(kv[0].trimStart().trimEnd())
-                let v = SimpleJson.unquotePublic(kv[1].trimStart().trimEnd())
+                let k = SimpleJson.unquotePublic(trimSpace(kv[0]))
+                let v = SimpleJson.unquotePublic(trimSpace(kv[1]))
                 if (!k.isEmpty()) {
                     out.add(FieldPair(k, v))
                 }

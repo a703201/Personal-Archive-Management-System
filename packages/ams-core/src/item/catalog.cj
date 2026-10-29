@@ -5,10 +5,15 @@
 //   系统预置 12 分类的字段模板与中文标签，用户可增删字段。
 //
 // [分类枚举]（数据模型 §11.2，硬编码）
-//   1 basic 基本信息 / 2 identity 身份证明 / 3 education 教育经历
-//   4 experience 工作经历 / 5 certificate 资格证书 / 6 contact 联系方式
+//   1 basic 个人基本信息 / 2 identity 证件信息 / 3 education 教育经历
+//   4 experience 职业经历 / 5 certificate 资质证书 / 6 contact 联系方式
 //   7 family 家庭关系 / 8 health 健康信息 / 9 asset 资产信息
 //   10 impression 影像附件 / 11 custom 自定义分类
+//
+// ⚠️ 中文名以 `docs/06-数据模型设计.md` §12.3 为唯一口径。
+//    此处曾用「基本信息 / 身份证明 / 工作经历 / 资格证书」，
+//    与文档和前端字典（`web/src/composables/useCatalog.ts`）不一致，
+//    导致同一分类在不同页面显示不同名字 —— 已统一。
 //
 // [敏感度]（PRD §5.5）
 //   basic/education/experience/certificate/impression → normal
@@ -27,11 +32,11 @@ package ams.core.item
  * 档案分类。
  */
 public enum ArchiveCategory {
-    | Basic       // 1 基本信息
-    | Identity    // 2 身份证明
+    | Basic       // 1 个人基本信息
+    | Identity    // 2 证件信息
     | Education   // 3 教育经历
-    | Experience  // 4 工作经历
-    | Certificate // 5 资格证书
+    | Experience  // 4 职业经历
+    | Certificate // 5 资质证书
     | Contact     // 6 联系方式
     | Family      // 7 家庭关系
     | Health      // 8 健康信息
@@ -90,14 +95,16 @@ public enum ArchiveCategory {
 
     /**
      * 分类中文名。
+     *
+     * 口径：`docs/06-数据模型设计.md` §12.3，与前端 `useCatalog.ts` 保持一致。
      */
     public func displayName(): String {
         match (this) {
-            case ArchiveCategory.Basic => return "基本信息"
-            case ArchiveCategory.Identity => return "身份证明"
+            case ArchiveCategory.Basic => return "个人基本信息"
+            case ArchiveCategory.Identity => return "证件信息"
             case ArchiveCategory.Education => return "教育经历"
-            case ArchiveCategory.Experience => return "工作经历"
-            case ArchiveCategory.Certificate => return "资格证书"
+            case ArchiveCategory.Experience => return "职业经历"
+            case ArchiveCategory.Certificate => return "资质证书"
             case ArchiveCategory.Contact => return "联系方式"
             case ArchiveCategory.Family => return "家庭关系"
             case ArchiveCategory.Health => return "健康信息"

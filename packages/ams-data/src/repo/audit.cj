@@ -330,6 +330,107 @@ public class AuditRepo {
     }
 
     /**
+     * FR-AUD-008：将 aud_logs 中早于 beforeMillis 的记录**复制**到冷存 aud_logs_archive。
+     *
+     * 关键点：
+     *   - aud_logs 不可篡改（应用账号无 UPDATE/DELETE，见 002 迁移），
+     *     故留存策略只能「冷存归档」—— 把超期热表记录**复制**到 aud_logs_archive，
+     *     而不能从热表删除（热表保留全量以满足哈希链完整性）。
+     *   - 幂等：以 id 为键，NOT EXISTS 跳过已归档记录，可重复执行。
+     *
+     * @param beforeMillis 时间分界（毫秒 epoch）；早于它的记录进入归档
+     * @return 本次实际复制（归档）的记录数
+     */
+    public func archiveExpired(beforeMillis: Int64): Int64 {
+        // 列顺序与 aud_logs 完全一致（含 occurred_at、prev_hash、record_hash 等），
+        // 直接整行复制，避免遗漏或类型错位。
+        let sql = "INSERT INTO aud_logs_archive (" +
+                  "id, chain_seq, actor_id, actor_type, action, action_desc, " +
+                  "target_type, target_id, subject_id, category, result, error_code, " +
+                  "client_ip, user_agent, trace_id, detail, prev_hash, record_hash, " +
+                  "occurred_ms, occurred_at) " +
+                  "SELECT id, chain_seq, actor_id, actor_type, action, action_desc, " +
+                  "target_type, target_id, subject_id, category, result, error_code, " +
+                  "client_ip, user_agent, trace_id, detail, prev_hash, record_hash, " +
+                  "occurred_ms, occurred_at " +
+                  "FROM aud_logs " +
+                  "WHERE occurred_ms < ? " +
+                  "AND NOT EXISTS (SELECT 1 FROM aud_logs_archive a WHERE a.id = aud_logs.id)"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, beforeMillis)
+            return st.update().rowCount
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * FR-AUD-007：扫描自 fromMillis 起的高危操作信号，供实时告警使用。
+     *
+     * 覆盖四类（PRD §5.9 FR-AUD-007）：
+     *   ① 暴力破解 —— 同一 IP 登录失败次数 ≥ 阈值（默认 5）
+     *   ② 批量导出 —— 动作含 export 且失败（result = 1）
+     *   ③ 越权尝试 —— authz / perm 类动作失败
+     *   ④ 密钥操作 —— key 类动作失败
+     *
+     * 返回行（合并）：risk_type, client_ip, action, cnt, last_ms
+     *   risk_type ∈ {brute_force, batch_export, key_op, privilege_escalation}
+     */
+    public func scanHighRisk(fromMillis: Int64): RowSet {
+        let out = RowSet()
+        let c = this.db.connect()
+        try {
+            // ① 暴力破解：按来源 IP 聚合登录失败次数
+            let brute = "SELECT client_ip, COUNT(*) AS cnt, MAX(occurred_ms) AS last_ms " +
+                        "FROM aud_logs WHERE action = 'auth.login' AND result = 1 " +
+                        "AND occurred_ms >= ? GROUP BY client_ip HAVING COUNT(*) >= 5"
+            let st1 = c.prepareStatement(brute)
+            st1.set(0, fromMillis)
+            for (r in readRows(st1.query()).all().iterator()) {
+                let rd = RowData()
+                rd.put("risk_type", Some("brute_force"))
+                rd.put("client_ip", Some(r.str("client_ip")))
+                rd.put("action", Some("auth.login"))
+                rd.put("cnt", Some("${r.i64("cnt")}"))
+                rd.put("last_ms", Some("${r.i64("last_ms")}"))
+                out.add(rd)
+            }
+            // ②③④：失败的高危动作（批量导出 / 密钥操作 / 越权尝试）
+            let high = "SELECT " +
+                       "CASE " +
+                       "  WHEN action LIKE '%export%' THEN 'batch_export' " +
+                       "  WHEN action LIKE 'key.%' OR action LIKE 'crypto.key%' THEN 'key_op' " +
+                       "  ELSE 'privilege_escalation' " +
+                       "END AS risk_type, " +
+                       "action, client_ip, COUNT(*) AS cnt, MAX(occurred_ms) AS last_ms " +
+                       "FROM aud_logs WHERE result = 1 AND occurred_ms >= ? " +
+                       "AND (action LIKE '%export%' OR action LIKE 'key.%' OR action LIKE 'crypto.key%' " +
+                       "     OR action LIKE 'authz%' OR action LIKE 'perm%') " +
+                       "GROUP BY action, client_ip"
+            let st2 = c.prepareStatement(high)
+            st2.set(0, fromMillis)
+            for (r in readRows(st2.query()).all().iterator()) {
+                let rd = RowData()
+                rd.put("risk_type", Some(r.str("risk_type")))
+                rd.put("client_ip", Some(r.str("client_ip")))
+                rd.put("action", Some(r.str("action")))
+                rd.put("cnt", Some("${r.i64("cnt")}"))
+                rd.put("last_ms", Some("${r.i64("last_ms")}"))
+                out.add(rd)
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+        return out
+    }
+
+    /**
      * 十六进制串 → 字节数组。
      *
      * 解码失败时返回全零数组（长度与预期不符的哈希不可能匹配，

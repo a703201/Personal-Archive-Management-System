@@ -27,6 +27,7 @@ import ams.data.repo.*
 import ams.security.audit.*
 import ams.kernel.error.*
 import ams.kernel.log.*
+import ams.kernel.util.*
 
 /**
  * 检索应用服务。
@@ -126,6 +127,54 @@ public class SearchService {
             }
         }
         return this.searchRepo.search(q, tokens, q.tagIds, likePattern)
+    }
+
+    /**
+     * 搜索建议（FR-SRC-007）：返回匹配 query 的标签名与颁发机构。
+     */
+    public func suggest(q: String, ownerId: Int64, subjectIds: Array<String>): (ArrayList<String>, ArrayList<String>) {
+        let tags = this.searchRepo.suggestTags(q, ownerId)
+        let orgs = this.searchRepo.suggestOrgs(q, subjectIds)
+        return (tags, orgs)
+    }
+
+    // ------------------------------------------------------------
+    // 保存的筛选视图（FR-SRC-008）
+    // ------------------------------------------------------------
+
+    public func saveView(ownerId: Int64, name: String, queryJson: String, pinned: Bool): Int64 {
+        return this.searchRepo.saveView(ownerId, name, queryJson, pinned)
+    }
+
+    public func listViews(ownerId: Int64): RowSet {
+        return this.searchRepo.listViews(ownerId)
+    }
+
+    public func deleteView(ownerId: Int64, id: Int64): Bool {
+        return this.searchRepo.deleteView(ownerId, id)
+    }
+
+    // ------------------------------------------------------------
+    // 搜索历史（FR-SRC-009）
+    // ------------------------------------------------------------
+
+    /**
+     * 记录一次搜索（空串忽略）。
+     */
+    public func recordSearch(ownerId: Int64, query: String): Unit {
+        let q = trimSpace(query)
+        if (q.isEmpty()) {
+            return
+        }
+        this.searchRepo.recordSearch(ownerId, q)
+    }
+
+    public func listSearchHistory(ownerId: Int64, limit: Int64): RowSet {
+        return this.searchRepo.listSearchHistory(ownerId, limit)
+    }
+
+    public func clearSearchHistory(ownerId: Int64): Int64 {
+        return this.searchRepo.clearSearchHistory(ownerId)
     }
 
     /**

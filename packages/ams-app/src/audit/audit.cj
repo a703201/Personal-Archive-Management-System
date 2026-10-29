@@ -22,6 +22,7 @@ import ams.crypto.provider.*
 import ams.data.repo.*
 import ams.kernel.error.*
 import ams.kernel.time.*
+import ams.kernel.util.*
 import ams.security.audit.*
 
 /**
@@ -157,6 +158,35 @@ public class AuditRecorder {
     }
 
     /**
+     * 段内完整性校验（无锚点模式，FR-AUD-003 补充）。
+     *
+     * 与 [verifyChain] 的差别：**不要求**段首 prev_hash 等于段前记录的哈希，
+     * 而以段首记录自身的 prev_hash 作为锚点。
+     *
+     * 适用场景：审计链头部已按留存策略归档、或历史上确有断层（记录被删除）时，
+     * 仍需证明「从 fromSeq 起的这一段」内部连续且内容未被改动。
+     * 用默认模式校验这类分段会一律返回 Broken（段首无前驱可比），
+     * 无法把「段内完好」与「段内被改」区分开。
+     *
+     * 代价：无法证明段首本身未被整体替换 —— 故返回值必须向调用方明示
+     * “anchored=false”，由人判断是否接受。
+     *
+     * @return (校验结论, 本段实际校验条数)
+     */
+    public func verifyChainSegment(fromSeq: Int64, limit: Int64): (ChainVerifyResult, Int64) {
+        let rows = this.repo.listChain(fromSeq, limit)
+        let records = ArrayList<AuditRecord>()
+        for (r in rows.all().iterator()) {
+            records.add(this.toRecord(r))
+        }
+        if (records.isEmpty()) {
+            return (ChainVerifyResult.Ok, 0)
+        }
+        let anchor = records[0].prevHash
+        return (this.audit.verifyChainFrom(records.toArray(), anchor), records.size)
+    }
+
+    /**
      * 查询审计记录（FR-AUD-004）。
      */
     public func query(
@@ -249,6 +279,13 @@ public class AuditRecorder {
     /**
      * 详情 → JSON 字符串。
      */
+    /**
+     * 详情键值对 → JSON 字符串。
+     *
+     * ⚠️ 必须转义：detail 列是 jsonb，裸写 `"` 会让 jsonb 解析失败；
+     *    控制字符会被 jsonb 改写为 \uXXXX —— 两者都会使**校验时**读回的
+     *    值与原值不同，从而让哈希链误报「被篡改」。
+     */
     private static func detailToJson(detail: Array<(String, String)>): String {
         if (detail.isEmpty()) {
             return "{}"
@@ -261,51 +298,38 @@ public class AuditRecorder {
                 sb.append(",")
             }
             first = false
-            sb.append("\"${k}\":\"${v}\"")
+            sb.append("\"")
+            sb.append(jsonEscape(k))
+            sb.append("\":\"")
+            sb.append(jsonEscape(v))
+            sb.append("\"")
         }
         sb.append("}")
         return sb.toString()
     }
 
     /**
-     * JSON 字符串 → 详情键值对（极简解析，够用即可）。
+     * JSON 字符串 → 详情键值对。
+     *
+     * 交给 ams.kernel.util.jsonFlatEntries 做**扫描式**解析：
+     *   - 引号内的 , 与 : 不切分（值里出现半角逗号不再截断）；
+     *   - 正确处理 \" \\ \n \r \t \uXXXX 等转义；
+     *   - 首尾空白用 trimSpace（String.trimStart/trimEnd 在本 SDK 是空实现）。
+     *
+     * 早前用 `split(",")` + `split(":", 2)` + `trimStart()` 实现，
+     * 因 trimStart 空实现，把 `{"k": "v"}` 还原成 ` "k"= "v"`，
+     * 使**每条带 detail 的记录**校验时重算哈希都与落库值不符，
+     * /api/audit/verify-chain 因此对真实数据误报「被篡改」。
      */
     private static func jsonToDetail(json: String): Array<(String, String)> {
-        let out = ArrayList<(String, String)>()
-        let t = json.trimStart().trimEnd()
-        if (!t.startsWith("{") || !t.endsWith("}")) {
-            return out.toArray()
-        }
-        let inner = t[1..t.size - 1]
-        if (inner.isEmpty()) {
-            return out.toArray()
-        }
-        for (part in inner.split(",")) {
-            let kv = part.split(":", 2)
-            if (kv.size < 2) {
-                continue
-            }
-            let k = AuditRecorder.unquote(kv[0].trimStart().trimEnd())
-            let v = AuditRecorder.unquote(kv[1].trimStart().trimEnd())
-            if (!k.isEmpty()) {
-                out.add((k, v))
-            }
-        }
-        return out.toArray()
-    }
-
-    /**
-     * 去引号。
-     */
-    private static func unquote(s: String): String {
-        if (s.size >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
-            return s[1..s.size - 1]
-        }
-        return s
+        return jsonFlatEntries(json)
     }
 
     /**
      * 码 → 操作者类型。
+     *
+     * 必须覆盖 ActorType.toCode() 的**全部**取值（0/1/2/3），
+     * 否则漏掉的分支会退回 User(0)，使该类记录校验时哈希不符。
      */
     private static func toActorType(code: Int64): ActorType {
         if (code == 1) {
@@ -314,15 +338,30 @@ public class AuditRecorder {
         if (code == 2) {
             return ActorType.Anonymous
         }
+        if (code == 3) {
+            return ActorType.Service
+        }
         return ActorType.User
     }
 
     /**
      * 码 → 结果。
      */
+    /**
+     * 码 → 结果。
+     *
+     * 必须与 AuditResult.toCode() 完全互逆（0=Success / 1=Failure / 2=Denied）。
+     * 早前只判 code==1 就返回 Failure、其余一律 Success，
+     * 于是 result=2（Denied）的记录在校验时被还原成 0，
+     * 规范化串随之改变 —— 所有「被拒绝」的审计记录都被误判「被篡改」
+     * （实测：TOTP 挑战期的 auth.login_failed 即 result=2）。
+     */
     private static func toResult(code: Int64): AuditResult {
         if (code == 1) {
             return AuditResult.Failure
+        }
+        if (code == 2) {
+            return AuditResult.Denied
         }
         return AuditResult.Success
     }

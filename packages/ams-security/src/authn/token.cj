@@ -135,6 +135,30 @@ public interface SessionStore {
      * 吊销某用户的全部会话（全局登出 / 检测到重放时调用）。
      */
     func revokeAllByUser(uid: String): Int64
+
+    /**
+     * 吊销单个会话（FR-AUTH-007：用户远程踢出某一台设备）。
+     *
+     * @param uid 调用者用户 ID —— **必须校验归属**：
+     *            否则只要猜到 sid 就能踢掉别人的会话。
+     * @return false = 会话不存在、已吊销或不属于该用户
+     */
+    func revoke(sid: String, uid: String): Bool
+
+    /**
+     * 吊销某用户除 keepSid 之外的全部会话（「踢出其他设备」）。
+     *
+     * 保留当前会话，避免用户把自己登出后无法继续操作。
+     */
+    func revokeOthersByUser(uid: String, keepSid: String): Int64
+
+    /**
+     * 未被吊销的会话总数（在线用户口径）。
+     *
+     * 与 count() 的区别：count() 含已吊销行（用于测试），
+     * 这里给健康看板用，只统计仍有效的会话。
+     */
+    func activeCount(): Int64
 }
 
 /**

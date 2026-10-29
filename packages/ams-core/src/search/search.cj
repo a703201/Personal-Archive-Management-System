@@ -152,6 +152,17 @@ public class SearchQuery {
     public let pageSize: Int64
     /** 游标（空 = 首页） */
     public let cursor: Cursor
+    /**
+     * 来源系统筛选（FR-SRC-010）。
+     *
+     * 0 = 手动录入；1 = CSV 导入；2 = 克隆生成；3 = OCR 识别；4 = 附件导入。
+     * 0 表示「不限」之外的默认手动来源；传入 0 时不过滤（与「全部」等价）。
+     */
+    public let source: Int64
+    /** 创建时间起（含），`YYYY-MM-DD` 或 `YYYY-MM-DD HH:MM:SS` */
+    public let createdFrom: String
+    /** 创建时间止（含） */
+    public let createdTo: String
 
     public init(
         keyword: String,
@@ -168,7 +179,10 @@ public class SearchQuery {
         extraFilters: Array<(String, String)>,
         sort: SortSpec,
         pageSize: Int64,
-        cursor: Cursor
+        cursor: Cursor,
+        source!: Int64 = 0,
+        createdFrom!: String = "",
+        createdTo!: String = ""
     ) {
         this.keyword = keyword
         this.subjectIds = subjectIds
@@ -185,6 +199,9 @@ public class SearchQuery {
         this.sort = sort
         this.pageSize = pageSize
         this.cursor = cursor
+        this.source = source
+        this.createdFrom = createdFrom
+        this.createdTo = createdTo
     }
 }
 
@@ -219,19 +236,39 @@ public class Masker {
      * @param value 明文
      * @param sensitivity 敏感度（1=normal 2=sensitive 3=high）
      */
+    /**
+     * 按敏感度生成掩码值。
+     *
+     * - Normal    → 原值
+     * - Sensitive → 保留首尾各 1 位（如 3********4）
+     * - High      → 全掩码（********）
+     *
+     * 【全部按「字符」而非「字节」处理】
+     *   仓颉的 `String.size` 是字节数，`value[0..1]` 切出的是**单个字节**。
+     *   含中文的值（签发机关「市公安局」、地址、姓名等）被逐字节切碎后拼接，
+     *   会直接抛 `IllegalArgumentException: Invalid utf8 byte sequence`
+     *   —— 实测 `GET /api/search` 一遇到敏感条目就 500。
+     *   改用 chars() 按 UTF-8 边界切分后，掩码长度也**按字符数**计
+     *   （此前 9 字节的「市公安局」会显示 9 个星号，实际只有 4 个字）。
+     *
+     * @param value 明文
+     * @param sensitivity 敏感度（1=normal 2=sensitive 3=high）
+     */
     public static func mask(value: String, sensitivity: Int64): String {
         if (sensitivity <= 1 || value.isEmpty()) {
             return value
         }
+        let cs = Masker.chars(value)
+        let n = cs.size
         if (sensitivity >= 3) {
             // 高敏：全掩码，保留长度信息但不泄漏内容
-            return Masker.repeat("*", value.size)
+            return Masker.repeat("*", n)
         }
         // 敏感：保留首尾各 1 位
-        if (value.size <= 2) {
-            return Masker.repeat("*", value.size)
+        if (n <= 2) {
+            return Masker.repeat("*", n)
         }
-        return "${value[0..1]}${Masker.repeat("*", value.size - 2)}${value[value.size - 1..value.size]}"
+        return "${cs[0]}${Masker.repeat("*", n - 2)}${cs[n - 1]}"
     }
 
     /**
@@ -255,20 +292,83 @@ public class Masker {
      * 中间 12 位打码；共暴露 6/18 位，比行业惯用的前 6 后 4 更克制）。
      */
     public static func maskIdCard(value: String): String {
-        if (value.size < 6) {
-            return Masker.repeat("*", value.size)
+        let cs = Masker.chars(value)
+        let n = cs.size
+        if (n < 6) {
+            return Masker.repeat("*", n)
         }
-        return "${value[0..4]}${Masker.repeat("*", value.size - 6)}${value[value.size - 2..value.size]}"
+        var sb = StringBuilder()
+        for (i in 0..4) {
+            sb.append(cs[i])
+        }
+        sb.append(Masker.repeat("*", n - 6))
+        sb.append(cs[n - 2])
+        sb.append(cs[n - 1])
+        return sb.toString()
     }
 
     /**
      * 手机号的专用掩码（保留前 3 后 4）。
      */
     public static func maskPhone(value: String): String {
-        if (value.size < 7) {
-            return Masker.repeat("*", value.size)
+        let cs = Masker.chars(value)
+        let n = cs.size
+        if (n < 7) {
+            return Masker.repeat("*", n)
         }
-        return "${value[0..3]}${Masker.repeat("*", value.size - 7)}${value[value.size - 4..value.size]}"
+        var sb = StringBuilder()
+        for (i in 0..3) {
+            sb.append(cs[i])
+        }
+        sb.append(Masker.repeat("*", n - 7))
+        for (i in n - 4..n) {
+            sb.append(cs[i])
+        }
+        return sb.toString()
+    }
+
+    /**
+     * 按 UTF-8 字符边界切分为单字数组。
+     *
+     * 与分词器的 toChars 同思路：首字节高位决定字符占几字节，
+     * 保证后续任何切片都落在字符边界上。
+     */
+    private static func chars(s: String): Array<String> {
+        let out = ArrayList<String>()
+        var i: Int64 = 0
+        while (i < s.size) {
+            let len = Masker.utf8Len(s[i])
+            if (len <= 0) {
+                // 非法首字节（理论上不会出现）：跳过，避免死循环
+                i = i + 1
+            } else if (i + len > s.size) {
+                out.add(s[i..s.size])
+                i = s.size
+            } else {
+                out.add(s[i..(i + len)])
+                i = i + len
+            }
+        }
+        return out.toArray()
+    }
+
+    /**
+     * 按 UTF-8 首字节判定该字符占几字节。
+     */
+    private static func utf8Len(b: Byte): Int64 {
+        if (b < 0x80u8) {
+            return 1
+        }
+        if (b >= 0xC0u8 && b < 0xE0u8) {
+            return 2
+        }
+        if (b >= 0xE0u8 && b < 0xF0u8) {
+            return 3
+        }
+        if (b >= 0xF0u8 && b < 0xF8u8) {
+            return 4
+        }
+        return 0
     }
 }
 
@@ -296,6 +396,9 @@ public class SearchQueryBuilder {
     private var sortDirection: SortDirection = SortDirection.Desc
     private var pageSize: Int64 = 20
     private var cursor: Cursor = Cursor("", "")
+    private var source: Int64 = 0
+    private var createdFrom: String = ""
+    private var createdTo: String = ""
 
     public init() {
     }
@@ -337,6 +440,25 @@ public class SearchQueryBuilder {
     public func expiresRange(from: String, to: String): SearchQueryBuilder {
         this.expiresFrom = from
         this.expiresTo = to
+        return this
+    }
+
+    /**
+     * 来源系统筛选（FR-SRC-010）。
+     *
+     * @param v 0=手动 1=CSV导入 2=克隆 3=OCR 4=附件导入；0 表示不过滤
+     */
+    public func source_(v: Int64): SearchQueryBuilder {
+        this.source = v
+        return this
+    }
+
+    /**
+     * 创建时间范围（FR-SRC-010）。
+     */
+    public func createdRange(from: String, to: String): SearchQueryBuilder {
+        this.createdFrom = from
+        this.createdTo = to
         return this
     }
 
@@ -384,6 +506,7 @@ public class SearchQueryBuilder {
             this.expiresFrom, this.expiresTo, this.tagIds,
             this.blindFilters.toArray(), this.extraFilters.toArray(),
             SortSpec(this.sortField, this.sortDirection),
-            this.pageSize, this.cursor)
+            this.pageSize, this.cursor,
+            source: this.source, createdFrom: this.createdFrom, createdTo: this.createdTo)
     }
 }

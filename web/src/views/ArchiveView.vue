@@ -19,33 +19,18 @@
 import { ref, computed, onMounted } from 'vue'
 import { api } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
+import AttachmentPanel from '../components/AttachmentPanel.vue'
+import ShareLinkPanel from '../components/ShareLinkPanel.vue'
+import { CATEGORY_DEFS as CATEGORIES, categoryName, categorySensitivity } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
 
 const toast = useToast()
 
 // ---------------------------------------------------------------
 // 字典（与 docs/06 §12.3 的分类模板一一对应）
+// 分类名与默认敏感度统一取自 `composables/useCatalog`，本页不再自带副本
+// —— 此前该映射在本页与 OverviewView 各有一份且已漂移。
 // ---------------------------------------------------------------
-
-interface CategoryDef {
-  code: number
-  name: string
-  sensitivity: number
-}
-
-const CATEGORIES: CategoryDef[] = [
-  { code: 1, name: '个人基本信息', sensitivity: 1 },
-  { code: 2, name: '证件信息', sensitivity: 2 },
-  { code: 3, name: '教育经历', sensitivity: 1 },
-  { code: 4, name: '职业经历', sensitivity: 1 },
-  { code: 5, name: '资质证书', sensitivity: 1 },
-  { code: 6, name: '联系方式', sensitivity: 2 },
-  { code: 7, name: '家庭关系', sensitivity: 2 },
-  { code: 8, name: '健康信息', sensitivity: 3 },
-  { code: 9, name: '资产信息', sensitivity: 3 },
-  { code: 10, name: '影像附件', sensitivity: 1 },
-  { code: 11, name: '自定义分类', sensitivity: 1 },
-]
 
 /** 条目状态：0=草稿 1=正常 2=已归档 */
 const STATUS_OPTS = [
@@ -63,13 +48,9 @@ const RELATION_OPTS = [
   { value: 4, label: '其他' },
 ]
 
-function catName(code: number | string): string {
-  return CATEGORIES.find((c) => c.code === Number(code))?.name ?? '未分类'
-}
-
-function catSensitivity(code: number | string): number {
-  return CATEGORIES.find((c) => c.code === Number(code))?.sensitivity ?? 1
-}
+/** 本页历史别名，指向共享字典（保留调用点不变，减少改动面） */
+const catName = categoryName
+const catSensitivity = categorySensitivity
 
 function statusLabel(v: number | string): string {
   return STATUS_OPTS.find((s) => s.value === Number(v))?.label ?? '—'
@@ -78,6 +59,22 @@ function statusLabel(v: number | string): string {
 function sensLabel(v: number | string): string {
   const n = Number(v)
   return n >= 3 ? '高敏' : n === 2 ? '敏感' : '普通'
+}
+
+/**
+ * 来源系统枚举（与后端 arc_items.source 一致）：
+ * 0=手动 1=CSV导入 2=克隆 3=OCR 4=附件导入 5=导出包回导（FR-EXP-008）
+ */
+const SOURCE_LABELS: Record<number, string> = {
+  0: '手动',
+  1: 'CSV 导入',
+  2: '克隆',
+  3: 'OCR',
+  4: '附件导入',
+  5: '导出包回导',
+}
+function sourceLabel(v: number | string): string {
+  return SOURCE_LABELS[Number(v)] ?? '手动'
 }
 
 function fmtTime(ms: number | string | undefined): string {
@@ -114,6 +111,7 @@ interface Item {
   issuer: string
   remark: string
   version: number | string
+  source: number | string
   createdAt: number | string
   updatedAt: number | string
 }
@@ -149,6 +147,10 @@ const size = 10
 const keyword = ref('')
 const category = ref(0)
 const status = ref(-1)
+// FR-SRC-010：来源系统筛选 + 创建时间范围
+const source = ref(0)
+const createdFrom = ref('')
+const createdTo = ref('')
 
 const loading = ref(true)
 const error = ref('')
@@ -175,6 +177,9 @@ async function loadItems(): Promise<void> {
     if (activeSubjectId.value) q.set('subjectId', activeSubjectId.value)
     if (category.value > 0) q.set('category', String(category.value))
     if (status.value >= 0) q.set('status', String(status.value))
+    if (source.value > 0) q.set('source', String(source.value))
+    if (createdFrom.value) q.set('createdFrom', createdFrom.value)
+    if (createdTo.value) q.set('createdTo', createdTo.value)
     if (keyword.value.trim()) q.set('keyword', keyword.value.trim())
     q.set('page', String(page.value))
     q.set('size', String(size))
@@ -206,6 +211,119 @@ function goPage(next: number): void {
   void loadItems()
 }
 
+// ---------------------------------------------------------------
+// 批量选择（FR-UX-006）
+// ---------------------------------------------------------------
+const selected = ref<Set<string>>(new Set())
+const selectedCount = computed(() => selected.value.size)
+const allSelected = computed(
+  () => items.value.length > 0 && items.value.every((i) => selected.value.has(String(i.id))),
+)
+
+function toggleSelect(id: string): void {
+  const s = new Set(selected.value)
+  if (s.has(id)) {
+    s.delete(id)
+  } else {
+    s.add(id)
+  }
+  selected.value = s
+}
+
+function toggleSelectAll(): void {
+  if (allSelected.value) {
+    selected.value = new Set()
+  } else {
+    selected.value = new Set(items.value.map((i) => String(i.id)))
+  }
+}
+
+const batchDeleting = ref(false)
+
+/**
+ * 批量编辑（FR-ARCH-013）：一次改多个条目的分类 / 有效期 / 标签。
+ *
+ * 三个字段都是**可选**的：不填的字段不会动（后端是打补丁语义）。
+ * 与批量删除一样走「单接口 + 服务端按可访问主体过滤」，
+ * 越权条目根本不会被更新，响应的 updated 与实际选中数不一致即为信号。
+ */
+const batchEditing = ref(false)
+const editCategory = ref<number | null>(null)
+const editExpiresAt = ref('')
+const editTagId = ref('')
+/** 批量加标签的下拉选项（登录页级别的轻量加载，失败也不阻断列表） */
+const tagOptions = ref<{ id: string; name: string }[]>([])
+
+async function batchEdit(): Promise<void> {
+  if (selected.value.size === 0) return
+  if (editCategory.value === null && !editExpiresAt.value && !editTagId.value) {
+    toast.error('请至少选择一项要修改的内容（分类 / 有效期 / 标签）')
+    return
+  }
+  batchEditing.value = true
+  try {
+    const body: Record<string, unknown> = { ids: Array.from(selected.value) }
+    if (editCategory.value !== null) body.category = editCategory.value
+    if (editExpiresAt.value) body.expiresAt = editExpiresAt.value
+    if (editTagId.value) body.tagIds = [editTagId.value]
+    const res = await api<{ requested: number; updated: number; tagged: number }>(
+      '/items/batch/edit',
+      { method: 'POST', body },
+    )
+    const skipped = res.requested - res.updated
+    toast.success(
+      `已更新 ${res.updated} 条${res.tagged ? `，打标 ${res.tagged} 次` : ''}` +
+        (skipped > 0 ? `；${skipped} 条未变更（可能无权限或已删除）` : ''),
+    )
+    selected.value = new Set()
+    editCategory.value = null
+    editExpiresAt.value = ''
+    editTagId.value = ''
+    await loadItems()
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    batchEditing.value = false
+  }
+}
+
+async function batchDelete(): Promise<void> {
+  if (selected.value.size === 0) return
+  batchDeleting.value = true
+  try {
+    const ids = Array.from(selected.value)
+    let ok = 0
+    for (const id of ids) {
+      const it = items.value.find((x) => String(x.id) === id)
+      try {
+        await api(`/items/${id}`, {
+          method: 'DELETE',
+          body: { version: Number(it?.version ?? 1) },
+        })
+        ok++
+      } catch {
+        // 单条失败不阻断其余已选项
+      }
+    }
+    toast.success(`已删除 ${ok} 条（移入回收站）`)
+    selected.value = new Set()
+    await loadItems()
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    batchDeleting.value = false
+  }
+}
+
+async function loadTags(): Promise<void> {
+  try {
+    const res = await api<{ items: { id: string; name: string }[] }>('/tags')
+    tagOptions.value = (res.items ?? []).map((t) => ({ id: String(t.id), name: t.name }))
+  } catch {
+    /* 标签加载失败不阻断档案列表，只是批量加标签的下拉为空 */
+  }
+}
+
 onMounted(async () => {
   try {
     // 先拉主体（后端会为首访用户补建「本人」），再拉条目
@@ -214,6 +332,7 @@ onMounted(async () => {
     error.value = (e as Error).message
   }
   await loadItems()
+  await loadTags()
 })
 
 // ---------------------------------------------------------------
@@ -579,6 +698,23 @@ async function confirmDelete(): Promise<void> {
   }
 }
 
+// 克隆（FR-ARCH-009）：复制为新草稿
+const cloningId = ref('')
+
+async function cloneItem(it: Item): Promise<void> {
+  cloningId.value = String(it.id)
+  try {
+    const res = await api<{ id: string }>(`/items/${it.id}/clone`, { method: 'POST', body: {} })
+    toast.success('已复制为新草稿')
+    await loadItems()
+    void res
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    cloningId.value = ''
+  }
+}
+
 // ---------------------------------------------------------------
 // 字段渲染
 // ---------------------------------------------------------------
@@ -662,12 +798,43 @@ function inputType(t: number | string): string {
       <select v-model.number="status" class="field-control" @change="reload">
         <option v-for="s in STATUS_OPTS" :key="s.value" :value="s.value">{{ s.label }}</option>
       </select>
+      <select v-model.number="source" class="field-control" @change="reload" title="来源">
+        <option :value="0">全部来源</option>
+        <option :value="1">CSV 导入</option>
+        <option :value="2">克隆生成</option>
+        <option :value="3">OCR 识别</option>
+        <option :value="4">附件导入</option>
+        <option :value="5">导出包回导</option>
+      </select>
+      <div class="toolbar__dates">
+        <input
+          v-model="createdFrom"
+          class="field-control"
+          type="date"
+          title="创建时间起"
+          @change="reload"
+        />
+        <span class="toolbar__dash">~</span>
+        <input
+          v-model="createdTo"
+          class="field-control"
+          type="date"
+          title="创建时间止"
+          @change="reload"
+        />
+      </div>
       <button class="btn-ghost" type="button" @click="reload">查询</button>
       <button class="btn-text" type="button" @click="openRecycle">回收站</button>
     </div>
 
-    <p v-if="loading" class="hint">加载中…</p>
-    <p v-else-if="error" class="hint hint--error">{{ error }}</p>
+    <p v-if="error" class="hint hint--error">{{ error }}</p>
+    <div v-else-if="loading" class="list" aria-hidden="true">
+      <div v-for="n in 6" :key="n" class="card item item--skeleton">
+        <div class="skeleton skeleton--title" />
+        <div class="skeleton skeleton--line" style="width: 70%" />
+        <div class="skeleton skeleton--line" style="width: 40%" />
+      </div>
+    </div>
     <div v-else-if="items.length === 0" class="card empty">
       <div class="empty__title">还没有档案</div>
       <p class="empty__sub">点击右上角「新建档案」，为当前主体添加第一条记录。</p>
@@ -678,10 +845,21 @@ function inputType(t: number | string): string {
         v-for="it in items"
         :key="it.id"
         class="card item"
+        :class="{ 'item--selected': selected.has(String(it.id)) }"
         tabindex="0"
+        :aria-pressed="selected.has(String(it.id))"
         @click="openDetail(it)"
         @keyup.enter="openDetail(it)"
       >
+        <label class="item__check" @click.stop @keyup.stop>
+          <input
+            type="checkbox"
+            class="item__checkbox"
+            :checked="selected.has(String(it.id))"
+            :aria-label="`选择 ${it.title}`"
+            @change="toggleSelect(String(it.id))"
+          />
+        </label>
         <div class="item__main">
           <div class="item__title">{{ it.title }}</div>
           <div class="item__meta">
@@ -691,16 +869,75 @@ function inputType(t: number | string): string {
             </span>
             <span class="item__status">{{ statusLabel(it.status) }}</span>
             <span v-if="it.issuer" class="item__issuer">{{ it.issuer }}</span>
+            <span class="item__source">{{ sourceLabel(it.source) }}</span>
             <span class="item__time">{{ fmtTime(it.updatedAt) }}</span>
           </div>
         </div>
         <div class="item__actions">
           <button class="btn-text" type="button" @click.stop="openEdit(it)">编辑</button>
+          <button
+            class="btn-text"
+            type="button"
+            :disabled="cloningId === String(it.id)"
+            @click.stop="cloneItem(it)"
+          >
+            {{ cloningId === String(it.id) ? '复制中…' : '复制' }}
+          </button>
           <button class="btn-text btn-text--danger" type="button" @click.stop="askDelete(it)">
             删除
           </button>
         </div>
       </article>
+    </div>
+
+    <!-- 批量操作浮出栏（FR-UX-006）：选中后浮出 -->
+    <div
+      v-if="selectedCount > 0"
+      class="batchbar"
+      role="region"
+      aria-label="批量操作"
+    >
+      <label class="batchbar__count">
+        <input
+          type="checkbox"
+          :checked="allSelected"
+          :aria-label="allSelected ? '取消全选' : '全选本页'"
+          @change="toggleSelectAll"
+        />
+        已选 {{ selectedCount }} 项
+      </label>
+      <span class="batchbar__spacer" />
+      <!-- FR-ARCH-013 批量编辑：三项都可选，不填的字段不改 -->
+      <label class="batchbar__field">
+        <span>改分类</span>
+        <select v-model="editCategory" class="field-control field-control--sm">
+          <option :value="null">（不改）</option>
+          <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ c.name }}</option>
+        </select>
+      </label>
+      <label class="batchbar__field">
+        <span>有效期</span>
+        <input v-model="editExpiresAt" class="field-control field-control--sm" type="date" />
+      </label>
+      <label class="batchbar__field">
+        <span>加标签</span>
+        <select v-model="editTagId" class="field-control field-control--sm">
+          <option value="">（不加）</option>
+          <option v-for="t in tagOptions" :key="t.id" :value="t.id">{{ t.name }}</option>
+        </select>
+      </label>
+      <button class="btn-primary" type="button" :disabled="batchEditing" @click="batchEdit">
+        {{ batchEditing ? '提交中…' : '应用修改' }}
+      </button>
+      <button class="btn-ghost" type="button" @click="selected = new Set()">取消</button>
+      <button
+        class="btn-danger"
+        type="button"
+        :disabled="batchDeleting"
+        @click="batchDelete"
+      >
+        {{ batchDeleting ? '删除中…' : '批量删除' }}
+      </button>
     </div>
 
     <div v-if="!loading && total > size" class="pager">
@@ -844,6 +1081,12 @@ function inputType(t: number | string): string {
             <dd>{{ f.value || '—' }}</dd>
           </template>
         </dl>
+
+        <!-- 附件（上传 / 预览水印 / 版本对比 / 批量操作） -->
+        <AttachmentPanel v-if="detailItem" :item-id="Number(detailItem.id)" />
+
+        <!-- 共享链接（FR-ACL-011 / FR-ACL-012） -->
+        <ShareLinkPanel v-if="detailItem" :item-id="Number(detailItem.id)" />
       </template>
       <div class="sheet-actions">
         <button class="btn-ghost" type="button" @click="showDetail = false">关闭</button>
@@ -1055,6 +1298,17 @@ function inputType(t: number | string): string {
   flex: 1 1 200px;
   min-width: 160px;
 }
+.toolbar__dates {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.toolbar__dates .field-control {
+  width: auto;
+}
+.toolbar__dash {
+  color: var(--text-soft);
+}
 
 /* 列表 */
 .list {
@@ -1078,6 +1332,27 @@ function inputType(t: number | string): string {
 .item:active {
   transform: scale(0.995);
 }
+.item--selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.item--skeleton {
+  cursor: default;
+  pointer-events: none;
+}
+.item__check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  cursor: pointer;
+}
+.item__checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .item__title {
   font-weight: 600;
   font-size: var(--font-size-md);
@@ -1093,6 +1368,13 @@ function inputType(t: number | string): string {
 }
 .item__time {
   margin-left: auto;
+}
+.item__source {
+  padding: 1px 6px;
+  border-radius: var(--g3-sm, 12px);
+  font-size: 11px;
+  background: var(--bg-soft, #f0f1f5);
+  color: var(--text-soft);
 }
 .item__actions {
   display: flex;
@@ -1217,23 +1499,8 @@ function inputType(t: number | string): string {
   min-width: 0;
 }
 
-.kv {
-  display: grid;
-  grid-template-columns: 96px 1fr;
-  gap: var(--sp-2) var(--sp-3);
-  margin: 0;
-  font-size: var(--font-size-md);
-}
-.kv dt {
-  color: var(--text-secondary);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.kv dd {
-  margin: 0;
-  word-break: break-word;
-}
+/* `.kv`（键值描述列表）已提升到 styles/theme.css 作为全局类，
+   避免各页面各写一份、并在未定义的页面退化成浏览器默认缩进。 */
 
 .hint {
   color: var(--text-muted);

@@ -86,6 +86,10 @@ public class AttachmentService {
      * 上传附件。
      *
      * @param plain 明文内容（当前为非流式整块，见 FR-ATT-002 的已知局限）
+     * @param dedup 是否允许内容去重（默认 true = 同主体同内容秒传复用）。
+     *              批量导入（FR-IMP-002）必须传 false：去重命中时**不会**为
+     *              新条目建立归属关系，等于「文件静默丢失」——导入语义要求
+     *              每个条目都真正拥有自己的附件。
      */
     public func upload(
         subjectId: Int64,
@@ -94,7 +98,8 @@ public class AttachmentService {
         title: String,
         fileName: String,
         plain: Array<Byte>,
-        operatorId: Int64
+        operatorId: Int64,
+        dedup!: Bool = true
     ): UploadResult {
         // ---- 1. 基础校验（FR-ATT-001）----
         if (plain.size > FileTypes.maxFileSize) {
@@ -112,18 +117,41 @@ public class AttachmentService {
             throw validationError("file", "不支持的 MIME 类型")
         }
 
+        // ---- 1b. 归属修正：挂了条目就以**条目的主体**为准 ----
+        // 之前路由直接把「当前用户 ID」当 subject_id 传进来，导致附件挂在
+        // 一个根本不存在的主体上：列表按 itemId 查得到，但任何主体级鉴权
+        // （本 P1 的批量操作、版本上传）都会判成「不属于当前账号」。
+        var owner = subjectId
+        match (itemId) {
+            case Some(iid) =>
+                match (this.itemRepo) {
+                    case Some(ir) =>
+                        match (ir.findByIdRaw(iid)) {
+                            // ItemRecord 的 ID 字段是字符串（与 JSON 输出一致）
+                            case Some(it) => owner = RowData.toI64(it.subjectId)
+                            case None => throw notFound("所属条目")
+                        }
+                    case None => ()
+                }
+            case None => ()
+        }
+        if (owner <= 0) {
+            throw validationError("subjectId", "缺少 subjectId 或 itemId，无法确定附件归属")
+        }
         // ---- 2. 指纹与去重（FR-ATT-002）----
         let cipher = AttachmentCipher(this.cipherProvider)
         let fp = match (cipher.fingerprint(plain)) {
             case CryptoResult.Ok(v) => v
             case CryptoResult.Err(e) => throw e
         }
-        let dkey = cipher.dedupKey("${subjectId}", fp)
-        match (this.repo.findByDedupKey(subjectId, dkey)) {
-            case Some(existing) =>
-                // 同主体已存在完全相同内容 → 秒传复用，不重复落盘
-                return UploadResult(existing.id, true, existing.status)
-            case None => ()
+        let dkey = cipher.dedupKey("${owner}", fp)
+        if (dedup) {
+            match (this.repo.findByDedupKey(owner, dkey)) {
+                case Some(existing) =>
+                    // 同主体已存在完全相同内容 → 秒传复用，不重复落盘
+                    return UploadResult(existing.id, true, existing.status)
+                case None => ()
+            }
         }
 
         // ---- 3. 数据密钥（FR-ATT-003）----
@@ -161,7 +189,7 @@ public class AttachmentService {
 
         // ---- 7. 落库 ----
         let attId = this.repo.create(
-            subjectId, itemId, category, title, storageKey,
+            owner, itemId, category, title, storageKey,
             kv.version, plain.size, ext, mime, fp, dkey,
             status.toCode(), operatorId
         )
@@ -227,7 +255,12 @@ public class AttachmentService {
             case CryptoResult.Ok(k) => k
             case CryptoResult.Err(e) => throw e
         }
-        match (this.storage.get(rec.storageKey)) {
+        // 版本可能已被切换：以「当前版本」的存储键为准，回退到主记录键
+        let storageKey = match (this.repo.currentVersionStorageKey(attachmentId)) {
+            case Some(k) => k
+            case None => rec.storageKey
+        }
+        match (this.storage.get(storageKey)) {
             case Some(enc) =>
                 let cipher = AttachmentCipher(this.cipherProvider)
                 let plain = match (cipher.decrypt(enc, dek)) {
@@ -252,6 +285,85 @@ public class AttachmentService {
      */
     public func switchVersion(attachmentId: Int64, versionId: Int64): Bool {
         return this.repo.setCurrentVersion(attachmentId, versionId)
+    }
+
+    /**
+     * 上传新版本（FR-ATT-004 / 009 的数据前提）。
+     *
+     * 与首次上传的差异：
+     *   · 复用该附件已有的 **DEK**（一条附件一把数据密钥，
+     *     这样切版本只换对象、不换密钥，历史版本仍可解）；
+     *   · 版本号 = version_count + 1，对象键 `att_<id>_v<n>.bin`；
+     *   · 写完版本后把当前版本指向它，并更新版本计数。
+     *
+     * @param attachmentId 目标附件
+     * @param fileName     新版本文件名（决定扩展名/MIME）
+     * @param changeNote   变更说明（版本对比里会展示）
+     * @param plain        明文内容
+     * @param operatorId   操作员
+     * @return 新版本 ID
+     */
+    public func uploadVersion(
+        attachmentId: Int64,
+        fileName: String,
+        changeNote: String,
+        plain: Array<Byte>,
+        operatorId: Int64
+    ): Int64 {
+        let rec = match (this.repo.findById(attachmentId)) {
+            case Some(r) => r
+            case None => throw notFound("附件")
+        }
+        if (plain.size > FileTypes.maxFileSize) {
+            throw validationError("file", "文件超过 50MB 上限")
+        }
+        if (plain.size == 0) {
+            throw validationError("file", "文件内容为空")
+        }
+        let ext = FileTypes.extensionOf(fileName)
+        if (!FileTypes.isAllowedExtension(ext)) {
+            throw validationError("file", "不支持的文件类型（仅 jpg/png/pdf）")
+        }
+        let mime = FileTypes.mimeOf(ext)
+        if (!FileTypes.isAllowedMime(mime)) {
+            throw validationError("file", "不支持的 MIME 类型")
+        }
+        if (rec.wrappedDek.isEmpty()) {
+            throw AppError(AppErrorKind.CryptoFailure, "附件缺少数据密钥，无法加密新版本")
+        }
+        let dek = match (this.keyManager.unwrap(AttachmentService.decodeWrapped(rec.wrappedDek))) {
+            case CryptoResult.Ok(k) => k
+            case CryptoResult.Err(e) => throw e
+        }
+        let cipher = AttachmentCipher(this.cipherProvider)
+        let fp = match (cipher.fingerprint(plain)) {
+            case CryptoResult.Ok(v) => v
+            case CryptoResult.Err(e) => throw e
+        }
+        let encrypted = match (cipher.encrypt(plain, dek)) {
+            case CryptoResult.Ok(v) => v
+            case CryptoResult.Err(e) => throw e
+        }
+        let clean = AttachmentService.scanContent(plain, ext)
+        let status = if (clean) { AttachmentStatus.Ready } else { AttachmentStatus.Quarantined }
+        let versionNo = rec.versionCount + 1
+        let storageKey = "att_${attachmentId}_v${versionNo}.bin"
+        if (clean) {
+            this.storage.put(storageKey, encrypted)
+        } else {
+            this.quarantine.put(storageKey, encrypted)
+        }
+        let note = if (changeNote.isEmpty()) { "第 ${versionNo} 版" } else { changeNote }
+        let versionId = this.repo.addVersion(
+            attachmentId, versionNo, storageKey, encrypted.size, ext, mime, fp,
+            status.toCode(), note, operatorId
+        )
+        // 两件事都要做：
+        //   ① setCurrentVersion 翻转版本行的 is_current（下载按它取对象）
+        //   ② setCurrentVersionId 更新主记录的 current_version_id 与 version_count
+        this.repo.setCurrentVersion(attachmentId, versionId)
+        this.repo.setCurrentVersionId(attachmentId, versionId, versionNo)
+        return versionId
     }
 
     // ------------------------------------------------------------
