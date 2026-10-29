@@ -386,6 +386,9 @@ main(): Int64 {
     // ---- 批量导入（FR-IMP-001/003）----
     // 与导出共用 imp_export_tasks 与产物目录：任务表已按 task_type 区分，
     // 分目录反而让「按用户清理产物」变成两处逻辑。
+    // FR-IMP-005：注入 fieldDefRepo / itemFieldRepo，使导入模板带来的
+    // 自定义字段能解析为 field_def 后落 arc_item_fields。
+    let importTemplateRepo = ImportTemplateRepo(db)
     let importService = ImportService(
         itemRepo,
         userRepo,
@@ -396,14 +399,20 @@ main(): Int64 {
         // FR-EXP-008 回导验签：签名密钥必须与导出侧一致，
         // 否则自导出包会被判为「签名不匹配」。
         crypto: provider,
-        signKey: exportSignKey
+        signKey: exportSignKey,
+        fieldDefRepo: fieldDefRepo,
+        itemFieldRepo: itemFieldRepo
     )
     ImportRoutes(
         importService,
         exportTaskRepo,
         userRepo,
+        importTemplateRepo,
         storage: exportStorage
     ).register(router)
+
+    // ---- 导入模板（FR-IMP-005）：CSV 表头 → 字段键映射，owner 隔离 ----
+    ImportTemplateRoutes(importTemplateRepo).register(router)
 
     // ---- 条目模板（FR-ARCH-012 · 方案 C：骨架 + 字段默认值）----
     // 个人模板：owner 隔离在仓储 WHERE 里，接口只需 archive:write:own。

@@ -33,17 +33,20 @@ public class ImportRoutes {
     private let taskRepo: ExportTaskRepo
     private let userRepo: UserRepo
     private let storage: ?StorageBackend
+    private let templateRepo: ImportTemplateRepo
 
     public init(
         importService: ImportService,
         taskRepo: ExportTaskRepo,
         userRepo: UserRepo,
+        templateRepo: ImportTemplateRepo,
         storage!: ?StorageBackend = None
     ) {
         this.importService = importService
         this.taskRepo = taskRepo
         this.userRepo = userRepo
         this.storage = storage
+        this.templateRepo = templateRepo
     }
 
     public func register(router: Router): Unit {
@@ -101,12 +104,15 @@ public class ImportRoutes {
             throw validationError("csv", "缺少 CSV 内容")
         }
         let defaultSubject = ImportRoutes.subjectOf(req)
+        let (mapping, defaults) = this.loadTemplate(UserRepo.parseId(req.subjectId), req)
         let plan = this.importService.precheck(
             UserRepo.parseId(req.subjectId),
             req.perms.contains("archive:write:any"),
             csv,
             defaultSubject,
-            5000
+            5000,
+            mapping: mapping,
+            defaults: defaults
         )
         let sb = StringBuilder()
         sb.append("{\"total\":${plan.total},\"valid\":${plan.valid},\"invalid\":${plan.invalid},")
@@ -153,12 +159,15 @@ public class ImportRoutes {
         }
         let defaultSubject = ImportRoutes.subjectOf(req)
         let taskNo = "IMP${Times.nowMillis()}${Ids.next() % 1000}"
+        let (mapping, defaults) = this.loadTemplate(UserRepo.parseId(req.subjectId), req)
         this.importService.submit(
             UserRepo.parseId(req.subjectId),
             req.perms.contains("archive:write:any"),
             csv,
             defaultSubject,
-            taskNo
+            taskNo,
+            mapping: mapping,
+            defaults: defaults
         )
         return ApiResponse.ok("{\"taskNo\":\"${ApiResponse.escape(taskNo)}\",\"status\":0}",
                               req.requestId)
@@ -380,5 +389,68 @@ public class ImportRoutes {
             return hi
         }
         return v
+    }
+
+    // ---------------------------------------------------------
+    // 导入模板加载（FR-IMP-005）
+    // ---------------------------------------------------------
+
+    /**
+     * 解析请求里携带的 templateId（query 或 JSON 体），加载本人模板的
+     * 「表头 → 字段键」映射与默认值，供预检 / 执行共用。
+     *
+     * 加载失败（模板不存在 / 非本人）一律回落为「无映射」（固定列序），
+     * 不让「模板坏了」阻断整次导入 —— 用户至少还能按旧方式导入。
+     */
+    private func loadTemplate(actorId: Int64, req: ApiRequest): (HashMap<String, String>, HashMap<String, String>) {
+        var id = ImportRoutes.longOf(ImportRoutes.q(req, "templateId"), 0)
+        if (id <= 0) {
+            // 也可能放在 JSON 体里
+            let ct = (req.header("content-type") ?? "").toAsciiLower()
+            if (ct.contains("json")) {
+                id = ImportRoutes.templateIdFromBody(req.bodyText())
+            }
+        }
+        if (id <= 0) {
+            return (HashMap<String, String>(), HashMap<String, String>())
+        }
+        match (this.templateRepo.findByIdAndOwner(id, actorId)) {
+            case Some(t) =>
+                return (ImportRoutes.flatObject(t.mappingJson), ImportRoutes.flatObject(t.defaultsJson))
+            case None => return (HashMap<String, String>(), HashMap<String, String>())
+        }
+    }
+
+    private static func templateIdFromBody(body: String): Int64 {
+        match (SimpleJson.parse(body)) {
+            case Some(j) =>
+                match (j.get("templateId")) {
+                    case Some(v) => return if (v.isEmpty()) { 0 } else { RowData.toI64(v) }
+                    case None => return 0
+                }
+            case None => return 0
+        }
+    }
+
+    /**
+     * 把扁平 JSON 对象解析为 HashMap<k, v>（值统一为字符串）。
+     *
+     * 与 SimpleJson 不暴露键集合的限制配套：用 splitTopLevel 切顶层字段，
+     * 再按 `key: value` 拆分并去引号。值内含逗号的场景同样不受支持
+     * （SimpleJson 本身亦如此），但映射/默认值里几乎不会出现。
+     */
+    private static func flatObject(text: String): HashMap<String, String> {
+        let out = HashMap<String, String>()
+        for (part in SimpleJson.splitTopLevel(text).iterator()) {
+            let kv = part.split(":", 2)
+            if (kv.size >= 2) {
+                let k = SimpleJson.unquotePublic(kv[0].trimAscii())
+                let v = SimpleJson.unquotePublic(kv[1].trimAscii())
+                if (!k.isEmpty()) {
+                    out.add(k, v)
+                }
+            }
+        }
+        return out
     }
 }

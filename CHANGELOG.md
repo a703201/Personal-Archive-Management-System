@@ -18,7 +18,7 @@
 ## [未发布] — P1 收口 + P2 启动
 
 P1 需求逐条落地并在 `127.0.0.1:8080` 实跑验证：**34 条中 33 条实现、1 条降级交付、0 条未做**（详见 `docs/12-P1实现状态核对.md`）。
-P2（23 条）累计 **22 条实现 / 1 条评估中（FR-IMP-005，待方案决策）**，台账见 `docs/13-P2实现状态核对.md`。
+P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C 落地）**，台账见 `docs/13-P2实现状态核对.md`。
 
 ### 新增（家庭成员邀请 · FR-ACL-010 · 方案 B）
 
@@ -94,7 +94,7 @@ P2（23 条）累计 **22 条实现 / 1 条评估中（FR-IMP-005，待方案决
 
 ### 新增（P2 收口：安全策略 / 通知 / 导入导出 / 档案增强）
 
-> 本轮回填 7 条 P2，含 4 条能力边界降级项；三道闸门实跑：后端 `bash scripts/build.sh ams-server` 0 error、单测 `bash scripts/test.sh` **325 通过 / 0 失败**、前端 `cd web && npm run build` 0 error。端到端（`verify-family.py` 三-B 并发 accept 压测 + 新接口联调）**代码就绪但本环境无法实跑** —— 沙箱拦截 WSL/openGauss，需用户在本地拉起库后复验。
+> 本轮回填 7 条 P2，含 4 条能力边界降级项；三道闸门实跑：后端 `bash scripts/build.sh ams-server` 0 error、单测 `bash scripts/test.sh` **331 通过 / 0 失败**（较上轮 +6，来自 FR-IMP-005 模板路径）、前端 `cd web && npm run build` 0 error。端到端（`verify-family.py` 三-B 并发 accept 压测 + 新接口联调）**代码就绪但本环境无法实跑** —— 沙箱拦截 WSL/openGauss，需用户在本地拉起库后复验。
 
 - **账号锁定策略可配置（FR-AUTH-010）**：`AuthConfig` 阈值/时长原硬编码；现读取环境变量 `AMS_AUTH_MAX_FAILS`（默认 5）、`AMS_AUTH_LOCK_SECONDS`（默认 900），在 `main.cj` 装配处具名传入。`auth.cj` 的登录失败原子计数 + 渐进延时 + 锁定 + 管理员人工解锁（`POST /api/users/:id/unlock`，写审计）均已具备。
 - **短信通知降级（FR-NTF-005）**：新增 `SmsProvider` 接口（`Noop` / `Console`）+ `makeSmsProvider`（按 `sms.enabled` / `sms.console` 选择，默认关）。`Mailer.sendAlert` 在邮件基础上，若 `sms.enabled` 且电话非空则补发短信。安全事件走「站内 + 邮件 + 可选短信」双/三通道；密码重置已切到 `sendAlert`。
@@ -104,6 +104,7 @@ P2（23 条）累计 **22 条实现 / 1 条评估中（FR-IMP-005，待方案决
 - **图形验证码降级（FR-AUTH-011 降级）**：无图形库，降级为「同 IP 限流（`rateLimitMiddleware` 300/分钟）+ 登录递增延时 + 失败次数阈值锁定」，与 FR-AUTH-010 合并交付。
 - **导出格式（FR-EXP-005）**：已支持 JSON 包（manifest + HMAC-SM3 签名，FR-EXP-008 回导验签闭环）+ CSV 报告，形态已统一为可携带闭环。
 - **并发 accept 压测就绪（`scripts/ci/verify-family.py` 三-B）**：单条使用邀请（maxUses=1）下 10 个不同账号并发兑换，断言恰好 1 人成功（200）、其余 9 人一律 404，并校验组内仅 +1 新成员 —— 验证 `consumeOnce` 的「单条 UPDATE + WHERE 行锁」原子语义。
+- **导入模板管理（FR-IMP-005 · 方案 C：全量字段定义域）**：CSV 表头不固定时，用户可保存命名模板（`{CSV 表头 → 字段键}` 映射 + 系统字段默认值），导入时套用免去每次重排列位。新增表 `arc_import_templates`（迁移 `021`）+ `ImportTemplateRepo` + `ImportTemplateRoutes`（`GET/POST /api/import-templates`、`PUT/DELETE /api/import-templates/:id`，`archive:write:own`）。`ImportService.validate()` 新增「按表头映射」分支（`mapping`/`defaults` 入参，**空映射零回归**走原 `cells[i]` 固定列序）；`ImportRoutes` 透传 `templateId`（从 query 或 JSON 体加载，失败回落空映射）。自定义字段键经既有 `arc_field_defs` / `arc_item_fields`（FR-ARCH-003/004）落库，复用条目录入同一条字段定义域通道；模板仓储层全带 `owner_id` 隔离，非本人一律 404/409。6 条单测覆盖固定列序零回归、模板映射（系统+自定义）、默认值回落、主体越权、判重。前端导入页模板套用 UI 已补（#75）：下拉套用 / 删除 / **复制**（`POST` 带 `cloneFrom`，以本人既有模板为蓝本，名称默认「原名 副本」）/ **改名**（内联 PUT 只改名称）、可视化表头映射编辑器、系统字段默认值。迁移 `021` 幂等写法已复核（`CREATE TABLE/INDEX IF NOT EXISTS`，与既有 15 个迁移同款）。
 
 ### 新增（P2 第二批）
 

@@ -209,6 +209,7 @@ async function loadTasks(): Promise<void> {
 onMounted(async () => {
   await loadSubjects()
   await loadTasks()
+  await loadTemplates()
   timer = window.setInterval(() => {
     if (activeCount.value > 0) loadTasks()
   }, 1500)
@@ -244,8 +245,9 @@ async function csvPrecheck(): Promise<void> {
   if (!csvText.value.trim()) { toastError('请先选择 CSV 文件或粘贴内容'); return }
   busy.value = true
   try {
+    const qs = withTemplate(new URLSearchParams({ subjectId: subjectId.value }))
     const plan = await apiBinary<CsvPlan>(
-      `/import/precheck?subjectId=${encodeURIComponent(subjectId.value)}`,
+      `/import/precheck?${qs.toString()}`,
       new Blob([csvText.value], { type: 'text/csv' }),
       'text/csv; charset=utf-8',
     )
@@ -264,8 +266,9 @@ async function csvSubmit(): Promise<void> {
   if (!csvPlan.value) return
   busy.value = true
   try {
+    const qs = withTemplate(new URLSearchParams({ subjectId: subjectId.value }))
     const r = await apiBinary<{ taskNo: string }>(
-      `/import/tasks?subjectId=${encodeURIComponent(subjectId.value)}`,
+      `/import/tasks?${qs.toString()}`,
       new Blob([csvText.value], { type: 'text/csv' }),
       'text/csv; charset=utf-8',
     )
@@ -501,6 +504,267 @@ function triggerDownload(blob: Blob, name: string): void {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+// ---------------------------------------------------------------
+// 导入模板（FR-IMP-005 · 方案 C）
+//
+// 让用户把「CSV 表头 → 字段键」的映射 + 系统字段默认值保存为命名模板，
+// 下次导入直接套用，免去每次重排列位。
+//   GET    /api/import-templates           列出本人的全部模板
+//   POST   /api/import-templates           新建
+//   PUT    /api/import-templates/:id       更新（覆盖式）
+//   DELETE /api/import-templates/:id       删除
+// 预检 / 提交时把 templateId 透传进 query，后端据此加载 mapping / defaults。
+// ---------------------------------------------------------------
+
+interface ImportTemplate {
+  id: string
+  name: string
+  mapping: Record<string, string>
+  defaults: Record<string, string>
+  createdAt: number
+  updatedAt: number
+}
+
+interface FieldDefLite {
+  key: string
+  name: string
+}
+
+/** 系统字段（固定列序那 9 列），自定义字段键从字段定义域接口按分类拉取。 */
+const SYSTEM_FIELDS: { key: string; name: string }[] = [
+  { key: 'subject_id', name: '主体ID' },
+  { key: 'category', name: '分类' },
+  { key: 'title', name: '标题' },
+  { key: 'status', name: '状态' },
+  { key: 'sensitivity', name: '敏感度' },
+  { key: 'issued_date', name: '签发日期' },
+  { key: 'expires_at', name: '失效日期' },
+  { key: 'issuer', name: '签发机构' },
+  { key: 'remark', name: '备注' },
+]
+
+const SKIP = '__skip__'
+
+const templates = ref<ImportTemplate[]>([])
+const activeTemplateId = ref('')
+const tplBusy = ref(false)
+
+// 映射编辑器
+const showMapper = ref(false)
+const csvHeaders = ref<string[]>([])
+const headerField = ref<Record<string, string>>({})
+const refCategory = ref(3)
+const refFieldDefs = ref<FieldDefLite[]>([])
+const tplName = ref('')
+const tplDefaultSubject = ref('')
+const tplDefaultCategory = ref('')
+const tplDefaultStatus = ref('')
+const tplDefaultSensitivity = ref('')
+
+const activeTemplate = computed(
+  () => templates.value.find((t) => String(t.id) === activeTemplateId.value) ?? null,
+)
+
+/** 当前生效的目标字段选项：系统字段 + 参考分类下的自定义字段定义。 */
+const fieldOptions = computed<{ key: string; name: string }[]>(() => {
+  const opts = [...SYSTEM_FIELDS]
+  for (const f of refFieldDefs.value) {
+    if (!opts.some((o) => o.key === f.key)) opts.push(f)
+  }
+  return opts
+})
+
+async function loadTemplates(): Promise<void> {
+  try {
+    const data = await api<{ templates: ImportTemplate[] }>('/import-templates')
+    templates.value = data.templates ?? []
+  } catch (e) {
+    toastError((e as Error).message)
+  }
+}
+
+async function applyTemplate(id: string): Promise<void> {
+  const t = templates.value.find((x) => String(x.id) === id)
+  if (!t) return
+  activeTemplateId.value = id
+  csvHeaders.value = Object.keys(t.mapping)
+  headerField.value = { ...t.mapping }
+  tplName.value = t.name
+  tplDefaultSubject.value = t.defaults.subject_id ?? ''
+  tplDefaultCategory.value = t.defaults.category ?? ''
+  tplDefaultStatus.value = t.defaults.status ?? ''
+  tplDefaultSensitivity.value = t.defaults.sensitivity ?? ''
+  success(`已套用模板「${t.name}」`)
+}
+
+async function deleteTemplate(id: string): Promise<void> {
+  if (!window.confirm('确认删除该导入模板？删除后不可恢复。')) return
+  try {
+    await api(`/import-templates/${id}`, { method: 'DELETE' })
+    templates.value = templates.value.filter((x) => String(x.id) !== id)
+    if (activeTemplateId.value === id) activeTemplateId.value = ''
+    success('已删除模板')
+  } catch (e) {
+    toastError((e as Error).message)
+  }
+}
+
+function parseCsvHeaders(): void {
+  const text = csvText.value.trim()
+  if (!text) {
+    csvHeaders.value = []
+    return
+  }
+  const firstLine = text.split(/\r?\n/)[0] ?? ''
+  csvHeaders.value = firstLine
+    .split(',')
+    .map((h) => h.trim())
+    .filter((h) => h.length > 0)
+}
+
+async function refreshRefFieldDefs(): Promise<void> {
+  try {
+    const res = await api<{ fields: FieldDefLite[] }>(
+      `/field-defs?category=${refCategory.value}`,
+    )
+    refFieldDefs.value = res.fields ?? []
+  } catch {
+    refFieldDefs.value = []
+  }
+}
+
+/** 打开映射编辑器：先读 CSV 表头，未映射的列默认「不导入」。 */
+function openMapper(): void {
+  parseCsvHeaders()
+  if (csvHeaders.value.length === 0) {
+    toastError('请先选择 CSV 文件以读取表头')
+    return
+  }
+  const m: Record<string, string> = {}
+  for (const h of csvHeaders.value) {
+    m[h] = headerField.value[h] ?? (activeTemplate.value?.mapping[h] ?? SKIP)
+  }
+  headerField.value = m
+  showMapper.value = true
+  void refreshRefFieldDefs()
+}
+
+function buildMapping(): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const [h, f] of Object.entries(headerField.value)) {
+    if (f && f !== SKIP) map[h] = f
+  }
+  return map
+}
+
+function buildDefaults(): Record<string, string> {
+  const d: Record<string, string> = {}
+  if (tplDefaultSubject.value.trim()) d.subject_id = tplDefaultSubject.value.trim()
+  if (tplDefaultCategory.value.trim()) d.category = tplDefaultCategory.value.trim()
+  if (tplDefaultStatus.value.trim()) d.status = tplDefaultStatus.value.trim()
+  if (tplDefaultSensitivity.value.trim()) d.sensitivity = tplDefaultSensitivity.value.trim()
+  return d
+}
+
+async function saveTemplate(): Promise<void> {
+  if (!tplName.value.trim()) {
+    toastError('请填写模板名称')
+    return
+  }
+  const mapping = buildMapping()
+  if (Object.keys(mapping).length === 0) {
+    toastError('请至少为一个表头选择目标字段')
+    return
+  }
+  tplBusy.value = true
+  try {
+    if (activeTemplateId.value) {
+      await api(`/import-templates/${activeTemplateId.value}`, {
+        method: 'PUT',
+        body: { name: tplName.value.trim(), mapping, defaults: buildDefaults() },
+      })
+      success('模板已更新')
+    } else {
+      const r = await api<{ id: string }>('/import-templates', {
+        method: 'POST',
+        body: { name: tplName.value.trim(), mapping, defaults: buildDefaults() },
+      })
+      activeTemplateId.value = String(r.id)
+      success('模板已保存')
+    }
+    await loadTemplates()
+    showMapper.value = false
+  } catch (e) {
+    toastError((e as Error).message)
+  } finally {
+    tplBusy.value = false
+  }
+}
+
+/** 把当前生效的模板 id 追加进预检 / 提交的 query。 */
+function withTemplate(qs: URLSearchParams): URLSearchParams {
+  if (activeTemplateId.value) qs.set('templateId', activeTemplateId.value)
+  return qs
+}
+
+// 改名（内联）
+const renaming = ref(false)
+const renameText = ref('')
+
+function startRename(): void {
+  if (!activeTemplate.value) return
+  renaming.value = true
+  renameText.value = activeTemplate.value.name
+}
+
+/**
+ * 改名：用既有映射 / 默认值 + 新名称做一次覆盖式 PUT。
+ * 不必打开映射编辑器即可改名称。
+ */
+async function renameTemplate(newName: string): Promise<void> {
+  const t = activeTemplate.value
+  if (!t) return
+  const n = newName.trim()
+  if (!n) {
+    toastError('名称不能为空')
+    return
+  }
+  tplBusy.value = true
+  try {
+    await api(`/import-templates/${t.id}`, {
+      method: 'PUT',
+      body: { name: n, mapping: t.mapping, defaults: t.defaults },
+    })
+    renaming.value = false
+    await loadTemplates()
+    success('已改名')
+  } catch (e) {
+    toastError((e as Error).message)
+  } finally {
+    tplBusy.value = false
+  }
+}
+
+/** 复制：以当前模板为蓝本新建一份（名称默认为「原名 副本」）。 */
+async function cloneTemplate(): Promise<void> {
+  const t = activeTemplate.value
+  if (!t) return
+  tplBusy.value = true
+  try {
+    const r = await api<{ id: string }>('/import-templates', {
+      method: 'POST',
+      body: { cloneFrom: Number(t.id), name: `${t.name} 副本` },
+    })
+    await loadTemplates()
+    activeTemplateId.value = String(r.id)
+    success('已复制为副本')
+  } catch (e) {
+    toastError((e as Error).message)
+  } finally {
+    tplBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -694,12 +958,160 @@ function triggerDownload(blob: Blob, name: string): void {
 
     <!-- ---------------- CSV ---------------- -->
     <template v-else-if="tab === 'csv'">
+      <!-- 导入模板（FR-IMP-005）：保存/套用「CSV 表头 → 字段键」映射 -->
       <div class="card block">
-        <h2 class="block__title">① 选择 CSV 文件</h2>
+        <div class="block__head">
+          <h2 class="block__title">导入模板</h2>
+          <button class="btn-ghost" type="button" :disabled="busy || tplBusy" @click="openMapper">
+            {{ activeTemplate ? '编辑当前映射' : '新建模板' }}
+          </button>
+        </div>
         <p class="hint">
-          表头固定为
-          <code>subject_id,category,title,status,sensitivity,issued_date,expires_at,issuer,remark</code>。
-          <button class="btn-text" type="button" @click="downloadTemplate">下载模板</button>
+          把「CSV 表头 → 字段键」的映射与系统字段默认值存为命名模板，下次导入直接套用，免去每次重排列位。
+        </p>
+        <div class="tpl-bar">
+          <select v-model="activeTemplateId" class="field-control" @change="applyTemplate(activeTemplateId)">
+            <option value="">— 不使用模板（固定列序）—</option>
+            <option v-for="t in templates" :key="t.id" :value="String(t.id)">{{ t.name }}</option>
+          </select>
+          <button
+            v-if="activeTemplate"
+            class="btn-text"
+            type="button"
+            :disabled="tplBusy"
+            @click="cloneTemplate"
+          >
+            复制
+          </button>
+          <button
+            v-if="activeTemplate"
+            class="btn-text"
+            type="button"
+            :disabled="tplBusy"
+            @click="startRename"
+          >
+            改名
+          </button>
+          <button
+            v-if="activeTemplate"
+            class="btn-text"
+            type="button"
+            :disabled="busy"
+            @click="deleteTemplate(activeTemplate.id)"
+          >
+            删除
+          </button>
+        </div>
+        <div v-if="activeTemplate" class="tpl-applied">
+          <template v-if="renaming">
+            <input
+              v-model="renameText"
+              class="field-control"
+              style="max-width: 240px"
+              @keyup.enter="renameTemplate(renameText)"
+            />
+            <button class="btn-primary" type="button" :disabled="tplBusy" @click="renameTemplate(renameText)">
+              确认
+            </button>
+            <button class="btn-ghost" type="button" :disabled="tplBusy" @click="renaming = false">
+              取消
+            </button>
+          </template>
+          <template v-else>
+            <span class="tag tag--match">已套用「{{ activeTemplate.name }}」</span>
+            <span class="hint">
+              映射 {{ Object.keys(activeTemplate.mapping).length }} 个字段；
+              预检与提交将按此模板解析（不再要求固定列序）。
+            </span>
+          </template>
+        </div>
+      </div>
+
+      <!-- 映射编辑器（新建 / 编辑） -->
+      <template v-if="showMapper">
+        <div class="card block">
+          <h2 class="block__title">① 设置表头映射</h2>
+          <p class="hint">
+            为每个 CSV 表头选择目标字段。系统字段固定；自定义字段请从下方「参考分类」加载对应分类的字段定义。
+          </p>
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th>CSV 表头</th>
+                <th>目标字段</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="h in csvHeaders" :key="h">
+                <td class="mono">{{ h }}</td>
+                <td>
+                  <select v-model="headerField[h]" class="field-control">
+                    <option :value="SKIP">（不导入）</option>
+                    <option v-for="o in fieldOptions" :key="o.key" :value="o.key">
+                      {{ o.name }}（{{ o.key }}）
+                    </option>
+                  </select>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 class="block__title">参考分类（用于加载自定义字段）</h3>
+          <label class="field" style="max-width: 240px">
+            <span class="field__label">分类</span>
+            <select v-model.number="refCategory" class="field-control" @change="refreshRefFieldDefs">
+              <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ c.name }}</option>
+            </select>
+          </label>
+
+          <h3 class="block__title">系统字段默认值（CSV 缺列时回落）</h3>
+          <div class="defaults">
+            <label class="field">
+              <span class="field__label">subject_id</span>
+              <input v-model="tplDefaultSubject" class="field-control" placeholder="如 100" />
+            </label>
+            <label class="field">
+              <span class="field__label">category</span>
+              <input v-model="tplDefaultCategory" class="field-control" placeholder="如 3" />
+            </label>
+            <label class="field">
+              <span class="field__label">status</span>
+              <input v-model="tplDefaultStatus" class="field-control" placeholder="如 0" />
+            </label>
+            <label class="field">
+              <span class="field__label">sensitivity</span>
+              <input v-model="tplDefaultSensitivity" class="field-control" placeholder="如 1" />
+            </label>
+          </div>
+
+          <label class="field" style="max-width: 360px">
+            <span class="field__label">模板名称</span>
+            <input v-model="tplName" class="field-control" placeholder="给这套映射起个名字" />
+          </label>
+
+          <div class="actions">
+            <button class="btn-primary" :disabled="tplBusy" @click="saveTemplate">
+              {{ tplBusy ? '保存中…' : (activeTemplate ? '更新模板' : '保存模板') }}
+            </button>
+            <button class="btn-ghost" type="button" :disabled="tplBusy" @click="showMapper = false">
+              取消
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <div class="card block">
+        <h2 class="block__title">② 选择 CSV 文件</h2>
+        <p class="hint">
+          <template v-if="activeTemplate">
+            已套用模板「{{ activeTemplate.name }}」——表头由模板映射决定，无需固定列序。
+            <button class="btn-text" type="button" @click="openMapper">查看 / 调整映射</button>
+          </template>
+          <template v-else>
+            未套用模板时，表头固定为
+            <code>subject_id,category,title,status,sensitivity,issued_date,expires_at,issuer,remark</code>。
+          </template>
+          <button class="btn-text" type="button" @click="downloadTemplate">下载空模板</button>
         </p>
         <div class="picker">
           <input
@@ -721,7 +1133,7 @@ function triggerDownload(blob: Blob, name: string): void {
       </div>
 
       <div v-if="csvPlan" class="card block">
-        <h2 class="block__title">② 预检结果</h2>
+        <h2 class="block__title">③ 预检结果</h2>
         <div class="stats">
           <div class="stat">
             <span class="stat__n">{{ csvPlan.total }}</span>
@@ -1239,6 +1651,31 @@ code {
   color: var(--text-muted);
   font-size: var(--font-size-sm);
   padding: var(--sp-3) 0;
+}
+
+/* 导入模板（FR-IMP-005） */
+.tpl-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+}
+.tpl-bar .field-control {
+  min-width: 280px;
+}
+.tpl-applied {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+}
+.defaults {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
 }
 @media (max-width: 720px) {
   .conflict {

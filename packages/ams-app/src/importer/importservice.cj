@@ -82,20 +82,23 @@ public class ImportPlan {
 
 /** 一行解析后的导入数据 */
 public class ImportRow {
-    let line: Int64
-    let subjectId: Int64
-    let category: Int64
-    let title: String
-    let status: Int64
-    let sensitivity: Int64
-    let issuedDate: String
-    let expiresAt: String
-    let issuer: String
-    let remark: String
+    public let line: Int64
+    public let subjectId: Int64
+    public let category: Int64
+    public let title: String
+    public let status: Int64
+    public let sensitivity: Int64
+    public let issuedDate: String
+    public let expiresAt: String
+    public let issuer: String
+    public let remark: String
+    /** 自定义字段（fieldKey → 值），由导入模板映射而来（FR-IMP-005）。 */
+    public let customFields: HashMap<String, String>
 
     init(
         line: Int64, subjectId: Int64, category: Int64, title: String, status: Int64,
-        sensitivity: Int64, issuedDate: String, expiresAt: String, issuer: String, remark: String
+        sensitivity: Int64, issuedDate: String, expiresAt: String, issuer: String, remark: String,
+        customFields!: HashMap<String, String> = HashMap<String, String>()
     ) {
         this.line = line
         this.subjectId = subjectId
@@ -107,6 +110,7 @@ public class ImportRow {
         this.expiresAt = expiresAt
         this.issuer = issuer
         this.remark = remark
+        this.customFields = customFields
     }
 }
 
@@ -124,12 +128,21 @@ public class ImportService {
     private let crypto: ?CryptoProvider
     /** 导出包签名密钥：必须与导出侧一致，否则回导会被判为「签名不匹配」 */
     private let signKey: String
+    /** 字段定义仓储（FR-IMP-005 自定义字段落库用）；空则模板映射的自定义列被忽略 */
+    private let fieldDefRepo: ?FieldDefRepo
+    /** 扩展字段明细仓储（FR-IMP-005 自定义字段落库用） */
+    private let itemFieldRepo: ?ItemFieldRepo
 
     private static let BATCH: Int64 = 200
     private static let MAX_ROWS: Int64 = 5000
     /** 判重索引的条目上限（与附件导入的标题索引同量级） */
     private static let TITLE_INDEX_LIMIT: Int64 = 20000
     public static let TTL_MILLIS: Int64 = 7 * 24 * 3600 * 1000
+    /** 系统字段键集合：模板映射里出现这些键时走系统列，其余视为自定义字段键 */
+    private static let SYSTEM_FIELDS: Array<String> = [
+        "subject_id", "category", "title", "status", "sensitivity",
+        "issued_date", "expires_at", "issuer", "remark"
+    ]
 
     public init(
         itemRepo: ItemRepo,
@@ -139,7 +152,9 @@ public class ImportService {
         storage: StorageBackend,
         recorder!: ?AuditRecorder = None,
         crypto!: ?CryptoProvider = None,
-        signKey!: String = ""
+        signKey!: String = "",
+        fieldDefRepo!: ?FieldDefRepo = None,
+        itemFieldRepo!: ?ItemFieldRepo = None
     ) {
         this.itemRepo = itemRepo
         this.userRepo = userRepo
@@ -149,6 +164,8 @@ public class ImportService {
         this.recorder = recorder
         this.crypto = crypto
         this.signKey = signKey
+        this.fieldDefRepo = fieldDefRepo
+        this.itemFieldRepo = itemFieldRepo
     }
 
     /** 模板 CSV（表头 + 一行示例，示例行以 # 开头便于识别） */
@@ -162,20 +179,27 @@ public class ImportService {
 
     /**
      * 预检（FR-IMP-003）：只校验，不落库。
+     *
+     * @param mapping  导入模板的「CSV 表头 → 字段键」映射（FR-IMP-005）；
+     *                空则沿用固定列序（cells[0..8]），零回归。
+     * @param defaults 系统字段未从 CSV 取到时的默认值（fieldKey → value）。
      */
     public func precheck(
         actorId: Int64,
         scopeAny: Bool,
         csvText: String,
         defaultSubjectId: Int64,
-        maxRows: Int64
+        maxRows: Int64,
+        mapping!: HashMap<String, String> = HashMap<String, String>(),
+        defaults!: HashMap<String, String> = HashMap<String, String>()
     ): ImportPlan {
         let allowed = this.allowedSubjects(actorId, scopeAny)
         // 判重索引在预检阶段就要建：预检的职责是把「会发生什么」摊开，
         // 「这行会新建 / 这行会重复」正是用户最需要事先知道的信息。
         let existing = this.existingTitleIndex(allowed)
         return ImportService.validate(
-            csvText, allowed, defaultSubjectId, maxRows, existing: existing
+            csvText, allowed, defaultSubjectId, maxRows, existing: existing,
+            mapping: mapping, defaults: defaults
         )
     }
 
@@ -187,7 +211,9 @@ public class ImportService {
         scopeAny: Bool,
         csvText: String,
         defaultSubjectId: Int64,
-        taskNo: String
+        taskNo: String,
+        mapping!: HashMap<String, String> = HashMap<String, String>(),
+        defaults!: HashMap<String, String> = HashMap<String, String>()
     ): String {
         let now = Times.nowMillis()
         let params = "{\"defaultSubjectId\":${defaultSubjectId}," +
@@ -196,7 +222,7 @@ public class ImportService {
             taskNo, "import", actorId, None, "csv", params, 0, now + TTL_MILLIS
         )
         spawn { =>
-            this.runTask(taskId, actorId, scopeAny, csvText, defaultSubjectId, taskNo)
+            this.runTask(taskId, actorId, scopeAny, csvText, defaultSubjectId, taskNo, mapping, defaults)
         }
         return taskNo
     }
@@ -207,16 +233,21 @@ public class ImportService {
         scopeAny: Bool,
         csvText: String,
         defaultSubjectId: Int64,
-        taskNo: String
+        taskNo: String,
+        mapping: HashMap<String, String>,
+        defaults: HashMap<String, String>
     ): Unit {
         var done: Int64 = 0
         var failed: Int64 = 0
+        // 分类 → 字段定义 的缓存：导入大文件时避免每行都查一次库
+        let defCache = HashMap<Int64, ArrayList<FieldDefRecord>>()
         try {
             let allowed = this.allowedSubjects(actorId, scopeAny)
             // 执行阶段用**同一套**判重：否则会出现「预检说会跳过、执行却建了第二条」。
             let existing = this.existingTitleIndex(allowed)
             let plan = ImportService.validate(
-                csvText, allowed, defaultSubjectId, MAX_ROWS, existing: existing
+                csvText, allowed, defaultSubjectId, MAX_ROWS, existing: existing,
+                mapping: mapping, defaults: defaults
             )
             if (!this.taskRepo.claim(taskId, plan.total)) {
                 return
@@ -234,12 +265,21 @@ public class ImportService {
                     return
                 }
                 try {
-                    this.itemRepo.create(
+                    let newId = this.itemRepo.create(
                         r.subjectId, r.category, r.title, r.status, r.sensitivity,
                         r.issuedDate, r.expiresAt, r.issuer, r.remark, "{}", actorId,
                         source: 1
                     )
                     done = done + 1
+                    // FR-IMP-005：模板映射带来的自定义字段，解析为 field_def 后落 arc_item_fields
+                    if (!r.customFields.isEmpty()) {
+                        let unresolved =
+                            this.writeCustomFields(newId, r.category, actorId, r.customFields, defCache)
+                        for (u in unresolved) {
+                            errSb.append("${r.line},row," +
+                                "${ImportService.cell(u)} 未在分类 ${r.category} 的字段定义中找到，已忽略\n")
+                        }
+                    }
                 } catch (e: Exception) {
                     failed = failed + 1
                     errSb.append("${r.line},row,${ImportService.cell(ImportService.oneLine(e.message))}\n")
@@ -290,6 +330,68 @@ public class ImportService {
         let key = "${taskNo}-${taskId}-errors.csv"
         this.storage.put(key, csv.toArray())
         return key
+    }
+
+    /**
+     * 把一行里的自定义字段（fieldKey → 值）解析为 field_def 后落 `arc_item_fields`。
+     *
+     * 与 FR-ARCH-004 的写库路径一致：服务端按 fieldKey 在「该分类可见字段定义」
+     * （内置模板 + 调用者自定义）里定位 field_def_id 与 data_type，再 upsert。
+     * 命中不到任何定义的键一律忽略，并把键名返回给调用方写进错误报告
+     * （不阻断本行主条目的创建 —— 部分成功语义）。
+     *
+     * @param defCache 分类 → 字段定义 的缓存，避免大文件每行都查库
+     * @return 未被任何字段定义覆盖的自定义字段键（供错误报告提示）
+     */
+    private func writeCustomFields(
+        itemId: Int64,
+        category: Int64,
+        actorId: Int64,
+        custom: HashMap<String, String>,
+        defCache: HashMap<Int64, ArrayList<FieldDefRecord>>
+    ): ArrayList<String> {
+        let unresolved = ArrayList<String>()
+        let fdr = match (this.fieldDefRepo) {
+            case Some(r) => r
+            case None => return unresolved
+        }
+        let ifr = match (this.itemFieldRepo) {
+            case Some(r) => r
+            case None => return unresolved
+        }
+        let defs = this.defsFor(fdr, defCache, category, actorId)
+        for ((key, value) in custom) {
+            var hit = false
+            for (fd in defs) {
+                if (fd.fieldKey == key) {
+                    ifr.save(itemId, fd.id, fd.dataType, value)
+                    hit = true
+                    break
+                }
+            }
+            if (!hit) {
+                unresolved.add(key)
+            }
+        }
+        return unresolved
+    }
+
+    /**
+     * 取某分类的可见字段定义（带缓存）。
+     */
+    private func defsFor(
+        fdr: FieldDefRepo,
+        defCache: HashMap<Int64, ArrayList<FieldDefRecord>>,
+        category: Int64,
+        actorId: Int64
+    ): ArrayList<FieldDefRecord> {
+        match (defCache.get(category)) {
+            case Some(list) => return list
+            case None => ()
+        }
+        let list = fdr.listByCategory(category, actorId)
+        defCache.add(category, list)
+        return list
     }
 
     private func allowedSubjects(actorId: Int64, scopeAny: Bool): HashSet<Int64> {
@@ -381,7 +483,9 @@ public class ImportService {
         allowed: HashSet<Int64>,
         defaultSubjectId: Int64,
         maxRows: Int64,
-        existing!: HashMap<String, Int64> = HashMap<String, Int64>()
+        existing!: HashMap<String, Int64> = HashMap<String, Int64>(),
+        mapping!: HashMap<String, String> = HashMap<String, String>(),
+        defaults!: HashMap<String, String> = HashMap<String, String>()
     ): ImportPlan {
         let errors = ArrayList<RowError>()
         let duplicates = ArrayList<RowError>()
@@ -389,10 +493,25 @@ public class ImportService {
         let rows = Csv.parse(csvText)
         var total: Int64 = 0
         var lineNo: Int64 = 0
+        // 模板映射开启时：把 mapping 反转为「字段键 → CSV 表头」，并逐行按表头定位列。
+        // 无映射时走固定列序（cells[0..8]），与旧行为零回归。
+        let useMapping = !mapping.isEmpty()
+        let fieldToHeader = HashMap<String, String>()
+        if (useMapping) {
+            for ((header, fieldKey) in mapping) {
+                if (!fieldKey.isEmpty()) {
+                    fieldToHeader.add(fieldKey, header)
+                }
+            }
+        }
+        var headerIndex = HashMap<String, Int64>()
         for (cells in rows) {
             lineNo = lineNo + 1
-            // 表头
+            // 表头：开启映射时必须先建「表头 → 列号」索引
             if (lineNo == 1) {
+                if (useMapping) {
+                    headerIndex = ImportService.buildHeaderIndex(cells)
+                }
                 continue
             }
             // 空行跳过（不计入总数，也不算错误）
@@ -409,34 +528,79 @@ public class ImportService {
                 errors.add(RowError(lineNo, "file", "超过单次导入上限 ${maxRows} 行，请拆分文件"))
                 break
             }
-            let title = ImportService.at(cells, 2)
-            if (title.isEmpty()) {
+            // ---- 解析系统字段（按映射或固定列序）----
+            var sTitle = ""
+            var sCategory = ""
+            var sSens = ""
+            var sStatus = ""
+            var sSubject = ""
+            var sIssued = ""
+            var sExpires = ""
+            var sIssuer = ""
+            var sRemark = ""
+            let custom = HashMap<String, String>()
+            if (useMapping) {
+                sTitle = ImportService.resolve("title", fieldToHeader, headerIndex, cells, defaults)
+                sCategory = ImportService.resolve("category", fieldToHeader, headerIndex, cells, defaults)
+                sSens = ImportService.resolve("sensitivity", fieldToHeader, headerIndex, cells, defaults)
+                sStatus = ImportService.resolve("status", fieldToHeader, headerIndex, cells, defaults)
+                sSubject = ImportService.resolve("subject_id", fieldToHeader, headerIndex, cells, defaults)
+                sIssued = ImportService.resolve("issued_date", fieldToHeader, headerIndex, cells, defaults)
+                sExpires = ImportService.resolve("expires_at", fieldToHeader, headerIndex, cells, defaults)
+                sIssuer = ImportService.resolve("issuer", fieldToHeader, headerIndex, cells, defaults)
+                sRemark = ImportService.resolve("remark", fieldToHeader, headerIndex, cells, defaults)
+                // 自定义字段：映射里 fieldKey 不在系统字段集合的列，按表头取数
+                for ((header, fieldKey) in mapping) {
+                    if (!fieldKey.isEmpty() && !ImportService.isSystemField(fieldKey)) {
+                        match (headerIndex.get(header)) {
+                            case Some(idx) =>
+                                let v = ImportService.at(cells, idx)
+                                if (!v.isEmpty()) {
+                                    custom.add(fieldKey, v)
+                                }
+                            case None => ()
+                        }
+                    }
+                }
+            } else {
+                sTitle = ImportService.at(cells, 2)
+                sCategory = ImportService.at(cells, 1)
+                sSens = ImportService.at(cells, 4)
+                sStatus = ImportService.at(cells, 3)
+                sSubject = ImportService.at(cells, 0)
+                sIssued = ImportService.at(cells, 5)
+                sExpires = ImportService.at(cells, 6)
+                sIssuer = ImportService.at(cells, 7)
+                sRemark = ImportService.at(cells, 8)
+            }
+            // ---- 业务校验（两条路径共用，与旧行为一致）----
+            if (sTitle.isEmpty()) {
                 errors.add(RowError(lineNo, "title", "标题不能为空"))
                 continue
             }
-            if (title.toArray().size > 200) {
+            if (sTitle.toArray().size > 200) {
                 errors.add(RowError(lineNo, "title", "标题超过 200 字节"))
                 continue
             }
-            let cat = ImportService.numAt(cells, 1, -1)
+            let cat = ImportService.numOf(sCategory, -1)
             // 1-11：与前端字典、字段定义接口一致（旧代码写死 1-6，
             // 会把 7-11（家庭关系/健康/资产/影像附件/自定义）统统判成非法）
             if (cat < 1 || cat > 11) {
                 errors.add(RowError(lineNo, "category", "分类必须是 1-11 的数字"))
                 continue
             }
-            let sens = ImportService.numAt(cells, 4, 1)
+            let sens = ImportService.numOf(sSens, 1)
             if (sens < 1 || sens > 3) {
                 errors.add(RowError(lineNo, "sensitivity", "敏感度必须是 1-3"))
                 continue
             }
-            let st = ImportService.numAt(cells, 3, 0)
+            let st = ImportService.numOf(sStatus, 0)
             if (st < 0 || st > 9) {
                 errors.add(RowError(lineNo, "status", "状态必须是 0-9"))
                 continue
             }
             // subject: 空 → 默认主体；非空 → 必须在可写范围内
-            var subj = ImportService.numAt(cells, 0, 0)
+            var subj = ImportService.numOf(sSubject, 0)
             if (subj <= 0) {
                 subj = defaultSubjectId
             }
@@ -449,7 +613,7 @@ public class ImportService {
                 continue
             }
             // ---- FR-IMP-004 判重：同主体 + 同标题视为已存在 ----
-            match (existing.get(ImportService.dupKey("${subj}", title))) {
+            match (existing.get(ImportService.dupKey("${subj}", sTitle))) {
                 case Some(id) =>
                     duplicates.add(
                         RowError(lineNo, "title", "与已有条目重复（#${id}），将跳过")
@@ -458,15 +622,71 @@ public class ImportService {
                 case None => ()
             }
             good.add(ImportRow(
-                lineNo, subj, cat, title, st, sens,
-                ImportService.at(cells, 5), ImportService.at(cells, 6),
-                ImportService.at(cells, 7), ImportService.at(cells, 8)
+                lineNo, subj, cat, sTitle, st, sens, sIssued, sExpires, sIssuer, sRemark,
+                customFields: custom
             ))
         }
         return ImportPlan(
             total, good.size, total - good.size - duplicates.size,
             duplicates.size, errors, duplicates, good
         )
+    }
+
+    /**
+     * 构建「CSV 表头 → 列号」索引（按表头定位列的前提）。
+     */
+    private static func buildHeaderIndex(cells: Array<String>): HashMap<String, Int64> {
+        let m = HashMap<String, Int64>()
+        var i: Int64 = 0
+        for (c in cells) {
+            m.add(c.trimAscii(), i)
+            i = i + 1
+        }
+        return m
+    }
+
+    /**
+     * 按字段键解析系统字段值：优先「映射的 CSV 表头 → 列号」，其次取默认值。
+     *
+     * 既支持「模板列名 ↔ 系统字段」的任意映射，也支持「CSV 缺该列时回落默认」。
+     */
+    private static func resolve(
+        fieldKey: String,
+        fieldToHeader: HashMap<String, String>,
+        headerIndex: HashMap<String, Int64>,
+        cells: Array<String>,
+        defaults: HashMap<String, String>
+    ): String {
+        match (fieldToHeader.get(fieldKey)) {
+            case Some(header) =>
+                match (headerIndex.get(header)) {
+                    case Some(idx) => return ImportService.at(cells, idx)
+                    case None => ()
+                }
+            case None => ()
+        }
+        match (defaults.get(fieldKey)) {
+            case Some(d) => return d
+            case None => return ""
+        }
+    }
+
+    /** 字段键是否属于系统字段（否则视为自定义字段键，走 arc_item_fields）。 */
+    private static func isSystemField(key: String): Bool {
+        for (f in ImportService.SYSTEM_FIELDS) {
+            if (f == key) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /** 字符串 → 整数，空串回落默认值。 */
+    private static func numOf(raw: String, default: Int64): Int64 {
+        if (raw.isEmpty()) {
+            return default
+        }
+        return RowData.toI64(raw)
     }
 
     private static func isBlank(cells: Array<String>): Bool {
@@ -483,14 +703,6 @@ public class ImportService {
             return cells[i].trimAscii()
         }
         return ""
-    }
-
-    private static func numAt(cells: Array<String>, i: Int64, default: Int64): Int64 {
-        let raw = ImportService.at(cells, i)
-        if (raw.isEmpty()) {
-            return default
-        }
-        return RowData.toI64(raw)
     }
 
     private static func cell(s: String): String {
