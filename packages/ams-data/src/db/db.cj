@@ -30,13 +30,22 @@
 // ============================================================
 package ams.data.db
 
-import std.database.sql.*
+import std.database.sql.DriverManager
+import std.database.sql.Datasource
+import std.database.sql.Connection
 import std.unicode.*
+import std.time.*
 
 // opengauss-driver（纯仓颉 openGauss/PostgreSQL 驱动）
 // 由 scripts/install-driver.sh + scripts/build-driver.sh 提供，
 // 编译产物在 build/drv/，包名带组织前缀 cangjie_tpc::opengauss。
 import cangjie_tpc::opengauss.driver.*
+// 连接池：官方 PooledDatasource（基于 TinyPool，包 cangjie_tpc::opengauss.sqlpool）。
+// 驱动默认的 PGDB.connect() 每次都新建物理连接，必须包一层才能复用，否则每个 DB
+// 请求都重复支付握手成本。std.database.sql 也导出了同名 PooledDatasource，故此处
+// 单独显式导入 sqlpool 的 PooledDatasource / PoolConfig，避免与上面的 std 通配冲突。
+import cangjie_tpc::opengauss.sqlpool.PooledDatasource
+import cangjie_tpc::opengauss.sqlpool.PoolConfig
 
 import ams.kernel.error.*
 import ams.kernel.log.*
@@ -71,7 +80,7 @@ public class DbConfig {
         user: String,
         password: String,
         sslMode!: String = "prefer",
-        maxPoolSize!: Int64 = 10,
+        maxPoolSize!: Int64 = 50,
         acquireTimeoutMillis!: Int64 = 5000
     ) {
         this.host = host
@@ -125,7 +134,21 @@ public class Database {
             case Some(d) => d
             case None => throw AppError(AppErrorKind.Internal, "未找到 opengauss 驱动，无法建立数据源")
         }
-        this.ds = driver.open(cfg.url(), [])
+        // [修复 FR-PERF] 启用连接池。
+        // 驱动 open() 默认返回 PGDB，其 connect() 每次都新建物理连接；
+        // 包一层官方 PooledDatasource（TinyPool）后，repo 既有的 c.close()
+        // 经 ProxyConnection 自动归还连接而非销毁，握手成本只在池扩容时支付一次。
+        let raw = driver.open(cfg.url(), [])
+        this.ds = PooledDatasource(
+            raw,
+            PoolConfig(
+                Int32(cfg.maxPoolSize),
+                Int32(cfg.maxPoolSize),
+                Duration.minute * 10,
+                Duration.minute * 30,
+                Duration.minute * 1
+            )
+        )
     }
 
     /**
@@ -134,7 +157,14 @@ public class Database {
      * 调用方负责关闭（用 try/finally）。
      */
     public func connect(): Connection {
-        return this.ds.connect()
+        let t0 = DateTime.now()
+        let c = this.ds.connect()
+        let ms = DateTime.now().toUnixTimeStamp().toMilliseconds() -
+                 t0.toUnixTimeStamp().toMilliseconds()
+        if (ms > 200) {
+            Log.get().warn("db.connect.slow", None, [("ms", "${ms}")])
+        }
+        return c
     }
 
     /**
