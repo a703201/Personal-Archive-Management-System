@@ -169,6 +169,73 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
 
 ---
 
+## [未发布] — 工程化与交付增强（Linux / 容器 / 对外 API / 信创）
+
+> 本批次属**工程化与交付能力**补强，不改动业务功能（FR 完成度仍为 P1 34 条 / P2 23 条）。
+> 架构级两项（提炼通用框架、SaaS/微服务化）已在 `docs/18 §三` 拍板，并落地 **Phase 1**（见下方「新增（架构演进 · Phase 1）」）；Phase 2 待办见 #87 / #89。
+
+### 新增（Linux 构建链路）
+- `scripts/build-linux.sh`：`build.sh` 的 Linux 移植（去 cygpath/`.exe`/`.dll`，运行时与 stdx 改 `linux_x86_64_cjnative`，产物 `ams-server` 无扩展名，SDK 探测 `/opt/cangjie` 或 `tools/cangjie`），驱动构建改调 `build-driver-linux.sh`。
+- `scripts/build-driver-linux.sh` / `scripts/test-linux.sh`：opengauss-driver 与单元测试的 Linux 移植，使 Linux 上可跑通「构建 + 单测」双闸门。
+- `.github/workflows/ci-linux.yml`：独立的 opt-in Linux CI（仅 `workflow_dispatch` 与 `ci-linux` 分支触发，不干扰现有 Windows CI），支持自托管 Linux runner 或 `CANGJIE_LINUX_SDK_URL` 下载直链。
+- ⚠️ 沙箱无 Linux，脚本为 best-effort 移植，需在 Linux runner（含 Cangjie SDK 1.2.x）实测复验。
+
+### 新增（容器化部署）
+- `deploy/docker/Dockerfile`：多阶段镜像（builder 跑 `build-linux.sh` + web 阶段构建前端 SPA + runtime 仅留可执行文件与运行时/ stdx `.so`）。
+- `deploy/compose/docker-compose.yml`：`ams` 应用 + `openGauss`（enmotech/opengauss:5.0.0）单机编排，含健康检查与 volume。
+- `deploy/config/ams.env.example`：运行期环境变量模板（不含密钥）。
+- `deploy/README.md`：构建 / 首次建库迁移 / 启动 / 生产 Checklist。
+
+### 新增（对外 API 接入配套）
+- `docs/17-对外API规范-OpenAPI.yaml`：基于 156 个 method+path 自动提取生成的 OpenAPI 3.1 基线规范，含 Bearer 鉴权、通用错误包、按标签分组；request/response schema 暂以占位类型标记，待按后端 DTO 补全。
+
+### 新增（信创·国家标准参考）
+- `docs/16-信创与国家密码标准参考.md`：对齐国密 SM3（GB/T 32905 / GM/T 0004）、SM4（GB/T 32907 / GM/T 0002）、SM2（GB/T 32918 / GM/T 0003）标准，显式列出已实现（SM3 / HMAC-SM3 / SM4-CBC·CTR / PBKDF2-HMAC-SM3）与未实现（SM4-GCM 受 stdx 限制、SM2 未实现，导出签名用 HMAC 对称），并声明「代码对齐 ≠ 商用密码产品认证」边界。
+
+### 新增（架构演进 · Phase 1 落地 — docs/18）
+
+> `docs/18 §三`（2026-10-29）已拍板：通用框架 → **A 独立框架库**；SaaS 第一步 → **A 多租户单体**。本批落地两项 Phase 1。
+
+- **多租户数据层隔离（SaaS · 方案 A · Phase 1）**
+  - 迁移 `022_tenant_isolation.sql`：建 `sys_tenants`（默认租户 `id=1, code='default'`）；用幂等 `DO $$` 块（`information_schema.columns` 判定）给 `sys_users` / `arc_subjects` / `arc_items` 加 `tenant_id BIGINT NOT NULL DEFAULT 1`；补 `idx_*_tenant` 索引。复验：迁移 10/0 成功，三表列/索引齐备，存量 12 subjects / 24 items / 89 users 回填 `tenant_id=1`。
+  - 鉴权链路注入 `tenantId`：`UserAccess` / `AccessContext` / `ApiRequest` 新增字段；`main.cj` 与 `ams-app.authz` 经 `UserRepo.tenantOf(userId)` 推导并沿请求传递。
+  - 隔离策略：**传递性隔离 + 显式 tenant_id** 混合（stdx 并发处理请求，无法用品圆线程级 ambient context）。
+    - `UserRepo.listAccessibleSubjectIds` / `listOwnedSubjectIds` 内部按 `tenantOf` 推导租户并过滤 `arc_subjects.tenant_id`；item 查询多按 `subjectIds` 过滤，租户隔离**传递性**覆盖（调用方零改动）。
+    - 写路径 `ItemRepo.create` / `cloneItem` 显式带 `tenant_id`（clone 复制并校验同租户）。
+    - `ItemRepo.findByIdRaw` **保持租户无关**：后鉴权加载点，隔离已由 guard 的 tenant-scoped subjectIds 保证；若加 tenant_id 会破坏共享链接 / 被授权用户的 FR-ACL-008 通路。
+  - 附带修复 `scripts/db.py`：原按分号原生切分语句会把 `DO $$...$$` 块拆碎（`unterminated dollar-quoted string`）；新增 `_split_statements()` 状态机（忽略美元引用串与单引号串内分号），`exec_file` 改用它，惠及后续所有含 DO 块的迁移。
+  - 编译复验：强制清 `.cjo` / `.a` 缓存全量重编，受影响包 0 error，`build/ams-server.exe` 13M 产出。
+- **通用框架 facade（框架 · 方案 A · Phase 1）**：新增 `ams-kit` 作为对外稳定 API 层，re-export `ams-crypto`（SM3/HMAC-SM3/SM4/PBKDF2/盲索引）与 `ams-security.authz` 纯逻辑部分；业务耦合点参数化，框架层不 import 任何 AMS 业务包；已并入 `scripts/build.sh` / `build-linux.sh` 拓扑序。Phase 2 发布化已完成（详见下方「新增（架构演进 · Phase 2 落地）」）。
+
+### 新增（架构演进 · Phase 2 落地 — #87 框架发布化 / #89 跨租户回归）
+
+> 2026-10-30 完成。三道闸门实跑：后端 `bash scripts/build.sh` 0 error、`bash scripts/test.sh` **338 通过 / 0 失败**（较上轮 331 +7：ams-kit 独立单测 +4、authz 跨租户断言 +3）、前端 `cd web && npm run build` EXIT 0；端到端 `scripts/ci/verify-tenant.py` 在 `ams_opengauss` 实跑 **23/23 全绿**（初跑 22/23，暴露并修复一处 owner 跨租户详情泄漏后满绿）。
+
+- **框架发布化（#87）**
+  - `packages/ams-kit/tests/kit/kit_test.cj` 新建 **4 条独立单测**（`KitFacadeTest`）：`KIT_VERSION` 非空、`SM3("abc")` 标准向量、`KeyManager` KEK ≥16 字节且 wrap/unwrap 往返、`BlindIndex` 生成 32 字节且归一化匹配/不匹配。与产品代码物理分离（测试包声明 `ams.kit.test`）。
+  - `scripts/test.sh` / `scripts/test-linux.sh` 默认 `PKGS` 数组追加 `ams-kit`，纳入全量门禁。
+  - 补 cjpm 包描述三件套：`packages/ams-kernel/cjpm.toml`、`packages/ams-crypto/cjpm.toml`、`packages/ams-kit/cjpm.toml`（按官方 `cjpm init` 模板：`cjc-version="1.2.0"`、`output-type="static"`、版本 `0.1.0`）。依赖链用**下划线扁平形式** `ams_kernel` / `ams_crypto` / `ams_kit`。
+  - ⚠️ **发布链路阻塞（待决策）**：cjpm 1.2.0 要求 toml `name` 为**扁平标识符**且与源码 `package` 声明**逐字相等**；AMS 全仓用点号分层命名（`ams.kit`），`cjpm check` 实测报 `the package name ... is wrong, the right name should be 'ams_kit'`，改回点号又报 `'ams.kit' is wrong, the example is 'cjDemo'` —— 即 cjpm 无法解析 AMS 现有包名。当前可用产物是 `build/*.a` 静态库（经 `scripts/build.sh` 拓扑序产出）；若要走 `cjpm publish`，需把相关包改名（波及全仓 import），属破坏性决策，故仅写出 toml 作文档意图，未强行改名。待用户拍板是否启动「包名扁平化」重构。
+
+- **跨租户隔离正确性验证（#89）**
+  - 新建 `scripts/ci/verify-tenant.py`：**确定性端到端回归**（仿 `verify-family.py` 风格，端口 `18105`，自启停 server，幂等 UPSERT 第二租户 `id=2, code='tenant2'`）。覆盖：
+    - curator 双向跨租户隔离（主体列表 / 条目列表 / 详情按 ID → 403·404）；
+    - 正向对照（各见自己）；创建隔离（租户1 在租户2 主体下创建 → 403）；克隆隔离（克隆租户2 条目 → 非 200）；
+    - **owner 跨租户详情探针**（回归目标 → 必须 403/404）；owner 同租户 `archive:read:any` 语义保留；owner 列表同样经 tenant-scoped subjectIds 隔离。
+  - **发现并修复 owner 跨租户详情泄漏（安全缺口）**：初跑仅「owner 读租户2 条目详情」得 200（应拒）。根因是 `Authorizer.checkOwnership` 的**路径 0**（`if (ctx.hasPerm("archive:read:any")) return true` —— 持有 any 范围权限的角色 `owner`/`org_admin` 放弃归属约束）叠加 `ItemRepo.findByIdRaw` **租户无关**（设计如此，供 FR-ACL-008 共享链接后鉴权加载），二者叠加 ⇒ owner 可凭条目 ID 跨租户读他人详情。修复：
+    - `ItemRecord` 新增 `subjectId` / `tenantId` / `category` 字段并贯穿 SELECT / `toRecord`；
+    - `AuthzResource` 新增 `tenantId: Int64`（默认 0 哨兵），`checkOwnership` **最顶部**加跨租户强制：`if (resource.tenantId != 0 && resource.tenantId != ctx.tenantId) return false`（防御所有路径含路径 0）；
+    - `items.cj` 的 `guardOf` 将条目 `tenant_id` 传入 guard。
+  - `packages/ams-security/tests/authz/authz_test.cj` 新增 **3 条**断言（29→32）：已知租户+调用者 any → 拒绝；同租户 any → 放行；tenantId=0 哨兵跳过强制。
+  - 复验：e2e 22/23→23/23、authz 32/32、全量 338/338、build 0 error、web build OK。
+
+### 候选（待拍板，未落地）
+- `docs/18-架构演进路线-方案候选.md`：提炼通用开发框架（A 独立框架库 / B 仓内 shared / C 脚手架）与 SaaS/微服务化（A 多租户单体 / B 模块化单体 / C 完整微服务）的 A/B/C 方案与权衡；**Phase 1、Phase 2 均已落地（见上方 #87 框架发布化 / #89 跨租户回归）**。
+
+### 修复
+
+- **标签合并前端入口缺失（FR-TAG-003）**：后端 `POST /api/tags/:id/merge`（`mergeTag`，含「防合并到自身」校验）早已具备，但 `TagView.vue` 一直只有「改名 / 移动 / 删除」，没有合并 UI —— FR-TAG-003 此前实际只完成后端一半。现补「合并」按钮 + 目标标签下拉（排除自身与子孙，复用 `parentOptions`）+「确认合并」，与服务端环路/深度校验形成双保险。`cd web && npm run build` 类型检查 + 构建通过。
+
 ## [0.2.0] — 2026-10-27
 
 P0 需求全量落地（54 已实现 / 0 部分 / 0 未实现），并以单元测试套件全绿（214 通过 / 0 失败）收口。

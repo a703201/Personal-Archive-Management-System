@@ -61,9 +61,9 @@ public class SubjectRoutes {
             throw AppError(AppErrorKind.Unauthorized, "登录状态无效")
         }
         // 懒建「本人」主体：让新注册用户与存量账号都能立刻开始建档
-        this.service.ensureDefault(uid, this.displayNameOf(uid))
+        this.service.ensureDefault(uid, req.tenantId, this.displayNameOf(uid))
 
-        let items = this.service.list(uid)
+        let items = this.service.list(uid, req.tenantId)
         let sb = StringBuilder()
         sb.append("{\"subjects\":[")
         var first = true
@@ -88,6 +88,7 @@ public class SubjectRoutes {
         let json = SubjectRoutes.body(req)
         let id = this.service.create(
             uid,
+            req.tenantId,
             json.get("name") ?? "",
             json.get("alias") ?? "",
             SubjectRoutes.intOf(json, "relation", 0),
@@ -113,11 +114,12 @@ public class SubjectRoutes {
         // 未传 name 时沿用原值：PATCH 语义更贴合「只改备注」的场景
         var name = json.get("name") ?? ""
         if (name.isEmpty()) {
-            name = this.currentName(id, uid)
+            name = this.currentName(id, uid, req.tenantId)
         }
         let ok = this.service.update(
             id,
             uid,
+            req.tenantId,
             expected,
             name,
             json.get("alias") ?? "",
@@ -141,8 +143,8 @@ public class SubjectRoutes {
         if (id <= 0) {
             throw validationError("id", "主体 ID 非法")
         }
-        let n = this.service.itemCount(id)
-        let ok = this.service.remove(id, uid)
+        let n = this.service.itemCount(id, req.tenantId)
+        let ok = this.service.remove(id, uid, req.tenantId)
         if (!ok) {
             throw notFound("主体")
         }
@@ -170,8 +172,8 @@ public class SubjectRoutes {
     /**
      * 取当前主体名（更新时未传 name 的兜底）。
      */
-    private func currentName(id: Int64, uid: Int64): String {
-        for (s in this.service.list(uid).iterator()) {
+    private func currentName(id: Int64, uid: Int64, tenantId: Int64): String {
+        for (s in this.service.list(uid, tenantId).iterator()) {
             if (s.id == "${id}") {
                 return s.name
             }

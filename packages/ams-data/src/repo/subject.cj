@@ -58,16 +58,18 @@ public class SubjectRepo {
      *
      * 主主体排在前，其后按关系、ID 稳定排序。
      */
-    public func list(userId: Int64): RowSet {
+    public func list(userId: Int64, tenantId: Int64): RowSet {
         let sql = "SELECT ${SubjectRepo.COLUMNS} FROM arc_subjects " +
                   "WHERE deleted_at IS NULL " +
                   "AND (owner_id = ? OR ? = ANY(custodian_ids)) " +
+                  "AND tenant_id = ? " +
                   "ORDER BY is_primary DESC, relation ASC, id ASC"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
             st.set(0, userId)
             st.set(1, userId)
+            st.set(2, tenantId)
             return readRows(st.query())
         } catch (e: Exception) {
             throw toDbError(e)
@@ -77,18 +79,20 @@ public class SubjectRepo {
     }
 
     /**
-     * 按 ID 查主体（**限所有者或代管人**）。
+     * 按 ID 查主体（**限所有者或代管人 + 同租户**）。
      */
-    public func findAccessible(id: Int64, userId: Int64): Option<RowData> {
+    public func findAccessible(id: Int64, userId: Int64, tenantId: Int64): Option<RowData> {
         let sql = "SELECT ${SubjectRepo.COLUMNS} FROM arc_subjects " +
                   "WHERE id = ? AND deleted_at IS NULL " +
-                  "AND (owner_id = ? OR ? = ANY(custodian_ids))"
+                  "AND (owner_id = ? OR ? = ANY(custodian_ids)) " +
+                  "AND tenant_id = ?"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
             st.set(0, id)
             st.set(1, userId)
             st.set(2, userId)
+            st.set(3, tenantId)
             let rows = readRows(st.query())
             return rows.first()
         } catch (e: Exception) {
@@ -99,17 +103,19 @@ public class SubjectRepo {
     }
 
     /**
-     * 列出全部未删除主体 ID。
+     * 列出本租户内全部未删除主体 ID。
      *
      * 用途：FR-ACL-013 权限预览 —— 角色具备 `archive:read:any` 时，
      * 可见范围是「全机构主体」，需要一次拿到全集做计数。
+     * 多租户隔离后范围限定在**同租户**内（防越权跨租户）。
      */
-    public func listAllIds(): ArrayList<String> {
-        let sql = "SELECT id FROM arc_subjects WHERE deleted_at IS NULL"
+    public func listAllIds(tenantId: Int64): ArrayList<String> {
+        let sql = "SELECT id FROM arc_subjects WHERE deleted_at IS NULL AND tenant_id = ?"
         let out = ArrayList<String>()
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
+            st.set(0, tenantId)
             let rs = readRows(st.query())
             for (r in rs.all().iterator()) {
                 out.add(r.str("id"))
@@ -123,16 +129,17 @@ public class SubjectRepo {
     }
 
     /**
-     * 统计用户名下的主体数（未删除）。
+     * 统计用户名下的主体数（未删除，限同租户）。
      *
      * 用途：懒建「本人」主体前判断是否已有主体（自愈存量账号）。
      */
-    public func countByOwner(ownerId: Int64): Int64 {
-        let sql = "SELECT COUNT(*) AS n FROM arc_subjects WHERE owner_id = ? AND deleted_at IS NULL"
+    public func countByOwner(ownerId: Int64, tenantId: Int64): Int64 {
+        let sql = "SELECT COUNT(*) AS n FROM arc_subjects WHERE owner_id = ? AND deleted_at IS NULL AND tenant_id = ?"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
             st.set(0, ownerId)
+            st.set(1, tenantId)
             let rows = readRows(st.query())
             if (rows.isEmpty()) {
                 return 0
@@ -162,13 +169,14 @@ public class SubjectRepo {
         relation: Int64,
         isPrimary: Bool,
         summary: String,
+        tenantId: Int64,
         operatorId: Int64
     ): Int64 {
         let id = Ids.next()
         let sql = "INSERT INTO arc_subjects (" +
                   "id, name_enc, alias, relation, is_primary, owner_id, status, summary, " +
-                  "created_at, created_by, updated_at, updated_by, version" +
-                  ") VALUES (?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1)"
+                  "tenant_id, created_at, created_by, updated_at, updated_by, version" +
+                  ") VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1)"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
@@ -179,8 +187,9 @@ public class SubjectRepo {
             st.set(4, isPrimary)
             st.set(5, ownerId)
             SubjectRepo.bindText(st, 6, summary)
-            st.set(7, operatorId)
+            st.set(7, tenantId)
             st.set(8, operatorId)
+            st.set(9, operatorId)
             st.update()
             return id
         } catch (e: Exception) {
@@ -203,11 +212,12 @@ public class SubjectRepo {
         alias: String,
         relation: Int64,
         summary: String,
+        tenantId: Int64,
         operatorId: Int64
     ): Bool {
         let sql = "UPDATE arc_subjects SET name_enc = ?, alias = ?, relation = ?, summary = ?, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
-                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL AND version = ?"
+                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL AND version = ? AND tenant_id = ?"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
@@ -219,6 +229,7 @@ public class SubjectRepo {
             st.set(5, id)
             st.set(6, ownerId)
             st.set(7, expectedVersion)
+            st.set(8, tenantId)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
@@ -233,16 +244,17 @@ public class SubjectRepo {
      * 只标记 deleted_at / status，物理行保留 —— 其下档案条目仍可追溯，
      * 由回收站与审计链保证可审计性（FR-ARCH-006）。
      */
-    public func softDelete(id: Int64, ownerId: Int64, operatorId: Int64): Bool {
+    public func softDelete(id: Int64, ownerId: Int64, tenantId: Int64, operatorId: Int64): Bool {
         let sql = "UPDATE arc_subjects SET deleted_at = CURRENT_TIMESTAMP, status = 3, " +
                   "updated_at = CURRENT_TIMESTAMP, updated_by = ?, version = version + 1 " +
-                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL"
+                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL AND tenant_id = ?"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
             st.set(0, operatorId)
             st.set(1, id)
             st.set(2, ownerId)
+            st.set(3, tenantId)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
@@ -254,12 +266,13 @@ public class SubjectRepo {
     /**
      * 统计该主体下的档案条目数（删除前提示用）。
      */
-    public func itemCount(subjectId: Int64): Int64 {
-        let sql = "SELECT COUNT(*) AS n FROM arc_items WHERE subject_id = ? AND deleted_at IS NULL"
+    public func itemCount(subjectId: Int64, tenantId: Int64): Int64 {
+        let sql = "SELECT COUNT(*) AS n FROM arc_items WHERE subject_id = ? AND deleted_at IS NULL AND tenant_id = ?"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
             st.set(0, subjectId)
+            st.set(1, tenantId)
             let rows = readRows(st.query())
             if (rows.isEmpty()) {
                 return 0
@@ -289,11 +302,11 @@ public class SubjectRepo {
      *
      * @return true = 本次新授予；false = 已存在或无权
      */
-    public func grantCustodian(subjectId: Int64, ownerId: Int64, custodianId: Int64): Bool {
+    public func grantCustodian(subjectId: Int64, ownerId: Int64, custodianId: Int64, tenantId: Int64): Bool {
         let sql = "UPDATE arc_subjects SET " +
                   "custodian_ids = array_append(COALESCE(custodian_ids, ARRAY[]::bigint[]), ?), " +
                   "updated_at = CURRENT_TIMESTAMP, version = version + 1 " +
-                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL " +
+                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL AND tenant_id = ? " +
                   "AND NOT (? = ANY(COALESCE(custodian_ids, ARRAY[]::bigint[])))"
         let c = this.db.connect()
         try {
@@ -301,7 +314,8 @@ public class SubjectRepo {
             st.set(0, custodianId)
             st.set(1, subjectId)
             st.set(2, ownerId)
-            st.set(3, custodianId)
+            st.set(3, tenantId)
+            st.set(4, custodianId)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
@@ -316,11 +330,11 @@ public class SubjectRepo {
      * 与授予对称：只有所有者能撤销，且从数组里精确移除该用户。
      * 撤销立刻生效 —— 可访问主体集合是**每次请求现算**的，没有缓存。
      */
-    public func revokeCustodian(subjectId: Int64, ownerId: Int64, custodianId: Int64): Bool {
+    public func revokeCustodian(subjectId: Int64, ownerId: Int64, custodianId: Int64, tenantId: Int64): Bool {
         let sql = "UPDATE arc_subjects SET " +
                   "custodian_ids = array_remove(COALESCE(custodian_ids, ARRAY[]::bigint[]), ?), " +
                   "updated_at = CURRENT_TIMESTAMP, version = version + 1 " +
-                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL " +
+                  "WHERE id = ? AND owner_id = ? AND deleted_at IS NULL AND tenant_id = ? " +
                   "AND ? = ANY(COALESCE(custodian_ids, ARRAY[]::bigint[]))"
         let c = this.db.connect()
         try {
@@ -328,7 +342,8 @@ public class SubjectRepo {
             st.set(0, custodianId)
             st.set(1, subjectId)
             st.set(2, ownerId)
-            st.set(3, custodianId)
+            st.set(3, tenantId)
+            st.set(4, custodianId)
             return st.update().rowCount > 0
         } catch (e: Exception) {
             throw toDbError(e)
@@ -343,14 +358,15 @@ public class SubjectRepo {
      * 用途：前端「这个档案我授权给了谁」的反向展示，
      * 以及移除成员时判断是否需要回收代管关系。
      */
-    public func listCustodianIds(subjectId: Int64): ArrayList<Int64> {
+    public func listCustodianIds(subjectId: Int64, tenantId: Int64): ArrayList<Int64> {
         let out = ArrayList<Int64>()
         let sql = "SELECT unnest(COALESCE(custodian_ids, ARRAY[]::bigint[])) AS uid " +
-                  "FROM arc_subjects WHERE id = ? AND deleted_at IS NULL"
+                  "FROM arc_subjects WHERE id = ? AND deleted_at IS NULL AND tenant_id = ?"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
             st.set(0, subjectId)
+            st.set(1, tenantId)
             let rows = readRows(st.query())
             for (r in rows.all().iterator()) {
                 out.add(r.i64("uid"))

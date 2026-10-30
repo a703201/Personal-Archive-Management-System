@@ -586,6 +586,7 @@ main(): Int64 {
                     roleRepo.listUserRoleCodes(uidNum),
                     userRepo.listAccessibleSubjectIds(uidNum),
                     userRepo.maxDataLevel(uidNum),
+                    userRepo.tenantOf(uidNum),
                     ownedSubjectIds: userRepo.listOwnedSubjectIds(uidNum)
                 )
             },

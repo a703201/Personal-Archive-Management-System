@@ -1,0 +1,16 @@
+[package]
+  cjc-version = "1.2.0"
+  name = "ams_kit"
+  organization = ""
+  description = "AMS 通用开发框架对外 API：统一密码学能力入口（functional facade）"
+  version = "0.1.0"
+  target-dir = ""
+  script-dir = ""
+  output-type = "static"
+  compile-option = ""
+  override-compile-option = ""
+  link-option = ""
+  package-configuration = {}
+
+[dependencies]
+  ams_crypto = { path = "../ams-crypto" }

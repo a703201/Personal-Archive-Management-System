@@ -1,6 +1,11 @@
 <script setup lang="ts">
 /**
- * 标签管理（FR-TAG-004 使用统计 / FR-TAG-005 标签层级）。
+ * 标签管理（FR-TAG-003 重命名/合并 / FR-TAG-004 使用统计 / FR-TAG-005 标签层级）。
+ *
+ * 合并（FR-TAG-003）：把源标签的所有条目关联迁到目标标签后删除源标签，
+ * 后端 `POST /api/tags/:id/merge` 在同 owner 下做归属迁移 + 软删，带「防合并到自身」
+ * 校验；前端要求先选目标再点「确认合并」，避免误并。可选项同样排除自身与子孙
+ * （复用 `parentOptions`，与服务端环路/深度校验形成双保险）。
  *
  * 【为什么把层级判定放在服务端】
  *   parent_id 是自引用列，「A→B→A」会让树变成环。服务端在写库前做环路
@@ -49,6 +54,10 @@ const newName = ref('')
 const newParent = ref('')
 const editingId = ref('')
 const editName = ref('')
+
+// ---- 合并（FR-TAG-003）----
+const mergeId = ref('')
+const mergeTarget = ref('')
 
 /**
  * 由扁平列表建树。
@@ -114,6 +123,7 @@ function parentOptions(excludeId: string): TagNode[] {
 
 const createParentOptions = computed(() => parentOptions(''))
 const moveParentOptions = computed(() => parentOptions(editingId.value))
+const mergeTargetOptions = computed(() => parentOptions(mergeId.value))
 
 function fmtTime(ms: string | number): string {
   const n = Number(ms)
@@ -200,6 +210,36 @@ async function removeTag(t: TagNode): Promise<void> {
   try {
     await api(`/tags/${t.id}`, { method: 'DELETE' })
     success('已删除标签')
+    await load()
+  } catch (e) {
+    toastError((e as Error).message)
+  } finally {
+    busy.value = false
+  }
+}
+
+// ---- 合并（FR-TAG-003）----
+function startMerge(t: TagNode): void {
+  mergeId.value = t.id
+  mergeTarget.value = ''
+}
+
+function cancelMerge(): void {
+  mergeId.value = ''
+  mergeTarget.value = ''
+}
+
+async function confirmMerge(t: TagNode): Promise<void> {
+  const targetId = mergeTarget.value
+  if (!targetId || targetId === t.id) {
+    toastError('请选择一个不同的目标标签')
+    return
+  }
+  busy.value = true
+  try {
+    const r = await api<{ moved: number }>(`/tags/${t.id}/merge`, { method: 'POST', body: { targetId } })
+    success(`已合并，迁移 ${r.moved} 条关联`)
+    mergeId.value = ''
     await load()
   } catch (e) {
     toastError((e as Error).message)
@@ -305,6 +345,22 @@ async function removeTag(t: TagNode): Promise<void> {
                   <button class="btn-text" type="button" :disabled="busy" @click="saveEdit">保存</button>
                   <button class="btn-text" type="button" @click="editingId = ''">取消</button>
                 </template>
+                <template v-else-if="mergeId === t.id">
+                  <select
+                    class="field-control field-control--sm"
+                    v-model="mergeTarget"
+                    :disabled="busy"
+                  >
+                    <option value="">合并到…</option>
+                    <option v-for="p in mergeTargetOptions" :key="p.id" :value="p.id">
+                      {{ '　'.repeat(Math.max(0, p.depth - 1)) }}{{ p.name }}
+                    </option>
+                  </select>
+                  <button class="btn-text" type="button" :disabled="busy" @click="confirmMerge(t)">
+                    确认合并
+                  </button>
+                  <button class="btn-text" type="button" @click="cancelMerge">取消</button>
+                </template>
                 <template v-else>
                   <button class="btn-text" type="button" @click="startEdit(t)">改名</button>
                   <button
@@ -329,6 +385,9 @@ async function removeTag(t: TagNode): Promise<void> {
                       {{ p.name }}
                     </option>
                   </select>
+                  <button class="btn-text" type="button" :disabled="busy" @click="startMerge(t)">
+                    合并
+                  </button>
                   <button class="btn-text" type="button" :disabled="busy" @click="removeTag(t)">
                     删除
                   </button>

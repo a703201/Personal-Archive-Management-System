@@ -424,7 +424,7 @@ public class AttachmentImportService {
                 try {
                     let id = this.itemRepo.create(
                         subjectId, category, title, 0, 1, "", "", "",
-                        "由 ZIP 批量导入自动创建", "{}", actorId,
+                        "由 ZIP 批量导入自动创建", "{}", this.userRepo.tenantOf(actorId), actorId,
                         source: 4
                     )
                     createdItems.add(title, id)

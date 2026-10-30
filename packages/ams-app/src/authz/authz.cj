@@ -47,7 +47,8 @@ public class AuthzService {
         let subjects = this.userRepo.listAccessibleSubjectIds(uid)
         let owned = this.userRepo.listOwnedSubjectIds(uid)
         let level = this.userRepo.maxDataLevel(uid)
-        return AccessContext(userId, perms.toArray(), subjects.toArray(), level,
+        let tenant = this.userRepo.tenantOf(uid)
+        return AccessContext(userId, perms.toArray(), subjects.toArray(), level, tenant,
                              ownedSubjectIds: owned.toArray())
     }
 

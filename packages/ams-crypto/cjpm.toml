@@ -1,0 +1,16 @@
+[package]
+  cjc-version = "1.2.0"
+  name = "ams_crypto"
+  organization = ""
+  description = "AMS 国密密码学实现：SM3/HMAC-SM3/SM4-CBC·CTR/PBKDF2 + 密钥管理 + 盲索引"
+  version = "0.1.0"
+  target-dir = ""
+  script-dir = ""
+  output-type = "static"
+  compile-option = ""
+  override-compile-option = ""
+  link-option = ""
+  package-configuration = {}
+
+[dependencies]
+  ams_kernel = { path = "../ams-kernel" }

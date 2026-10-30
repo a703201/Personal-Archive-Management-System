@@ -300,7 +300,8 @@ public class ItemRoutes {
                 r.subjectId,
                 r.category,
                 ItemRoutes.toSensitivity(r.sensitivity),
-                itemId: r.id
+                itemId: r.id,
+                tenantId: r.tenantId
             ))
             case None => return None
         }
@@ -458,6 +459,7 @@ public class ItemRoutes {
             json.get("issuer") ?? "",
             json.get("remark") ?? "",
             json.get("extra") ?? "{}",
+            req.tenantId,
             UserRepo.parseId(req.subjectId)
         )
         // 同步重建检索索引（失败不影响创建结果）
@@ -636,7 +638,7 @@ public class ItemRoutes {
     private func cloneItem(req: ApiRequest): ApiResponse {
         let idStr = req.pathParam("id") ?? ""
         let id = UserRepo.parseId(idStr)
-        let newId = this.itemRepo.cloneItem(id, UserRepo.parseId(req.subjectId))
+        let newId = this.itemRepo.cloneItem(id, req.tenantId, UserRepo.parseId(req.subjectId))
         if (newId <= 0) {
             throw notFound("条目")
         }

@@ -100,7 +100,7 @@ public class PermissionPreviewRoutes {
             subjectIds = this.userRepo.listAccessibleSubjectIds(userId)
             scopeText = "user:${userId}"
         } else if (scopeAny) {
-            subjectIds = this.subjectRepo.listAllIds()
+            subjectIds = this.subjectRepo.listAllIds(req.tenantId)
             scopeText = "any"
         }
 

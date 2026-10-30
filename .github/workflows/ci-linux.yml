@@ -1,0 +1,109 @@
+# ============================================================
+# AMS · Linux 持续集成（opt-in）
+#
+# 与 .github/workflows/ci.yml（Windows self-hosted）平行，专门验证
+# Linux 构建链路：scripts/build-linux.sh + scripts/test-linux.sh。
+#
+# ⚠️ 触发策略（opt-in，不破坏现有 Windows 流程）：
+#   - workflow_dispatch：手动触发
+#   - push 到 ci-linux 分支：专门给 Linux 链路用的试验分支
+#   默认不监听 develop/main，避免在没有 Linux 工具链的机器上误跑失败。
+#
+# 关于 runner：
+#   仓颉 SDK（Linux 版）需自行准备。两种方式（二选一）：
+#   ① 自托管 Linux runner（推荐，与 Windows 侧同思路）：
+#      机器上装好 Cangjie 1.2.x，并设置标签 `linux` + `cangjie`，
+#      把本 job 的 runs-on 改成 `['linux', 'cangjie']`。
+#   ② GitHub 托管 ubuntu-latest + 提供 SDK 下载地址：
+#      取消下方 ubuntu job 的注释，并在仓库 Secrets/Variables 配置
+#      CANGJIE_LINUX_SDK_URL（SDK 压缩包直链）。
+#      注意：官方 Linux SDK 直链同样可能需自举（参考 Windows 侧
+#      scripts/ci/publish-toolchain.sh 的思路做成 Release 资产）。
+# ============================================================
+name: CI-Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci-linux]
+
+concurrency:
+  group: ci-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------- 方案 ①：自托管 Linux runner ----------
+  build-and-test-linux:
+    # runs-on: [self-hosted, linux, cangjie]   # ← 启用自托管时取消注释并改用此行
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 提示（opt-in 未配置 Linux 工具链时跳过）
+        run: |
+          echo "::warning::本 job 默认在 ubuntu-latest 上运行，但不会自动安装 Cangjie SDK。"
+          echo "若要真正跑 Linux 构建，请："
+          echo "  1) 准备自托管 Linux runner（装好 Cangjie 1.2.x，标签 linux + cangjie），"
+          echo "     并把下面的 runs-on 改为 ['self-hosted','linux','cangjie']；或"
+          echo "  2) 提供 CANGJIE_LINUX_SDK_URL 并启用下方 ubuntu 变体。"
+          echo "当前仅做语法/结构校验占位，不执行实际构建。"
+
+      # ---- 启用自托管 runner 后，取消下面注释即可 ----
+      # - name: 构建（Linux）
+      #   run: bash scripts/build-linux.sh
+      #
+      # - name: 单元测试（Linux）
+      #   run: bash scripts/test-linux.sh
+      #
+      # - name: 前端构建
+      #   working-directory: web
+      #   run: |
+      #     npm ci
+      #     npm run build
+
+  # ---------- 方案 ②：GitHub 托管 ubuntu + SDK 直链 ----------
+  # 需要仓库变量 CANGJIE_LINUX_SDK_URL（Linux 版 Cangjie SDK 压缩包直链）。
+  # build-linux.sh 会探测 /opt/cangjie、tools/cangjie、或 $HOME/Cangjie，
+  # 故此处把 SDK 解压到 /opt/cangjie。
+  build-and-test-linux-hosted:
+    if: ${{ vars.CANGJIE_LINUX_SDK_URL != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装 Cangjie SDK（Linux）
+        run: |
+          set -euo pipefail
+          URL="${{ vars.CANGJIE_LINUX_SDK_URL }}"
+          echo "下载 SDK：${URL}"
+          curl -fSL "$URL" -o /tmp/cangjie.tar.gz
+          sudo mkdir -p /opt/cangjie
+          sudo tar -xzf /tmp/cangjie.tar.gz -C /opt/cangjie --strip-components=1
+          /opt/cangjie/bin/cjc -v
+
+      - name: 安装 stdx（Linux）
+        if: ${{ vars.CANGJIE_LINUX_STDX_URL != '' }}
+        run: |
+          set -euo pipefail
+          URL="${{ vars.CANGJIE_LINUX_STDX_URL }}"
+          curl -fSL "$URL" -o /tmp/stdx.tar.gz
+          sudo mkdir -p /opt/cangjie-stdx
+          sudo tar -xzf /tmp/stdx.tar.gz -C /opt/cangjie-stdx --strip-components=1
+
+      - name: 构建（Linux）
+        run: bash scripts/build-linux.sh
+
+      - name: 单元测试（Linux）
+        run: bash scripts/test-linux.sh
+
+      - name: 前端构建
+        working-directory: web
+        run: |
+          npm ci
+          npm run build

@@ -193,7 +193,7 @@ public class ItemTemplateRoutes {
         for (title in TemplatePlan.titles(baseTitle, count)) {
             let newId = this.itemRepo.create(
                 subjectId, category, title, status, sensitivity,
-                "", expiresAt, issuer, remark, extraJson, uid,
+                "", expiresAt, issuer, remark, extraJson, req.tenantId, uid,
                 source: 0
             )
             if (created > 0) {

@@ -62,13 +62,114 @@ def _docker(sql_text, use_file=False):
     return rc, out.replace("__RC=", "")
 
 
+def _split_statements(text):
+    """
+    按 ; 拆分为独立语句，但忽略出现在以下上下文中的 ;：
+      - 美元引用串（$$...$$ 或 $tag$...$tag$，如 DO 块 / 函数体）
+      - 单引号字符串字面量（'...'）
+    这样 DO $$ BEGIN ... END $$; 这类语句不会被拆碎。
+    """
+    stmts = []
+    buf = []
+    in_dollar = False
+    dollar_tag = ""
+    in_quote = False
+    i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if in_dollar:
+            buf.append(ch)
+            # 匹配闭标签：连续两个 $（裸 $$）或 $tag$
+            if ch == "$" and nxt == "$":
+                in_dollar = False
+                buf.append(nxt)
+                i += 2
+                continue
+            if ch == "$":
+                # 尝试读 $tag$
+                j = i + 1
+                tag = "$"
+                while j < n and text[j] != "$":
+                    tag += text[j]
+                    j += 1
+                if j < n:
+                    tag += "$"
+                    if tag == dollar_tag:
+                        in_dollar = False
+                        buf.append(tag)
+                        i = j + 1
+                        continue
+                # 不匹配，当普通字符
+                buf.append(tag)
+                i = j + 1
+                continue
+            i += 1
+            continue
+        if in_quote:
+            buf.append(ch)
+            if ch == "'":
+                # '' 是转义引号，不退出
+                if nxt == "'":
+                    buf.append(nxt)
+                    i += 2
+                    continue
+                in_quote = False
+            i += 1
+            continue
+        # 普通状态
+        if ch == ";":
+            s = "".join(buf).strip()
+            if s:
+                stmts.append(s)
+            buf = []
+            i += 1
+            continue
+        if ch == "'":
+            in_quote = True
+            buf.append(ch)
+            i += 1
+            continue
+        if ch == "$" and nxt == "$":
+            in_dollar = True
+            dollar_tag = "$$"
+            buf.append(ch)
+            buf.append(nxt)
+            i += 2
+            continue
+        if ch == "$":
+            # 可能的 $tag$
+            j = i + 1
+            tag = "$"
+            while j < n and text[j] != "$":
+                tag += text[j]
+                j += 1
+            if j < n and 1 < len(tag) < 64:  # 合法美元标签：至少 $x$
+                tag += "$"
+                in_dollar = True
+                dollar_tag = tag
+                buf.append(tag)
+                i = j + 1
+                continue
+            buf.append(ch)
+            i += 1
+            continue
+        buf.append(ch)
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        stmts.append(tail)
+    return stmts
+
+
 def exec_file(path):
-    """执行 SQL 文件（按 ; 拆分为独立语句，便于定位失败）。"""
+    """执行 SQL 文件（按 ; 拆分为独立语句，便于定位失败；尊重美元引用串）。"""
     with open(path, encoding="utf-8") as f:
         raw = f.read()
     # 去掉整行注释
     lines = [l for l in raw.split("\n") if not l.strip().startswith("--")]
-    stmts = [s.strip() for s in "\n".join(lines).split(";") if s.strip()]
+    stmts = [s for s in _split_statements("\n".join(lines)) if s.strip()]
     ok = 0
     fails = []
     for s in stmts:

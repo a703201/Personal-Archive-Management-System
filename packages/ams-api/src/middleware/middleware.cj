@@ -62,12 +62,21 @@ public class UserAccess {
     public let ownedSubjectIds: ArrayList<String>
     /** 数据可见上限（取所有角色的最大值） */
     public let maxDataLevel: Int64
+    /**
+     * 所属租户（多租户隔离根）。
+     *
+     * 所有数据访问都必须带上此值做行级过滤（见 docs/18 §4.2）。
+     * 由 accessLoader 从 sys_users.tenant_id 取出，失败关闭为 0
+     * （0 表示非法租户，仓储层据此拒绝而非放行）。
+     */
+    public let tenantId: Int64
 
     public init(
         perms: ArrayList<String>,
         roles: ArrayList<String>,
         subjectIds: ArrayList<String>,
         maxDataLevel: Int64,
+        tenantId: Int64,
         ownedSubjectIds!: ArrayList<String> = ArrayList<String>()
     ) {
         this.perms = perms
@@ -75,6 +84,7 @@ public class UserAccess {
         this.subjectIds = subjectIds
         this.ownedSubjectIds = ownedSubjectIds
         this.maxDataLevel = maxDataLevel
+        this.tenantId = tenantId
     }
 }
 
@@ -200,6 +210,7 @@ public func authMiddleware(auth: AuthContext, router: Router): Middleware {
                         let access = auth.accessLoader(payload.uid)
                         req.perms = access.perms
                         req.roles = access.roles
+                        req.tenantId = access.tenantId
                         // 功能权限判定（安全章 §6.1 第 2 步）
                         //
                         // ⚠️ 必须用 satisfiesPerm（any 覆盖 own），**不能**用
@@ -211,6 +222,7 @@ public func authMiddleware(auth: AuthContext, router: Router): Middleware {
                             access.perms.toArray(),
                             access.subjectIds.toArray(),
                             access.maxDataLevel,
+                            access.tenantId,
                             ownedSubjectIds: access.ownedSubjectIds.toArray()
                         )
                         if (!requiredPerm.isEmpty() && !funcCtx.satisfiesPerm(requiredPerm)) {
@@ -317,6 +329,7 @@ public class MiddlewareGuards {
             access.perms.toArray(),
             access.subjectIds.toArray(),
             access.maxDataLevel,
+            access.tenantId,
             ownedSubjectIds: access.ownedSubjectIds.toArray()
         )
         let authorizer = Authorizer(auth.grantLoader(userId))

@@ -78,7 +78,7 @@ if [ ! -f "$CJC" ]; then
 fi
 
 if [ ${#PKGS[@]} -eq 0 ]; then
-    PKGS=(ams-kernel ams-crypto ams-storage ams-data ams-security ams-core ams-app ams-api)
+    PKGS=(ams-kernel ams-crypto ams-storage ams-data ams-security ams-core ams-app ams-api ams-kit)
 fi
 
 mkdir -p "$TEST_DIR"
@@ -195,7 +195,7 @@ for pkg in "${PKGS[@]}"; do
                 [ -f "$_cjo" ] && mv -f "$_cjo" "$_cjo.old" 2>/dev/null
                 _lib="$BUILD_DIR/lib$(echo "${pkg}" | sed 's#-#.#g').${sub}.a"
                 [ -f "$_lib" ] && mv -f "$_lib" "$_lib.old" 2>/dev/null
-                "$CJC" -p "$src_dir" \
+                "$CJC" -O2 -p "$src_dir" \
                       --import-path "$BUILD_DIR" \
                       --import-path "$STDX_DIR_MSYS" \
                       --import-path "$BUILD_DIR/drv" \
@@ -223,7 +223,7 @@ for pkg in "${PKGS[@]}"; do
 
         if [ "$VERBOSE" = 1 ]; then
             echo "  [COMPILE] ${pkg}/${sub}"
-            "$CJC" -p "$tdir" \
+            "$CJC" -O2 -p "$tdir" \
                   --import-path "$BUILD_DIR" \
                   --import-path "$STDX_DIR_MSYS" \
                   --import-path "$BUILD_DIR/drv" \
@@ -231,7 +231,7 @@ for pkg in "${PKGS[@]}"; do
                   --link-options "$ALL_LIBS $_link_args" 2>&1 | head -25
         else
             # 链接 20+ 个静态库与 25+ 个 dll，耗时较长 —— 给足超时但防挂死
-            timeout 300 "$CJC" -p "$tdir" \
+            timeout 300 "$CJC" -O2 -p "$tdir" \
                   --import-path "$BUILD_DIR" \
                   --import-path "$STDX_DIR_MSYS" \
                   --import-path "$BUILD_DIR/drv" \

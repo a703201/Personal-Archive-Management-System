@@ -232,7 +232,7 @@ public func testAuthMiddlewarePublicRoute(): Unit {
     r.add(Route("GET", "/api/health", { _: ApiRequest => ApiResponse.ok("{}", "r") }, isPublic: true))
     let auth = AuthContext(
         TokenService(StdxCryptoProvider(), TokenConfig(secret: Array<Byte>(32, repeat: 0u8)), MemorySessionStore()),
-        { _: String => UserAccess(ArrayList<String>(), ArrayList<String>(), ArrayList<String>(), 0) }
+        { _: String => UserAccess(ArrayList<String>(), ArrayList<String>(), ArrayList<String>(), 0, 1) }
     )
     let req = makeReq("GET", "/api/health")
     let mw = authMiddleware(auth, r)
@@ -248,7 +248,7 @@ public func testAuthMiddlewareMissingToken(): Unit {
     r.get("/api/users", { _: ApiRequest => ApiResponse.ok("{}", "r") })
     let auth = AuthContext(
         TokenService(StdxCryptoProvider(), TokenConfig(secret: Array<Byte>(32, repeat: 0u8)), MemorySessionStore()),
-        { _: String => UserAccess(ArrayList<String>(), ArrayList<String>(), ArrayList<String>(), 0) }
+        { _: String => UserAccess(ArrayList<String>(), ArrayList<String>(), ArrayList<String>(), 0, 1) }
     )
     let req = makeReq("GET", "/api/users")
     let mw = authMiddleware(auth, r)

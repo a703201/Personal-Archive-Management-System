@@ -109,6 +109,8 @@ public class ApiRequest {
     public var perms: ArrayList<String> = ArrayList<String>()
     /** 角色集合（由鉴权中间件填充） */
     public var roles: ArrayList<String> = ArrayList<String>()
+    /** 所属租户（由鉴权中间件填充，多租户隔离根） */
+    public var tenantId: Int64 = 0
 
     public init(
         method: String,

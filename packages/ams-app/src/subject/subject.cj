@@ -105,12 +105,12 @@ public class SubjectService {
      *
      * @param displayName 主体名（一般取昵称，空则用用户名）
      */
-    public func ensureDefault(userId: Int64, displayName: String): Unit {
-        if (this.repo.countByOwner(userId) > 0) {
+    public func ensureDefault(userId: Int64, tenantId: Int64, displayName: String): Unit {
+        if (this.repo.countByOwner(userId, tenantId) > 0) {
             return
         }
         let name = if (displayName.isEmpty()) { "本人" } else { displayName }
-        let id = this.repo.create(userId, this.seal(name), "", 0, true, "", userId)
+        let id = this.repo.create(userId, this.seal(name), "", 0, true, "", tenantId, userId)
         Log.get().info("subject.default.created", None, [
             ("uid", "${userId}"),
             ("subjectId", "${id}")
@@ -118,10 +118,10 @@ public class SubjectService {
     }
 
     /**
-     * 列出可读主体（自有 + 代管）。
+     * 列出可读主体（自有 + 代管，限同租户）。
      */
-    public func list(userId: Int64): ArrayList<SubjectView> {
-        let rows = this.repo.list(userId)
+    public func list(userId: Int64, tenantId: Int64): ArrayList<SubjectView> {
+        let rows = this.repo.list(userId, tenantId)
         let out = ArrayList<SubjectView>()
         for (r in rows.all().iterator()) {
             let name = this.open(r.getOpt("name_hex") ?? "")
@@ -149,6 +149,7 @@ public class SubjectService {
      */
     public func create(
         ownerId: Int64,
+        tenantId: Int64,
         name: String,
         alias: String,
         relation: Int64,
@@ -166,13 +167,13 @@ public class SubjectService {
         }
         // 重名判定：name_enc 每次加密的 IV 不同，密文不可比对，
         // 因此按「解密后的明文」在内存里比对（单用户主体数量很小）。
-        for (s in this.list(ownerId).iterator()) {
+        for (s in this.list(ownerId, tenantId).iterator()) {
             if (s.name == trimmed) {
                 throw conflict("已存在同名主体「${trimmed}」")
             }
         }
-        let isFirst = this.repo.countByOwner(ownerId) == 0
-        return this.repo.create(ownerId, this.seal(trimmed), alias, relation, isFirst, summary, ownerId)
+        let isFirst = this.repo.countByOwner(ownerId, tenantId) == 0
+        return this.repo.create(ownerId, this.seal(trimmed), alias, relation, isFirst, summary, tenantId, ownerId)
     }
 
     /**
@@ -184,6 +185,7 @@ public class SubjectService {
     public func update(
         id: Int64,
         ownerId: Int64,
+        tenantId: Int64,
         expectedVersion: Int64,
         name: String,
         alias: String,
@@ -198,12 +200,12 @@ public class SubjectService {
             throw validationError("relation", "关系取值非法（0=本人 1=配偶 2=子女 3=父母 4=其他）")
         }
         // 先确认可写（所有者）且存在，避免把「无权」误报成「版本冲突」
-        match (this.repo.findAccessible(id, ownerId)) {
+        match (this.repo.findAccessible(id, ownerId, tenantId)) {
             case Some(_) => ()
             case None => throw notFound("主体")
         }
         return this.repo.update(
-            id, ownerId, expectedVersion, this.seal(trimmed), alias, relation, summary, ownerId
+            id, ownerId, expectedVersion, this.seal(trimmed), alias, relation, summary, tenantId, ownerId
         )
     }
 
@@ -213,15 +215,15 @@ public class SubjectService {
      * 允许删除最后一个主体 —— 若用户真的清空了，下次拉列表会重新补建「本人」，
      * 不会留下「无主体可用」的死局。
      */
-    public func remove(id: Int64, ownerId: Int64): Bool {
-        return this.repo.softDelete(id, ownerId, ownerId)
+    public func remove(id: Int64, ownerId: Int64, tenantId: Int64): Bool {
+        return this.repo.softDelete(id, ownerId, tenantId, ownerId)
     }
 
     /**
-     * 该主体下的条目数（删除前提示）。
+     * 该主体下的条目数（删除前提示，限同租户）。
      */
-    public func itemCount(id: Int64): Int64 {
-        return this.repo.itemCount(id)
+    public func itemCount(id: Int64, tenantId: Int64): Int64 {
+        return this.repo.itemCount(id, tenantId)
     }
 
     // ---------------------------------------------------------------

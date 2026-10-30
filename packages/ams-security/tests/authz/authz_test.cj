@@ -169,7 +169,7 @@ public class AuthorizerTest {
         level: Int64,
         owned!: Array<String> = []
     ): AccessContext {
-        return AccessContext(userId, perms, subjects, level, ownedSubjectIds: owned)
+        return AccessContext(userId, perms, subjects, level, 1, ownedSubjectIds: owned)
     }
 
     /**
@@ -193,6 +193,35 @@ public class AuthorizerTest {
         let c = this.ctx("u1", [], ["s1"], 3)
         let r = a.authorize(c, "archive:read:own", this.res("s1", 1, Sensitivity.Normal, ""), this.now)
         @Assert(r.isAllowed(), false)
+    }
+
+    // ---- 多租户隔离（方案 A）----
+
+    @TestCase
+    public func testDenyCrossTenantWhenTenantKnown() {
+        // 资源在租户2，调用者在租户1：即便持有 archive:read:any 也必须拒绝
+        let a = Authorizer(Array<Grant>())
+        let c = this.ctx("u1", ["archive:read:any"], [], 3)
+        let r = AuthzResource("s2", 1, Sensitivity.Normal, itemId: "i2", tenantId: 2)
+        @Assert(a.authorize(c, "archive:read:own", r, this.now).isAllowed(), false)
+    }
+
+    @TestCase
+    public func testAllowSameTenantWithAny() {
+        // 同租户 + any 仍放行（any 语义在多租户内保留）
+        let a = Authorizer(Array<Grant>())
+        let c = this.ctx("u1", ["archive:read:any"], [], 3)
+        let r = AuthzResource("s1", 1, Sensitivity.Normal, itemId: "i1", tenantId: 1)
+        @Assert(a.authorize(c, "archive:read:own", r, this.now).isAllowed(), true)
+    }
+
+    @TestCase
+    public func testTenantSentinelZeroSkipsEnforcement() {
+        // 资源未提供租户（tenantId=0）时不强制（兼容既有测试与未知场景）
+        let a = Authorizer(Array<Grant>())
+        let c = this.ctx("u1", ["archive:read:any"], [], 3)
+        let r = AuthzResource("s2", 1, Sensitivity.Normal, itemId: "i2")
+        @Assert(a.authorize(c, "archive:read:own", r, this.now).isAllowed(), true)
     }
 
     @TestCase

@@ -371,8 +371,13 @@ Archive_manager/
 | 13 | [P2 实现状态核对](./docs/13-P2实现状态核对.md) | P2 23 条落地情况与缺口 |
 | 14 | [家庭成员邀请设计](./docs/14-家庭成员邀请设计.md) | 家庭协作的安全设计（10 原则 / 14 威胁 / API 草案） |
 | 15 | [家庭成员邀请方案评估](./docs/15-家庭成员邀请方案评估.md) | 授权粒度、审批流、分批范围的取舍与推荐 |
+| 16 | [信创与国家密码标准参考](./docs/16-信创与国家密码标准参考.md) | 国密 GM/T·GB/T 对齐、已落地/未实现能力、信创适配现状 |
+| 17 | [对外 API 规范（OpenAPI）](./docs/17-对外API规范-OpenAPI.yaml) | 156 个接口的 OpenAPI 3.1 基线规范（schema 待补全） |
+| 18 | [架构演进路线（方案候选）](./docs/18-架构演进路线-方案候选.md) | 提炼通用框架 / SaaS·微服务化的 A/B/C 候选方案（待拍板） |
 
 变更记录见 [CHANGELOG.md](./CHANGELOG.md)。
+
+> **部署与运维**：物理机发布包见 `docs/09`；容器化（`Dockerfile` + `docker-compose` + `deploy/README.md`）与 Linux 构建链路（`scripts/build-linux.sh` 等）已就绪，详见 `deploy/` 目录。
 
 ---
 

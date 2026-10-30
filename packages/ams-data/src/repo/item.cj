@@ -54,6 +54,8 @@ public enum SqlParam {
 public class ItemRecord {
     public let id: String
     public let subjectId: String
+    /** 所属租户（多租户隔离根；由 findByIdRaw/findById 返回，0 表示未知） */
+    public let tenantId: Int64
     public let category: Int64
     public let title: String
     public let status: Int64
@@ -71,6 +73,7 @@ public class ItemRecord {
     public init(
         id: String,
         subjectId: String,
+        tenantId: Int64,
         category: Int64,
         title: String,
         status: Int64,
@@ -87,6 +90,7 @@ public class ItemRecord {
     ) {
         this.id = id
         this.subjectId = subjectId
+        this.tenantId = tenantId
         this.category = category
         this.title = title
         this.status = status
@@ -122,7 +126,7 @@ public class ItemRepo {
         if (subjectIds.isEmpty()) {
             return None
         }
-        let sql = "SELECT id, subject_id, category, title, status, sensitivity, " +
+        let sql = "SELECT id, subject_id, tenant_id, category, title, status, sensitivity, " +
                   "issued_date, expires_at, issuer, remark, extra::text AS extra, " +
                   "version, " +
                   "CAST(COALESCE(EXTRACT(EPOCH FROM created_at) * 1000, 0) AS BIGINT) AS created_ms, " +
@@ -167,7 +171,7 @@ public class ItemRepo {
      *   安全性由 Authorizer 保证：拒绝时统一 403，不区分「不存在」与「无权限」。
      */
     public func findByIdRaw(id: Int64): Option<ItemRecord> {
-        let sql = "SELECT id, subject_id, category, title, status, sensitivity, " +
+        let sql = "SELECT id, subject_id, tenant_id, category, title, status, sensitivity, " +
                   "issued_date, expires_at, issuer, remark, extra::text AS extra, " +
                   "version, " +
                   "CAST(COALESCE(EXTRACT(EPOCH FROM created_at) * 1000, 0) AS BIGINT) AS created_ms, " +
@@ -488,15 +492,16 @@ public class ItemRepo {
         issuer: String,
         remark: String,
         extraJson: String,
+        tenantId: Int64,
         operatorId: Int64,
         source!: Int64 = 0
     ): Int64 {
         let id = Ids.next()
         let sql = "INSERT INTO arc_items (" +
                   "id, subject_id, category, title, title_norm, status, sensitivity, " +
-                  "issued_date, expires_at, issuer, remark, extra, source, " +
+                  "issued_date, expires_at, issuer, remark, extra, source, tenant_id, " +
                   "created_at, created_by, updated_at, updated_by, version" +
-                  ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, " +
+                  ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, " +
                   "CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1)"
         let c = this.db.connect()
         try {
@@ -514,8 +519,9 @@ public class ItemRepo {
             ItemRepo.bindStr(st, 10, remark)
             st.set(11, extraJson)
             st.set(12, source)
-            st.set(13, operatorId)
+            st.set(13, tenantId)
             st.set(14, operatorId)
+            st.set(15, operatorId)
             st.update()
             return id
         } catch (e: Exception) {
@@ -534,7 +540,9 @@ public class ItemRepo {
      *
      * @return 新条目 id；源不存在或复制失败返回 0
      */
-    public func cloneItem(sourceId: Int64, operatorId: Int64): Int64 {
+    public func cloneItem(sourceId: Int64, tenantId: Int64, operatorId: Int64): Int64 {
+        // tenant_id 在下方 INSERT...SELECT 中按源条目复制并校验同一租户；
+        // 这里用不过滤归属的 findByIdRaw 探活（与既有语义一致）。
         match (this.findByIdRaw(sourceId)) {
             case None => return 0
             case Some(_) => ()
@@ -544,22 +552,24 @@ public class ItemRepo {
         try {
             // ① 复制条目主行
             //   注意：arc_items.source 是 SMALLINT（来源系统枚举），不是「源条目引用」；
-            //   源条目 id 记录在 source_ref（VARCHAR）。
+            //   源条目 id 记录在 source_ref（VARCHAR）。tenant_id 随源条目复制，
+            //   克隆体归属同一租户（多租户隔离）。
             let ins = c.prepareStatement(
                 "INSERT INTO arc_items (" +
                 "id, subject_id, category, title, title_norm, status, sensitivity, " +
                 "issued_date, expires_at, issuer, remark, extra, source, source_ref, " +
-                "created_at, created_by, updated_at, updated_by, version) " +
+                "created_at, created_by, updated_at, updated_by, version, tenant_id) " +
                 "SELECT ?, subject_id, category, title, title_norm, 0, sensitivity, " +
                   "issued_date, expires_at, issuer, remark, extra, 2, ?, " +
-                "CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1 " +
-                "FROM arc_items WHERE id = ? AND deleted_at IS NULL"
+                "CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1, tenant_id " +
+                "FROM arc_items WHERE id = ? AND deleted_at IS NULL AND tenant_id = ?"
             )
             ins.set(0, newId)
             ins.set(1, "${sourceId}")
             ins.set(2, operatorId)
             ins.set(3, operatorId)
             ins.set(4, sourceId)
+            ins.set(5, tenantId)
             if (ins.update().rowCount == 0) {
                 return 0
             }
@@ -972,6 +982,7 @@ public class ItemRepo {
         return ItemRecord(
             "${r.i64("id")}",
             "${r.i64("subject_id")}",
+            r.i64("tenant_id"),
             r.i64("category"),
             r.str("title"),
             r.i64("status"),

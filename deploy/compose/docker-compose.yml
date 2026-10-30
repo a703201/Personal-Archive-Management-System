@@ -1,0 +1,81 @@
+# ============================================================
+# AMS · 容器编排（开发 / 单机演示用）
+#
+# 组成：
+#   - ams    ：应用服务（deploy/docker/Dockerfile 构建的镜像）
+#   - db     ：openGauss 数据库
+#
+# 用法：
+#   # 1) 构建镜像（需要 Linux 版 Cangjie SDK，见 Dockerfile 顶部说明）
+#   docker compose -f deploy/compose/docker-compose.yml build \
+#       --build-arg CANGJIE_SDK_URL=https://.../cangjie-1.2.0-linux.tar.gz \
+#       --build-arg CANGJIE_STDX_URL=https://.../cangjie-stdx-linux.tar.gz
+#
+#   # 2) 启动
+#   docker compose -f deploy/compose/docker-compose.yml up -d
+#
+#   # 3) 初始化数据库 schema（首次启动前，需先把迁移跑进 db）
+#   #    见 deploy/README.md 的「首次初始化」一节。
+#
+#   # 4) 访问：http://localhost:8080
+#
+# ⚠️ 生产部署务必：
+#   - 覆盖 AMS_TOKEN_SECRET / AMS_KEK（≥32 字节随机值）
+#   - 使用受限运行时账号 AMS_DB_APP_USER / AMS_DB_APP_PASSWORD
+#   - 不要在 compose 文件里硬编码口令，改用 env_file 或 secrets
+# ============================================================
+services:
+  db:
+    # openGauss 社区镜像（基于 5.0.0）。如内网有镜像仓库请改用内部地址。
+    image: enmotech/opengauss:5.0.0
+    container_name: ams-db
+    environment:
+      GS_PASSWORD: "${AMS_DB_PASSWORD:-Changeme123!}"
+      GS_USERNAME: gaussdb
+      GS_DBNAME: ams
+    ports:
+      - "15432:5432"          # 宿主机 15432 → 容器 5432（与 AMS_DB_PORT 对齐）
+    volumes:
+      - ams-db-data:/var/lib/opengauss/data
+    healthcheck:
+      test: ["CMD-SHELL", "gs_ctl query -D /var/lib/opengauss/data | grep -q 'server_status.*Normal'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  ams:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: ams-server
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      AMS_HTTP_HOST: "0.0.0.0"
+      AMS_HTTP_PORT: "8080"
+      AMS_DB_HOST: db
+      AMS_DB_PORT: "5432"        # openGauss 容器内端口
+      AMS_DB_NAME: ams
+      AMS_DB_USER: gaussdb
+      AMS_DB_PASSWORD: "${AMS_DB_PASSWORD:-Changeme123!}"
+      AMS_TOKEN_SECRET: "${AMS_TOKEN_SECRET:-change-me-in-production-at-least-32-bytes}"
+      AMS_KEK: "${AMS_KEK:-change-me-in-production}"
+      AMS_WEB_DIR: /app/web
+    ports:
+      - "8080:8080"
+    volumes:
+      - ams-config:/app/config
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fSs http://127.0.0.1:8080/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  ams-db-data:
+  ams-config:

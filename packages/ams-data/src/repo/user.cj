@@ -735,17 +735,21 @@ public class UserRepo {
      *   禁止由前端传参决定归属 —— 故此列表必须**由服务端**算出。
      */
     public func listAccessibleSubjectIds(userId: Int64): ArrayList<String> {
+        // 多租户隔离（docs/18 §4.2）：用户归属唯一租户，从 userId 推导租户后
+        // 限定主体范围，使所有「按 subjectIds 过滤」的条目查询透传隔离。
+        let tenantId = this.tenantOf(userId)
         let out = ArrayList<String>()
         let sql = "SELECT DISTINCT id FROM arc_subjects " +
-                  "WHERE deleted_at IS NULL AND (" +
+                  "WHERE deleted_at IS NULL AND tenant_id = ? AND (" +
                   "  owner_id = ?" +
                   "  OR ? = ANY(custodian_ids)" +
                   ") ORDER BY id"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
-            st.set(0, userId)
+            st.set(0, tenantId)
             st.set(1, userId)
+            st.set(2, userId)
             let rows = readRows(st.query())
             for (r in rows.all().iterator()) {
                 out.add("${r.i64("id")}")
@@ -759,18 +763,21 @@ public class UserRepo {
     }
 
     /**
-     * 列出该用户**本人拥有**的主体 ID（不含代管）。
+     * 列出该用户**本人拥有**的主体 ID（不含代管，限同租户）。
      *
      * 用途（FR-ACL-007 敏感度分级）：所有者对自己名下的一切天然可见，
      * 代管人则需显式授权 —— 故必须区分「拥有」与「可访问」。
      */
     public func listOwnedSubjectIds(userId: Int64): ArrayList<String> {
+        // 多租户隔离：同上，从 userId 推导租户后限定范围。
+        let tenantId = this.tenantOf(userId)
         let out = ArrayList<String>()
-        let sql = "SELECT id FROM arc_subjects WHERE deleted_at IS NULL AND owner_id = ? ORDER BY id"
+        let sql = "SELECT id FROM arc_subjects WHERE deleted_at IS NULL AND tenant_id = ? AND owner_id = ? ORDER BY id"
         let c = this.db.connect()
         try {
             let st = c.prepareStatement(sql)
-            st.set(0, userId)
+            st.set(0, tenantId)
+            st.set(1, userId)
             let rows = readRows(st.query())
             for (r in rows.all().iterator()) {
                 out.add("${r.i64("id")}")
@@ -802,6 +809,31 @@ public class UserRepo {
                 return 0
             }
             return rows.at(0).i64("coalesce")
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 查询用户所属租户（多租户隔离根）。
+     *
+     * 失败关闭：若用户不存在或无租户归属，返回 0（非法租户），
+     * 仓储层据此拒绝而非悄悄落到默认租户。0 不对应任何真实租户
+     * （默认租户 id=1），故不会误放行到其他租户。
+     */
+    public func tenantOf(userId: Int64): Int64 {
+        let sql = "SELECT COALESCE(tenant_id, 0) AS tid FROM sys_users WHERE id = ?"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, userId)
+            let rows = readRows(st.query())
+            if (rows.isEmpty()) {
+                return 0
+            }
+            return rows.at(0).i64("tid")
         } catch (e: Exception) {
             throw toDbError(e)
         } finally {

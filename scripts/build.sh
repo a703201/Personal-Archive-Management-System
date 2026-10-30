@@ -145,6 +145,7 @@ TOP_ORDER=(
     ams-core
     ams-data
     ams-security
+    ams-kit
     ams-app
     ams-api
     ams-server
@@ -329,7 +330,7 @@ for top in "${TOPS[@]}"; do
             #    导致跑的是旧版本（本项目踩过：日志显示旧内容但报告 OK）。
             [ -f "$BUILD_DIR/ams-server.exe" ] && mv -f "$BUILD_DIR/ams-server.exe" "$BUILD_DIR/ams-server.exe.old" 2>/dev/null
             _link="$LINK_LIBS $DRV_LIBS $STDX_LIBS_ALL"
-            "$CJC" -p "$subdir" \
+            "$CJC" -O2 -p "$subdir" \
                   --import-path "$BUILD_DIR" \
                   --import-path "$STDX_DIR" \
                   --import-path "$DRV_DIR" \
@@ -380,14 +381,14 @@ for top in "${TOPS[@]}"; do
                     echo "FAILED（缺 opengauss-driver：请先执行 bash scripts/build-driver.sh）"
                     exit 1
                 fi
-                "$CJC" -p "$subdir" \
+                "$CJC" -O2 -p "$subdir" \
                       --import-path "$BUILD_DIR" \
                       --import-path "$STDX_DIR" \
                       --import-path "$DRV_DIR" \
                       --output-type staticlib \
                       --output-dir "$BUILD_DIR" > /tmp/ams_build.log 2>&1
             else
-                "$CJC" -p "$subdir" \
+                "$CJC" -O2 -p "$subdir" \
                       --import-path "$BUILD_DIR" \
                       --import-path "$STDX_DIR" \
                       --output-type staticlib \

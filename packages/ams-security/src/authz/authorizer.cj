@@ -80,12 +80,21 @@ public class AccessContext {
     private let ownedSubjectIds: HashSet<String>
     /** 数据可见上限（取所有角色的最大值） */
     public let maxDataLevel: Int64
+    /**
+     * 所属租户（多租户隔离根）。
+     *
+     * 该用户的全部数据访问都被限定在此租户内。鉴权决策若涉及跨租户
+     * 资源，应据此拒绝（防越权跨租户）。仓储层才是行级过滤的执行点，
+     * 此处主要供审计/日志与未来跨租户 guard 判定使用。
+     */
+    public let tenantId: Int64
 
     public init(
         userId: String,
         perms: Array<String>,
         subjectIds: Array<String>,
         maxDataLevel: Int64,
+        tenantId: Int64,
         ownedSubjectIds!: Array<String> = []
     ) {
         this.userId = userId
@@ -107,6 +116,7 @@ public class AccessContext {
             this.ownedSubjectIds.add(s)
         }
         this.maxDataLevel = maxDataLevel
+        this.tenantId = tenantId
     }
 
     /**
@@ -203,6 +213,8 @@ public class AccessContext {
 public class AuthzResource {
     /** 所属主体 ID */
     public let subjectId: String
+    /** 所属租户（多租户隔离根；由条目记录携带，0 表示未提供） */
+    public let tenantId: Int64
     /** 所属分类码（0 表示不涉及分类） */
     public let category: Int64
     /** 分类敏感度 */
@@ -214,9 +226,11 @@ public class AuthzResource {
         subjectId: String,
         category: Int64,
         sensitivity: Sensitivity,
-        itemId!: String = ""
+        itemId!: String = "",
+        tenantId!: Int64 = 0
     ) {
         this.subjectId = subjectId
+        this.tenantId = tenantId
         this.category = category
         this.sensitivity = sensitivity
         this.itemId = itemId
@@ -405,6 +419,13 @@ public class Authorizer {
         resource: AuthzResource,
         nowMillis: Int64
     ): Bool {
+        // 跨租户强制（多租户隔离根）：资源已知租户时，调用者必须同租户。
+        // 防御**所有**路径（含路径0 的 any 绕过）的越权跨租户访问 ——
+        // 否则持有 archive:read:any 的角色可凭条目 ID 读取任意租户的条目。
+        // 资源未提供租户（tenantId=0）时跳过本检查（兼容既有测试与未知场景）。
+        if (resource.tenantId != 0 && resource.tenantId != ctx.tenantId) {
+            return false
+        }
         // 路径 0：持有 any 范围权限 → **放弃归属约束**
         // （PRD §5.4 脚注：「拥有 any 即表示放弃归属约束，因此不叠加 own 的判定」）
         if (ctx.hasPerm("archive:read:any")) {

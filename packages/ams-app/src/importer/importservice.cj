@@ -267,7 +267,7 @@ public class ImportService {
                 try {
                     let newId = this.itemRepo.create(
                         r.subjectId, r.category, r.title, r.status, r.sensitivity,
-                        r.issuedDate, r.expiresAt, r.issuer, r.remark, "{}", actorId,
+                        r.issuedDate, r.expiresAt, r.issuer, r.remark, "{}", this.userRepo.tenantOf(actorId), actorId,
                         source: 1
                     )
                     done = done + 1
@@ -865,7 +865,7 @@ public class ImportService {
                     // source=5：回导（区别于手工 0 / CSV 1 / 克隆 2 / OCR 3 / 附件 4）
                     this.itemRepo.create(
                         r.subjectId, r.category, r.title, r.status, r.sensitivity,
-                        r.issuedDate, r.expiresAt, r.issuer, r.remark, "{}", actorId,
+                        r.issuedDate, r.expiresAt, r.issuer, r.remark, "{}", this.userRepo.tenantOf(actorId), actorId,
                         source: 5
                     )
                     done = done + 1
