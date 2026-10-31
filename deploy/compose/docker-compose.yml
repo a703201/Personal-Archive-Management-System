@@ -92,7 +92,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.prebuilt
-    image: ams:0.1.0
+    image: ams:1.0.0
     container_name: ams-server
     depends_on:
       # 等迁移任务成功跑完再起应用（对应 returnguard 的 app 依赖 init）

@@ -18,7 +18,7 @@
 #      scripts/ci/publish-toolchain.sh）。
 #
 # 构建示例：
-#   docker build -t ams:0.1.0 \
+#   docker build -t ams:1.0.0 \
 #     --build-arg CANGJIE_SDK_URL=https://.../cangjie-1.2.0-linux.tar.gz \
 #     --build-arg CANGJIE_STDX_URL=https://.../cangjie-stdx-linux.tar.gz \
 #     -f deploy/docker/Dockerfile .

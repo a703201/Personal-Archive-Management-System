@@ -16,7 +16,7 @@
 #   bash deploy/scripts/build-linux-docker.sh     # 产出 build/linux/
 #
 # 构建镜像：
-#   docker build -t ams:0.1.0 -f deploy/docker/Dockerfile.prebuilt .
+#   docker build -t ams:1.0.0 -f deploy/docker/Dockerfile.prebuilt .
 #
 # 说明：web/dist 为平台无关的静态产物，直接复用宿主的 `npm run build`
 #       结果，容器内不再装 Node（省 ~200MB 与一次网络安装）。
