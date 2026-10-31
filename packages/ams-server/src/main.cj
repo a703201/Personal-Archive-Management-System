@@ -128,9 +128,13 @@ public class ServerConfig {
             case None => dbPass
         }
 
+        // 端口：容器部署时 openGauss 在 compose 网络内是 5432，
+        // 物理机本地开发默认 15432。此前此处硬编码 15432，导致
+        // AMS_DB_PORT 被静默忽略（容器内永远连不上 db:5432）。
+        let dbPort = parseIntEnv(getVariable("AMS_DB_PORT") ?? "15432", 15432)
         let db = DbConfig(
             getVariable("AMS_DB_HOST") ?? "127.0.0.1",
-            15432,
+            dbPort,
             getVariable("AMS_DB_NAME") ?? "ams",
             dbUser,
             dbRuntimePass,

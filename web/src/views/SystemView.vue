@@ -10,6 +10,7 @@
  * （本页路由 meta.admin=true，且每个接口在服务端再校验 system:admin）。
  */
 import { ref, computed, onMounted } from 'vue'
+import { t as tr } from '../i18n'
 import { api } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
 import { useToast } from '../composables/useToast'
@@ -329,7 +330,7 @@ function fmtTime(ms: number | string | undefined): string {
 
 <template>
   <section>
-    <h1 class="page-title">系统运维</h1>
+    <h1 class="page-title">{{ tr('SystemView.08f206', '系统运维') }}</h1>
 
     <div class="tabs" role="tablist">
       <button
@@ -346,44 +347,44 @@ function fmtTime(ms: number | string | undefined): string {
       </button>
     </div>
 
-    <p v-if="loading" class="hint">加载中…</p>
+    <p v-if="loading" class="hint">{{ tr('SystemView.300ee3', '加载中…') }}</p>
     <p v-else-if="error" class="hint hint--error">{{ error }}</p>
 
     <!-- 健康看板 -->
     <template v-else-if="tab === 'health' && health">
       <div class="metrics">
         <div class="card metric">
-          <div class="metric__label">运行时长</div>
+          <div class="metric__label">{{ tr('SystemView.66836c', '运行时长') }}</div>
           <div class="metric__value">{{ fmtUptime(health.uptimeMs) }}</div>
         </div>
         <div class="card metric">
-          <div class="metric__label">请求数</div>
+          <div class="metric__label">{{ tr('SystemView.b28376', '请求数') }}</div>
           <div class="metric__value">{{ health.requests }}</div>
         </div>
         <div class="card metric">
-          <div class="metric__label">服务端错误率</div>
+          <div class="metric__label">{{ tr('SystemView.10a54c', '服务端错误率') }}</div>
           <div class="metric__value" :class="{ 'metric__value--bad': Number(health.errorRatePermille) >= 10 }">
             {{ errorRateText }}
           </div>
           <div class="metric__sub">4xx {{ health.error4xx }} · 5xx {{ health.error5xx }}</div>
         </div>
         <div class="card metric">
-          <div class="metric__label">在线会话</div>
+          <div class="metric__label">{{ tr('SystemView.22e4bf', '在线会话') }}</div>
           <div class="metric__value">{{ health.onlineSessions }}</div>
         </div>
         <div class="card metric">
-          <div class="metric__label">数据库延迟</div>
+          <div class="metric__label">{{ tr('SystemView.16f794', '数据库延迟') }}</div>
           <div class="metric__value">{{ health.dbLatencyMs }} ms</div>
-          <div class="metric__sub">SELECT 1 往返</div>
+          <div class="metric__sub">{{ tr('SystemView.9716a2', 'SELECT 1 往返') }}</div>
         </div>
         <div class="card metric">
-          <div class="metric__label">附件存储</div>
+          <div class="metric__label">{{ tr('SystemView.b0eca7', '附件存储') }}</div>
           <div class="metric__value">{{ fmtBytes(health.storageBytes) }}</div>
           <div class="metric__sub">{{ health.storageFiles }} 个文件</div>
         </div>
       </div>
 
-      <h2 class="section-title">数据表行数</h2>
+      <h2 class="section-title">{{ tr('SystemView.e8e6fc', '数据表行数') }}</h2>
       <div class="card">
         <div class="rows">
           <div v-for="t in health.tables" :key="t.table" class="rows__row">
@@ -397,16 +398,16 @@ function fmtTime(ms: number | string | undefined): string {
     <!-- 配置中心 -->
     <template v-else-if="tab === 'config'">
       <div class="bar">
-        <p class="bar__hint">敏感配置项的值以 *** 展示，编辑时需重新输入；留空表示不修改。</p>
-        <button class="btn-primary" type="button" @click="openSettingCreate">新增配置</button>
+        <p class="bar__hint">{{ tr('SystemView.b845a2', '敏感配置项的值以 *** 展示，编辑时需重新输入；留空表示不修改。') }}</p>
+        <button class="btn-primary" type="button" @click="openSettingCreate">{{ tr('SystemView.679b34', '新增配置') }}</button>
       </div>
       <div class="card">
-        <p v-if="settings.length === 0" class="hint">还没有配置项。</p>
+        <p v-if="settings.length === 0" class="hint">{{ tr('SystemView.ab13c3', '还没有配置项。') }}</p>
         <div v-for="s in settings" :key="s.key" class="rowitem">
           <div class="rowitem__main">
             <div class="rowitem__title">
               <code>{{ s.key }}</code>
-              <span v-if="s.isSecret === true || s.isSecret === 't'" class="st st--warn">敏感</span>
+              <span v-if="s.isSecret === true || s.isSecret === 't'" class="st st--warn">{{ tr('SystemView.e4d1f0', '敏感') }}</span>
             </div>
             <div class="rowitem__sub">{{ s.description || '—' }}</div>
             <div class="rowitem__value">{{ s.value }}</div>
@@ -424,12 +425,12 @@ function fmtTime(ms: number | string | undefined): string {
     <!-- 定时任务 -->
     <template v-else-if="tab === 'jobs'">
       <div class="card">
-        <p v-if="jobs.length === 0" class="hint">没有已登记的任务。</p>
+        <p v-if="jobs.length === 0" class="hint">{{ tr('SystemView.c992a4', '没有已登记的任务。') }}</p>
         <div v-for="j in jobs" :key="j.name" class="rowitem">
           <div class="rowitem__main">
             <div class="rowitem__title"><code>{{ j.name }}</code></div>
             <div class="rowitem__sub">{{ j.description }}</div>
-            <div class="rowitem__value">上次执行：{{ fmtTime(j.lastRunAt) }}</div>
+            <div class="rowitem__value">{{ tr('SystemView.eec850', '上次执行：') }}{{ fmtTime(j.lastRunAt) }}</div>
           </div>
           <div class="rowitem__actions">
             <button
@@ -443,19 +444,19 @@ function fmtTime(ms: number | string | undefined): string {
           </div>
         </div>
       </div>
-      <p class="hint">立即执行会跳过 24 小时的间隔闸门，用于手工触发或演练。</p>
+      <p class="hint">{{ tr('SystemView.685acd', '立即执行会跳过 24 小时的间隔闸门，用于手工触发或演练。') }}</p>
     </template>
 
     <!-- 密钥管理 -->
     <template v-else-if="tab === 'keys'">
       <div class="bar">
-        <p class="bar__hint">此处只展示密钥的**版本与状态**，不存储也不展示任何密钥材料。</p>
+        <p class="bar__hint">{{ tr('SystemView.4ea666', '此处只展示密钥的**版本与状态**，不存储也不展示任何密钥材料。') }}</p>
         <button class="btn-primary" type="button" :disabled="keyBusy" @click="rotateKey">
           轮换密钥
         </button>
       </div>
       <div class="card">
-        <p v-if="keys.length === 0" class="hint">还没有登记任何密钥版本。</p>
+        <p v-if="keys.length === 0" class="hint">{{ tr('SystemView.6f78c4', '还没有登记任何密钥版本。') }}</p>
         <div v-for="k in keys" :key="k.id" class="rowitem">
           <div class="rowitem__main">
             <div class="rowitem__title">
@@ -464,8 +465,8 @@ function fmtTime(ms: number | string | undefined): string {
                 {{ (KEY_STATUS[Number(k.status)] ?? KEY_STATUS[1]).label }}
               </span>
             </div>
-            <div class="rowitem__sub">用途 {{ k.purpose }} · {{ k.note || '无备注' }}</div>
-            <div class="rowitem__value">创建于 {{ fmtTime(k.createdAt) }}</div>
+            <div class="rowitem__sub">{{ tr('SystemView.7c49c8', '用途') }} {{ k.purpose }} {{ tr('SystemView.1fdf0d', '·') }} {{ k.note || '无备注' }}</div>
+            <div class="rowitem__value">{{ tr('SystemView.f3b01f', '创建于') }} {{ fmtTime(k.createdAt) }}</div>
           </div>
           <div class="rowitem__actions" v-if="Number(k.status) === 1">
             <button class="btn-text" type="button" :disabled="keyBusy" @click="changeKeyStatus(k, 'retire')">
@@ -491,13 +492,13 @@ function fmtTime(ms: number | string | undefined): string {
     <!-- 备份恢复 -->
     <template v-else-if="tab === 'backup'">
       <div class="bar">
-        <p class="bar__hint">生成配置快照；行数据请用数据库自带工具（openGauss gs_dump）备份。</p>
+        <p class="bar__hint">{{ tr('SystemView.478ab7', '生成配置快照；行数据请用数据库自带工具（openGauss gs_dump）备份。') }}</p>
         <button class="btn-primary" type="button" :disabled="backupBusy" @click="createBackup">
           生成快照
         </button>
       </div>
       <div class="card">
-        <p v-if="backups.length === 0" class="hint">还没有备份。</p>
+        <p v-if="backups.length === 0" class="hint">{{ tr('SystemView.366fe0', '还没有备份。') }}</p>
         <div v-for="b in backups" :key="b.file" class="rowitem">
           <div class="rowitem__main">
             <div class="rowitem__title"><code>{{ b.file }}</code></div>
@@ -517,21 +518,21 @@ function fmtTime(ms: number | string | undefined): string {
        v-else-if 必须紧邻上一个分支，中间夹其它元素会让整条链失效） -->
   <AppSheet
     v-model="showSetting"
-    :title="settingMode === 'create' ? '新增配置' : '编辑配置'"
+    ::title="settingMode === 'create' ? tr('SystemView.227e8e.new', '新增配置') : tr('SystemView.227e8e.edit', '编辑配置')"
     size="sm"
     :dismissible="!savingSetting"
   >
     <div class="form">
       <label v-if="settingMode === 'create'" class="field">
-        <span class="field__label">键名 <em>*</em></span>
-        <input v-model="settingForm.key" class="field-control" placeholder="如 archive.retention_days" />
+        <span class="field__label">{{ tr('SystemView.f0b357', '键名') }} <em>*</em></span>
+        <input v-model="settingForm.key" class="field-control" :placeholder="tr('SystemView.140598', '如 archive.retention_days')" />
       </label>
       <label class="field">
-        <span class="field__label">值</span>
+        <span class="field__label">{{ tr('SystemView.321b95', '值') }}</span>
         <input v-model="settingForm.value" class="field-control" />
       </label>
       <label class="field">
-        <span class="field__label">类型</span>
+        <span class="field__label">{{ tr('SystemView.e4e46c', '类型') }}</span>
         <select v-model="settingForm.valueType" class="field-control">
           <option value="string">string</option>
           <option value="int">int</option>
@@ -540,11 +541,11 @@ function fmtTime(ms: number | string | undefined): string {
         </select>
       </label>
       <label class="field">
-        <span class="field__label">说明</span>
+        <span class="field__label">{{ tr('SystemView.26670d', '说明') }}</span>
         <input v-model="settingForm.description" class="field-control" />
       </label>
     </div>
-    <p class="hint">敏感配置的值不会展示，编辑时留空表示不修改。</p>
+    <p class="hint">{{ tr('SystemView.7d17b0', '敏感配置的值不会展示，编辑时留空表示不修改。') }}</p>
     <div class="sheet-actions">
       <button class="btn-ghost" type="button" :disabled="savingSetting" @click="showSetting = false">
         取消
@@ -582,7 +583,6 @@ function fmtTime(ms: number | string | undefined): string {
   border-radius: var(--g3-sm, 12px);
   margin-bottom: var(--sp-4);
   overflow-x: auto;
-  corner-style: continuous;
 }
 .tab {
   flex: 1 0 auto;
@@ -597,7 +597,6 @@ function fmtTime(ms: number | string | undefined): string {
   transition:
     background var(--spring-fast) var(--ease-apple),
     color var(--spring-fast) var(--ease-apple);
-  corner-style: continuous;
 }
 .tab--on {
   background: var(--bg-surface);

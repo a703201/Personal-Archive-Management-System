@@ -17,10 +17,12 @@
  *   （见 changedFields），未触碰的敏感字段一律不提交。
  */
 import { ref, computed, onMounted } from 'vue'
+import { t as tr } from '../i18n'
 import { api } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
 import AttachmentPanel from '../components/AttachmentPanel.vue'
 import ShareLinkPanel from '../components/ShareLinkPanel.vue'
+import DatePicker from '../components/DatePicker.vue'
 import { CATEGORY_DEFS as CATEGORIES, categoryName, categorySensitivity } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
 
@@ -745,17 +747,17 @@ function inputType(t: number | string): string {
   <section class="archive">
     <header class="page-head">
       <div>
-        <h1 class="page-title">档案</h1>
+        <h1 class="page-title">{{ tr('ArchiveView.3ca928', '档案') }}</h1>
         <p class="page-sub">
           共 {{ total }} 条
-          <template v-if="activeSubject"> · 当前主体 {{ activeSubject.name }}</template>
+          <template v-if="activeSubject"> {{ tr('ArchiveView.2eaeb7', '· 当前主体') }} {{ activeSubject.name }}</template>
         </p>
       </div>
-      <button class="btn-primary" type="button" @click="openCreate">新建档案</button>
+      <button class="btn-primary" type="button" @click="openCreate">{{ tr('ArchiveView.88b10e', '新建档案') }}</button>
     </header>
 
     <!-- 主体切换：一行胶囊，横向可滚（移动端不换行挤压） -->
-    <div class="subjects" role="tablist" aria-label="档案主体">
+    <div class="subjects" role="tablist" :aria-label="tr('ArchiveView.74bc27', '档案主体')">
       <button
         v-for="s in subjects"
         :key="s.id"
@@ -768,7 +770,7 @@ function inputType(t: number | string): string {
       >
         <span class="subject-chip__avatar">{{ s.name.slice(0, 1) || '?' }}</span>
         <span class="subject-chip__name">{{ s.name }}</span>
-        <span v-if="s.isPrimary === true || s.isPrimary === 'true'" class="subject-chip__tag">主</span>
+        <span v-if="s.isPrimary === true || s.isPrimary === 'true'" class="subject-chip__tag">{{ tr('ArchiveView.fbf713', '主') }}</span>
       </button>
       <button class="subject-chip subject-chip--add" type="button" @click="openSubjectCreate">
         + 主体
@@ -788,43 +790,41 @@ function inputType(t: number | string): string {
       <input
         v-model="keyword"
         class="field-control toolbar__search"
-        placeholder="搜索标题或备注"
+        :placeholder="tr('ArchiveView.efc001', '搜索标题或备注')"
         @keyup.enter="reload"
       />
       <select v-model.number="category" class="field-control" @change="reload">
-        <option :value="0">全部分类</option>
+        <option :value="0">{{ tr('ArchiveView.a8e369', '全部分类') }}</option>
         <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ c.name }}</option>
       </select>
       <select v-model.number="status" class="field-control" @change="reload">
         <option v-for="s in STATUS_OPTS" :key="s.value" :value="s.value">{{ s.label }}</option>
       </select>
-      <select v-model.number="source" class="field-control" @change="reload" title="来源">
-        <option :value="0">全部来源</option>
-        <option :value="1">CSV 导入</option>
-        <option :value="2">克隆生成</option>
-        <option :value="3">OCR 识别</option>
-        <option :value="4">附件导入</option>
-        <option :value="5">导出包回导</option>
+      <select v-model.number="source" class="field-control" @change="reload" :title="tr('ArchiveView.c63f79', '来源')">
+        <option :value="0">{{ tr('ArchiveView.f8d22f', '全部来源') }}</option>
+        <option :value="1">{{ tr('ArchiveView.b7d837', 'CSV 导入') }}</option>
+        <option :value="2">{{ tr('ArchiveView.aae2d0', '克隆生成') }}</option>
+        <option :value="3">{{ tr('ArchiveView.bb5ace', 'OCR 识别') }}</option>
+        <option :value="4">{{ tr('ArchiveView.1e77ab', '附件导入') }}</option>
+        <option :value="5">{{ tr('ArchiveView.3685ba', '导出包回导') }}</option>
       </select>
       <div class="toolbar__dates">
-        <input
+        <DatePicker
           v-model="createdFrom"
           class="field-control"
-          type="date"
-          title="创建时间起"
+          :title="tr('ArchiveView.12ec01', '创建时间起')"
           @change="reload"
         />
         <span class="toolbar__dash">~</span>
-        <input
+        <DatePicker
           v-model="createdTo"
           class="field-control"
-          type="date"
-          title="创建时间止"
+          :title="tr('ArchiveView.a7bc27', '创建时间止')"
           @change="reload"
         />
       </div>
-      <button class="btn-ghost" type="button" @click="reload">查询</button>
-      <button class="btn-text" type="button" @click="openRecycle">回收站</button>
+      <button class="btn-ghost" type="button" @click="reload">{{ tr('ArchiveView.711363', '查询') }}</button>
+      <button class="btn-text" type="button" @click="openRecycle">{{ tr('ArchiveView.64ea87', '回收站') }}</button>
     </div>
 
     <p v-if="error" class="hint hint--error">{{ error }}</p>
@@ -836,8 +836,8 @@ function inputType(t: number | string): string {
       </div>
     </div>
     <div v-else-if="items.length === 0" class="card empty">
-      <div class="empty__title">还没有档案</div>
-      <p class="empty__sub">点击右上角「新建档案」，为当前主体添加第一条记录。</p>
+      <div class="empty__title">{{ tr('ArchiveView.a5135e', '还没有档案') }}</div>
+      <p class="empty__sub">{{ tr('ArchiveView.f35149', '点击右上角「新建档案」，为当前主体添加第一条记录。') }}</p>
     </div>
 
     <div v-else class="list">
@@ -856,7 +856,7 @@ function inputType(t: number | string): string {
             type="checkbox"
             class="item__checkbox"
             :checked="selected.has(String(it.id))"
-            :aria-label="`选择 ${it.title}`"
+            ::aria-label="tr('ArchiveView.888021', '`选择 ${it.title}`')"
             @change="toggleSelect(String(it.id))"
           />
         </label>
@@ -895,13 +895,13 @@ function inputType(t: number | string): string {
       v-if="selectedCount > 0"
       class="batchbar"
       role="region"
-      aria-label="批量操作"
+      :aria-label="tr('ArchiveView.eae7c2', '批量操作')"
     >
       <label class="batchbar__count">
         <input
           type="checkbox"
           :checked="allSelected"
-          :aria-label="allSelected ? '取消全选' : '全选本页'"
+          ::aria-label="allSelected ? tr('ArchiveView.c2eb1c.on', '取消全选') : tr('ArchiveView.c2eb1c.off', '全选本页')"
           @change="toggleSelectAll"
         />
         已选 {{ selectedCount }} 项
@@ -909,20 +909,20 @@ function inputType(t: number | string): string {
       <span class="batchbar__spacer" />
       <!-- FR-ARCH-013 批量编辑：三项都可选，不填的字段不改 -->
       <label class="batchbar__field">
-        <span>改分类</span>
+        <span>{{ tr('ArchiveView.3b6209', '改分类') }}</span>
         <select v-model="editCategory" class="field-control field-control--sm">
-          <option :value="null">（不改）</option>
+          <option :value="null">{{ tr('ArchiveView.47de0d', '（不改）') }}</option>
           <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ c.name }}</option>
         </select>
       </label>
       <label class="batchbar__field">
-        <span>有效期</span>
-        <input v-model="editExpiresAt" class="field-control field-control--sm" type="date" />
+        <span>{{ tr('ArchiveView.222460', '有效期') }}</span>
+        <DatePicker v-model="editExpiresAt" class="field-control field-control--sm" />
       </label>
       <label class="batchbar__field">
-        <span>加标签</span>
+        <span>{{ tr('ArchiveView.eaf58d', '加标签') }}</span>
         <select v-model="editTagId" class="field-control field-control--sm">
-          <option value="">（不加）</option>
+          <option value="">{{ tr('ArchiveView.37b3b3', '（不加）') }}</option>
           <option v-for="t in tagOptions" :key="t.id" :value="t.id">{{ t.name }}</option>
         </select>
       </label>
@@ -958,23 +958,23 @@ function inputType(t: number | string): string {
     <!-- 新建 / 编辑 -->
     <AppSheet
       v-model="showForm"
-      :title="formMode === 'create' ? '新建档案' : '编辑档案'"
+      ::title="formMode === 'create' ? tr('ArchiveView.a7c2c1.new', '新建档案') : tr('ArchiveView.a7c2c1.edit', '编辑档案')"
       size="lg"
       :dismissible="!saving"
     >
       <div class="form">
         <label class="field field--full">
-          <span class="field__label">标题 <em>*</em></span>
+          <span class="field__label">{{ tr('ArchiveView.748d7d', '标题') }} <em>*</em></span>
           <input
             v-model="form.title"
             class="field-control"
             maxlength="120"
-            placeholder="如：居民身份证 / 本科毕业证"
+            :placeholder="tr('ArchiveView.61c119', '如：居民身份证 / 本科毕业证')"
           />
         </label>
 
         <label v-if="formMode === 'create'" class="field">
-          <span class="field__label">分类</span>
+          <span class="field__label">{{ tr('ArchiveView.435c52', '分类') }}</span>
           <select
             v-model.number="form.category"
             class="field-control"
@@ -985,31 +985,31 @@ function inputType(t: number | string): string {
         </label>
 
         <label class="field">
-          <span class="field__label">敏感度</span>
+          <span class="field__label">{{ tr('ArchiveView.c8165b', '敏感度') }}</span>
           <select v-model.number="form.sensitivity" class="field-control">
-            <option :value="1">普通</option>
-            <option :value="2">敏感</option>
-            <option :value="3">高敏</option>
+            <option :value="1">{{ tr('ArchiveView.7cda07', '普通') }}</option>
+            <option :value="2">{{ tr('ArchiveView.e4d1f0', '敏感') }}</option>
+            <option :value="3">{{ tr('ArchiveView.4bdda7', '高敏') }}</option>
           </select>
         </label>
 
         <label class="field">
-          <span class="field__label">签发日期</span>
-          <input v-model="form.issuedDate" class="field-control" type="date" />
+          <span class="field__label">{{ tr('ArchiveView.0b8bcd', '签发日期') }}</span>
+          <DatePicker v-model="form.issuedDate" class="field-control" />
         </label>
 
         <label class="field">
-          <span class="field__label">到期日期</span>
-          <input v-model="form.expiresAt" class="field-control" type="date" />
+          <span class="field__label">{{ tr('ArchiveView.e3e626', '到期日期') }}</span>
+          <DatePicker v-model="form.expiresAt" class="field-control" />
         </label>
 
         <label class="field">
-          <span class="field__label">签发机构</span>
+          <span class="field__label">{{ tr('ArchiveView.8eb731', '签发机构') }}</span>
           <input v-model="form.issuer" class="field-control" maxlength="128" />
         </label>
 
         <label class="field field--full">
-          <span class="field__label">备注</span>
+          <span class="field__label">{{ tr('ArchiveView.e03614', '备注') }}</span>
           <textarea v-model="form.remark" class="field-control" rows="2" />
         </label>
       </div>
@@ -1024,12 +1024,12 @@ function inputType(t: number | string): string {
             <span class="field__label">
               {{ f.fieldName }}
               <em v-if="f.isRequired === true || f.isRequired === 't'">*</em>
-              <span v-if="Number(f.sensitivity) >= 2" class="field__sens">敏感</span>
+              <span v-if="Number(f.sensitivity) >= 2" class="field__sens">{{ tr('ArchiveView.e4d1f0', '敏感') }}</span>
             </span>
             <select v-if="isBool(f.dataType)" v-model="fieldValues[f.fieldKey]" class="field-control">
-              <option value="">未填写</option>
-              <option value="true">是</option>
-              <option value="false">否</option>
+              <option value="">{{ tr('ArchiveView.287a1d', '未填写') }}</option>
+              <option value="true">{{ tr('ArchiveView.30160a', '是') }}</option>
+              <option value="false">{{ tr('ArchiveView.8bf5c1', '否') }}</option>
             </select>
             <input
               v-else
@@ -1052,31 +1052,31 @@ function inputType(t: number | string): string {
     </AppSheet>
 
     <!-- 详情 -->
-    <AppSheet v-model="showDetail" :title="detailItem?.title ?? '档案详情'" size="md">
+    <AppSheet v-model="showDetail" ::title="detailItem?.title ?? tr('ArchiveView.79abb2', '档案详情')" size="md">
       <template v-if="detailItem">
         <dl class="kv">
-          <dt>分类</dt>
+          <dt>{{ tr('ArchiveView.435c52', '分类') }}</dt>
           <dd>{{ catName(detailItem.category) }}</dd>
-          <dt>状态</dt>
+          <dt>{{ tr('ArchiveView.62e951', '状态') }}</dt>
           <dd>{{ statusLabel(detailItem.status) }}</dd>
-          <dt>敏感度</dt>
+          <dt>{{ tr('ArchiveView.c8165b', '敏感度') }}</dt>
           <dd>{{ sensLabel(detailItem.sensitivity) }}</dd>
-          <dt>签发机构</dt>
+          <dt>{{ tr('ArchiveView.8eb731', '签发机构') }}</dt>
           <dd>{{ detailItem.issuer || '—' }}</dd>
-          <dt>备注</dt>
+          <dt>{{ tr('ArchiveView.e03614', '备注') }}</dt>
           <dd>{{ detailItem.remark || '—' }}</dd>
-          <dt>更新时间</dt>
+          <dt>{{ tr('ArchiveView.093dea', '更新时间') }}</dt>
           <dd>{{ fmtTime(detailItem.updatedAt) }}</dd>
         </dl>
 
-        <h3 class="form__section">扩展字段</h3>
-        <p v-if="detailLoading" class="hint">加载中…</p>
-        <p v-else-if="detailFields.length === 0" class="hint">该分类还没有填写专属字段。</p>
+        <h3 class="form__section">{{ tr('ArchiveView.1537dc', '扩展字段') }}</h3>
+        <p v-if="detailLoading" class="hint">{{ tr('ArchiveView.300ee3', '加载中…') }}</p>
+        <p v-else-if="detailFields.length === 0" class="hint">{{ tr('ArchiveView.ac4833', '该分类还没有填写专属字段。') }}</p>
         <dl v-else class="kv">
           <template v-for="f in detailFields" :key="f.fieldKey">
             <dt>
               {{ f.fieldName }}
-              <span v-if="Number(f.sensitivity) >= 2" class="field__sens">敏感</span>
+              <span v-if="Number(f.sensitivity) >= 2" class="field__sens">{{ tr('ArchiveView.e4d1f0', '敏感') }}</span>
             </dt>
             <dd>{{ f.value || '—' }}</dd>
           </template>
@@ -1089,7 +1089,7 @@ function inputType(t: number | string): string {
         <ShareLinkPanel v-if="detailItem" :item-id="Number(detailItem.id)" />
       </template>
       <div class="sheet-actions">
-        <button class="btn-ghost" type="button" @click="showDetail = false">关闭</button>
+        <button class="btn-ghost" type="button" @click="showDetail = false">{{ tr('ArchiveView.6c14bd', '关闭') }}</button>
         <button
           v-if="detailItem"
           class="btn-primary"
@@ -1104,31 +1104,31 @@ function inputType(t: number | string): string {
     <!-- 主体新建 / 编辑 -->
     <AppSheet
       v-model="showSubject"
-      :title="subjectMode === 'create' ? '新增主体' : '管理主体'"
+      ::title="subjectMode === 'create' ? tr('ArchiveView.70990b.new', '新增主体') : tr('ArchiveView.70990b.manage', '管理主体')"
       size="sm"
       :dismissible="!subjectSaving"
     >
       <div class="form form--single">
         <label class="field field--full">
-          <span class="field__label">姓名 <em>*</em></span>
+          <span class="field__label">{{ tr('ArchiveView.be4c26', '姓名') }} <em>*</em></span>
           <input v-model="subjectForm.name" class="field-control" maxlength="64" />
         </label>
         <label class="field field--full">
-          <span class="field__label">与我的关系</span>
+          <span class="field__label">{{ tr('ArchiveView.5046f3', '与我的关系') }}</span>
           <select v-model.number="subjectForm.relation" class="field-control">
             <option v-for="r in RELATION_OPTS" :key="r.value" :value="r.value">{{ r.label }}</option>
           </select>
         </label>
         <label class="field field--full">
-          <span class="field__label">别称</span>
+          <span class="field__label">{{ tr('ArchiveView.198978', '别称') }}</span>
           <input v-model="subjectForm.alias" class="field-control" maxlength="64" />
         </label>
         <label class="field field--full">
-          <span class="field__label">备注</span>
+          <span class="field__label">{{ tr('ArchiveView.e03614', '备注') }}</span>
           <textarea v-model="subjectForm.summary" class="field-control" rows="2" />
         </label>
       </div>
-      <p class="hint">姓名以密文形式存储（SM4-CBC + HMAC-SM3）。</p>
+      <p class="hint">{{ tr('ArchiveView.abe4ab', '姓名以密文形式存储（SM4-CBC + HMAC-SM3）。') }}</p>
       <div class="sheet-actions">
         <button
           v-if="subjectMode === 'edit'"
@@ -1150,9 +1150,9 @@ function inputType(t: number | string): string {
     </AppSheet>
 
     <!-- 回收站 -->
-    <AppSheet v-model="showRecycle" title="回收站" size="md">
-      <p v-if="recycleLoading" class="hint">加载中…</p>
-      <p v-else-if="recycleItems.length === 0" class="hint">回收站是空的。</p>
+    <AppSheet v-model="showRecycle" :title="tr('ArchiveView.64ea87', '回收站')" size="md">
+      <p v-if="recycleLoading" class="hint">{{ tr('ArchiveView.300ee3', '加载中…') }}</p>
+      <p v-else-if="recycleItems.length === 0" class="hint">{{ tr('ArchiveView.8c1269', '回收站是空的。') }}</p>
       <div v-else class="recycle">
         <div v-for="it in recycleItems" :key="it.id" class="recycle__row">
           <div class="recycle__main">
@@ -1173,12 +1173,12 @@ function inputType(t: number | string): string {
         </div>
       </div>
       <div class="sheet-actions">
-        <button class="btn-ghost" type="button" @click="showRecycle = false">关闭</button>
+        <button class="btn-ghost" type="button" @click="showRecycle = false">{{ tr('ArchiveView.6c14bd', '关闭') }}</button>
       </div>
     </AppSheet>
 
     <!-- 删除确认 -->
-    <AppSheet v-model="showDelete" title="移入回收站" size="sm" :dismissible="!deleting">
+    <AppSheet v-model="showDelete" :title="tr('ArchiveView.298cbe', '移入回收站')" size="sm" :dismissible="!deleting">
       <p class="confirm-text">
         确定要删除「{{ deleteTarget?.title }}」吗？条目将进入回收站，可在回收站中恢复。
       </p>
@@ -1241,7 +1241,6 @@ function inputType(t: number | string): string {
     background var(--spring-fast) var(--ease-apple),
     border-color var(--spring-fast) var(--ease-apple),
     transform var(--spring-fast) var(--ease-apple);
-  corner-style: continuous;
 }
 .subject-chip:hover {
   background: var(--bg-hover);
@@ -1386,7 +1385,6 @@ function inputType(t: number | string): string {
   border-radius: var(--g3-sm, 12px);
   font-size: 11px;
   border: 1px solid currentColor;
-  corner-style: continuous;
 }
 .sens--1 {
   color: var(--sens-normal);
@@ -1493,7 +1491,6 @@ function inputType(t: number | string): string {
   padding: var(--sp-3);
   border: 1px solid var(--border-subtle);
   border-radius: var(--g3-sm, 12px);
-  corner-style: continuous;
 }
 .recycle__main {
   min-width: 0;

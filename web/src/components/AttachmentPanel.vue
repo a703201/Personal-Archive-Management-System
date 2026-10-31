@@ -14,6 +14,7 @@
  *   POST   /attachments/batch/delete      批量删除（软删）
  */
 import { computed, onMounted, ref } from 'vue'
+import { t as tr } from '../i18n'
 import { api, getToken } from '../api/client'
 
 interface Att {
@@ -444,7 +445,7 @@ onMounted(load)
 <template>
   <div class="att">
     <div class="att__head">
-      <h3 class="att__title">附件（{{ list.length }}）</h3>
+      <h3 class="att__title">{{ tr('AttachmentPanel.4ff6b6', '附件（') }}{{ list.length }}{{ tr('AttachmentPanel.fa354c', '）') }}</h3>
       <div class="att__actions">
         <button class="btn-text" type="button" :disabled="busy" @click="fileInput?.click()">
           上传
@@ -453,8 +454,8 @@ onMounted(load)
       </div>
     </div>
 
-    <p v-if="loading" class="hint">加载中…</p>
-    <p v-else-if="list.length === 0" class="hint">还没有附件。</p>
+    <p v-if="loading" class="hint">{{ tr('AttachmentPanel.300ee3', '加载中…') }}</p>
+    <p v-else-if="list.length === 0" class="hint">{{ tr('AttachmentPanel.c0bf82', '还没有附件。') }}</p>
     <template v-else>
       <div class="pickbar">
         <label class="pickbar__all">
@@ -465,12 +466,12 @@ onMounted(load)
           />
           全选
         </label>
-        <span v-if="picked.size > 0" class="pickbar__count">已选 {{ picked.size }}</span>
+        <span v-if="picked.size > 0" class="pickbar__count">{{ tr('AttachmentPanel.f24ddc', '已选') }} {{ picked.size }}</span>
         <template v-if="picked.size > 0">
           <button class="btn-text" type="button" :disabled="busy" @click="batchDownload">
             打包下载
           </button>
-          <button class="btn-text" type="button" :disabled="busy" @click="openTag">打标签</button>
+          <button class="btn-text" type="button" :disabled="busy" @click="openTag">{{ tr('AttachmentPanel.58446e', '打标签') }}</button>
           <button class="btn-text btn-text--danger" type="button" :disabled="busy" @click="batchDelete">
             删除
           </button>
@@ -482,11 +483,11 @@ onMounted(load)
           <input
             type="checkbox"
             :checked="picked.has(a.id)"
-            :aria-label="`选择 ${a.title}`"
+            ::aria-label="tr('AttachmentPanel.855d64', '`选择 ${a.title}`')"
             @change="toggle(a.id)"
           />
           <div v-if="thumbs[a.id]" class="att-thumb">
-            <img :src="thumbs[a.id]" class="att-thumb__img" :alt="`${a.title} 缩略图`" />
+            <img :src="thumbs[a.id]" class="att-thumb__img" ::alt="tr('AttachmentPanel.2267d7', '`${a.title} 缩略图`')" />
           </div>
           <div class="att-item__main">
             <div class="att-item__title">
@@ -498,14 +499,14 @@ onMounted(load)
               {{ fmtSize(a.fileSize) }} · 下载 {{ a.downloadCount }} 次
             </div>
             <div v-if="a.summary || a.keywords" class="att-item__meta">
-              <span v-if="a.summary" class="att-item__metaline">摘要：{{ a.summary }}</span>
-              <span v-if="a.keywords" class="att-item__metaline">关键词：{{ a.keywords }}</span>
+              <span v-if="a.summary" class="att-item__metaline">{{ tr('AttachmentPanel.79a6bb', '摘要：') }}{{ a.summary }}</span>
+              <span v-if="a.keywords" class="att-item__metaline">{{ tr('AttachmentPanel.2f8344', '关键词：') }}{{ a.keywords }}</span>
             </div>
           </div>
           <div class="att-item__ops">
-            <button class="btn-text" type="button" @click="openPreview(a)">预览</button>
-            <button class="btn-text" type="button" @click="openVersions(a)">版本</button>
-            <button class="btn-text" type="button" @click="openMeta(a)">摘要</button>
+            <button class="btn-text" type="button" @click="openPreview(a)">{{ tr('AttachmentPanel.de61aa', '预览') }}</button>
+            <button class="btn-text" type="button" @click="openVersions(a)">{{ tr('AttachmentPanel.989d1a', '版本') }}</button>
+            <button class="btn-text" type="button" @click="openMeta(a)">{{ tr('AttachmentPanel.46d4c1', '摘要') }}</button>
           </div>
         </li>
       </ul>
@@ -519,11 +520,11 @@ onMounted(load)
       <div class="modal__card">
         <div class="modal__head">
           <span class="modal__title">{{ previewAtt?.title }}</span>
-          <button class="btn-text" type="button" @click="closePreview">关闭</button>
+          <button class="btn-text" type="button" @click="closePreview">{{ tr('AttachmentPanel.6c14bd', '关闭') }}</button>
         </div>
         <div class="preview">
-          <img v-if="previewIsImage" :src="previewUrl" class="preview__img" alt="附件预览" />
-          <div v-else class="preview__fallback">该类型不支持在线预览，请使用「打包下载」。</div>
+          <img v-if="previewIsImage" :src="previewUrl" class="preview__img" :alt="tr('AttachmentPanel.c08005', '附件预览')" />
+          <div v-else class="preview__fallback">{{ tr('AttachmentPanel.1830f9', '该类型不支持在线预览，请使用「打包下载」。') }}</div>
           <!-- 水印层：服务端签发的文本，斜向平铺覆盖 -->
           <div v-if="watermark" class="wm" aria-hidden="true">
             <span v-for="i in 12" :key="i" class="wm__item">{{ watermark }}</span>
@@ -536,14 +537,14 @@ onMounted(load)
     <div v-if="verOpen" class="modal" role="dialog" aria-modal="true" @click.self="verOpen = false">
       <div class="modal__card">
         <div class="modal__head">
-          <span class="modal__title">版本 · {{ verAtt?.title }}</span>
-          <button class="btn-text" type="button" @click="verOpen = false">关闭</button>
+          <span class="modal__title">{{ tr('AttachmentPanel.c66e31', '版本 ·') }} {{ verAtt?.title }}</span>
+          <button class="btn-text" type="button" @click="verOpen = false">{{ tr('AttachmentPanel.6c14bd', '关闭') }}</button>
         </div>
         <ul class="ver-list">
           <li v-for="v in verList" :key="v.id" class="ver-item">
             <div>
               <strong>v{{ v.versionNo }}</strong>
-              <span v-if="v.isCurrent" class="ver-item__tag">当前</span>
+              <span v-if="v.isCurrent" class="ver-item__tag">{{ tr('AttachmentPanel.25e74d', '当前') }}</span>
               <div class="ver-item__sub">
                 {{ fmtSize(v.fileSize) }} · {{ fmtTime(v.uploadedAt) }}
                 <span v-if="v.changeNote"> · {{ v.changeNote }}</span>
@@ -559,7 +560,7 @@ onMounted(load)
             v-model="verNote"
             class="ver-upload__note"
             type="text"
-            placeholder="变更说明（可选）"
+            :placeholder="tr('AttachmentPanel.4d7ded', '变更说明（可选）')"
           />
           <button class="btn-ghost" type="button" :disabled="busy" @click="verFileInput?.click()">
             上传新版本
@@ -579,7 +580,7 @@ onMounted(load)
               <option v-for="v in verList" :key="v.id" :value="v.id">v{{ v.versionNo }}</option>
             </select>
           </label>
-          <button class="btn-ghost" type="button" @click="compare">开始对比</button>
+          <button class="btn-ghost" type="button" @click="compare">{{ tr('AttachmentPanel.f77160', '开始对比') }}</button>
         </div>
         <div v-if="diff" class="diff">
           <p class="diff__sum">
@@ -588,7 +589,7 @@ onMounted(load)
           </p>
           <table class="diff__table">
             <thead>
-              <tr><th>字段</th><th>v{{ diff.from.versionNo }}</th><th>v{{ diff.to.versionNo }}</th></tr>
+              <tr><th>{{ tr('AttachmentPanel.77a49f', '字段') }}</th><th>v{{ diff.from.versionNo }}</th><th>v{{ diff.to.versionNo }}</th></tr>
             </thead>
             <tbody>
               <tr v-for="f in diff.fields" :key="f.field" :class="{ 'diff__row--chg': f.changed }">
@@ -606,10 +607,10 @@ onMounted(load)
     <div v-if="tagOpen" class="modal" role="dialog" aria-modal="true" @click.self="tagOpen = false">
       <div class="modal__card">
         <div class="modal__head">
-          <span class="modal__title">给 {{ picked.size }} 个附件打标签</span>
-          <button class="btn-text" type="button" @click="tagOpen = false">关闭</button>
+          <span class="modal__title">{{ tr('AttachmentPanel.4047e3', '给') }} {{ picked.size }} {{ tr('AttachmentPanel.4ce7e9', '个附件打标签') }}</span>
+          <button class="btn-text" type="button" @click="tagOpen = false">{{ tr('AttachmentPanel.6c14bd', '关闭') }}</button>
         </div>
-        <p v-if="tags.length === 0" class="hint">还没有标签，请先在「档案」页创建。</p>
+        <p v-if="tags.length === 0" class="hint">{{ tr('AttachmentPanel.116840', '还没有标签，请先在「档案」页创建。') }}</p>
         <div class="tagchips">
           <button
             v-for="t in tags"
@@ -637,29 +638,29 @@ onMounted(load)
     <div v-if="metaOpen" class="modal" role="dialog" aria-modal="true" @click.self="metaOpen = false">
       <div class="modal__card">
         <div class="modal__head">
-          <span class="modal__title">编辑摘要 · {{ metaAtt?.title }}</span>
-          <button class="btn-text" type="button" @click="metaOpen = false">关闭</button>
+          <span class="modal__title">{{ tr('AttachmentPanel.23aaa2', '编辑摘要 ·') }} {{ metaAtt?.title }}</span>
+          <button class="btn-text" type="button" @click="metaOpen = false">{{ tr('AttachmentPanel.6c14bd', '关闭') }}</button>
         </div>
         <label class="field">
-          <span class="field__label">摘要</span>
+          <span class="field__label">{{ tr('AttachmentPanel.46d4c1', '摘要') }}</span>
           <textarea
             v-model="metaSummary"
             class="field__input"
             rows="3"
-            placeholder="一句话描述附件内容（OCR 不可用时的降级录入）"
+            :placeholder="tr('AttachmentPanel.134a53', '一句话描述附件内容（OCR 不可用时的降级录入）')"
           ></textarea>
         </label>
         <label class="field">
-          <span class="field__label">关键词</span>
+          <span class="field__label">{{ tr('AttachmentPanel.cc1b21', '关键词') }}</span>
           <input
             v-model="metaKeywords"
             class="field__input"
             type="text"
-            placeholder="逗号分隔，随条目检索索引"
+            :placeholder="tr('AttachmentPanel.060fee', '逗号分隔，随条目检索索引')"
           />
         </label>
         <div class="cmp">
-          <button class="btn-ghost" type="button" :disabled="busy" @click="saveMeta">保存</button>
+          <button class="btn-ghost" type="button" :disabled="busy" @click="saveMeta">{{ tr('AttachmentPanel.fadf24', '保存') }}</button>
         </div>
       </div>
     </div>

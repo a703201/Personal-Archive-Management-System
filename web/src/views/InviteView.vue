@@ -14,6 +14,7 @@
  *      输错达到上限后邀请自动作废，次数由后端累计，本页只显示结果。
  */
 import { computed, onMounted, ref } from 'vue'
+import { t } from '../i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { api, ApiError, getToken } from '../api/client'
 
@@ -125,11 +126,11 @@ onMounted(() => {
   <div class="invite-page">
     <header class="invite-page__head">
       <span class="invite-page__brand">AMS</span>
-      <span class="invite-page__tag">家庭邀请</span>
+      <span class="invite-page__tag">{{ t('InviteView.4a0293', '家庭邀请') }}</span>
     </header>
 
     <main class="invite-card">
-      <p v-if="loading" class="invite-hint">加载中…</p>
+      <p v-if="loading" class="invite-hint">{{ t('InviteView.300ee3', '加载中…') }}</p>
       <p v-else-if="metaError" class="invite-error">{{ metaError }}</p>
 
       <!-- 已成功加入 -->
@@ -140,7 +141,7 @@ onMounted(() => {
         <p class="invite-done__group">{{ accepted.groupName }}</p>
         <p class="invite-done__desc">
           你的角色：{{ roleText }}
-          <template v-if="accepted.alreadyMember">（无需重复加入）</template>
+          <template v-if="accepted.alreadyMember">{{ t('InviteView.4ed3b8', '（无需重复加入）') }}</template>
         </p>
         <p class="invite-done__note">
           家庭成员只读：你能看到组内为你授权的档案条目，但不能编辑、导出或再分享。
@@ -152,7 +153,7 @@ onMounted(() => {
 
       <!-- 邀请失效 -->
       <div v-else-if="meta && !meta.valid" class="invite-dead">
-        <h1 class="invite-dead__title">邀请已失效</h1>
+        <h1 class="invite-dead__title">{{ t('InviteView.ec0fa2', '邀请已失效') }}</h1>
         <p class="invite-dead__desc">
           该邀请可能已过期、已被撤销、已被使用完毕，或因邀请码输错次数过多而自动作废。
           请让邀请人重新生成一条。
@@ -161,14 +162,14 @@ onMounted(() => {
 
       <!-- 有效邀请：先核对，再输码 -->
       <div v-else-if="meta" class="invite-body">
-        <h1 class="invite-title">邀请你加入家庭组</h1>
+        <h1 class="invite-title">{{ t('InviteView.92fa8c', '邀请你加入家庭组') }}</h1>
         <p class="invite-group">{{ meta.groupName }}</p>
-        <p v-if="meta.inviter" class="invite-from">邀请人：{{ meta.inviter }}</p>
+        <p v-if="meta.inviter" class="invite-from">{{ t('InviteView.33e92a', '邀请人：') }}{{ meta.inviter }}</p>
 
         <dl class="invite-kv">
-          <dt>有效期至</dt>
+          <dt>{{ t('InviteView.37eb47', '有效期至') }}</dt>
           <dd>{{ fmt(meta.expiresAt) }}</dd>
-          <dt>剩余可用</dt>
+          <dt>{{ t('InviteView.59faa1', '剩余可用') }}</dt>
           <dd :class="{ 'invite-kv__warn': lastChance }">
             {{ meta.remainingUses }} 次{{ lastChance ? '（仅剩最后一次）' : '' }}
           </dd>
@@ -178,11 +179,11 @@ onMounted(() => {
           <p class="invite-note">
             需要先登录或注册一个账号，再输入邀请码加入。登录后会自动回到本页。
           </p>
-          <button class="btn-primary" type="button" @click="goLogin">登录后加入</button>
+          <button class="btn-primary" type="button" @click="goLogin">{{ t('InviteView.5d87eb', '登录后加入') }}</button>
         </template>
 
         <template v-else>
-          <label class="invite-label" for="invite-code">输入邀请码</label>
+          <label class="invite-label" for="invite-code">{{ t('InviteView.016f41', '输入邀请码') }}</label>
           <input
             id="invite-code"
             :value="code"
@@ -192,7 +193,7 @@ onMounted(() => {
             autocapitalize="characters"
             spellcheck="false"
             maxlength="8"
-            placeholder="8 位字符"
+            :placeholder="t('InviteView.d4f36a', '8 位字符')"
             autofocus
             @input="onInput"
             @keyup.enter="accept"
@@ -208,7 +209,7 @@ onMounted(() => {
       </div>
     </main>
 
-    <p class="invite-page__foot">本页由 AMS 个人档案管理系统生成 · 加入后仅获得被授权的只读内容</p>
+    <p class="invite-page__foot">{{ t('InviteView.de61da', '本页由 AMS 个人档案管理系统生成 · 加入后仅获得被授权的只读内容') }}</p>
   </div>
 </template>
 

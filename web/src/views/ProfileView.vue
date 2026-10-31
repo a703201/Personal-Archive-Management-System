@@ -16,6 +16,7 @@
  *   ② 改口令成功后后端会吊销全部会话（含当前），必须清 token 并跳登录。
  */
 import { ref, computed, onMounted } from 'vue'
+import { t } from '../i18n'
 import { useRouter } from 'vue-router'
 import { api, clearToken } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
@@ -376,9 +377,9 @@ async function changePassword(): Promise<void> {
 
 <template>
   <section>
-    <h1 class="page-title">个人主页</h1>
+    <h1 class="page-title">{{ t('ProfileView.d04c1f', '个人主页') }}</h1>
 
-    <p v-if="loading" class="hint">加载中…</p>
+    <p v-if="loading" class="hint">{{ t('ProfileView.300ee3', '加载中…') }}</p>
     <p v-else-if="error" class="hint hint--error">{{ error }}</p>
 
     <template v-else-if="me">
@@ -389,25 +390,25 @@ async function changePassword(): Promise<void> {
           <div class="profile__sub">@{{ me.username }} · ID {{ me.id }}</div>
         </div>
         <div class="profile__actions">
-          <button class="btn-ghost" type="button" @click="openEdit">编辑资料</button>
-          <button class="btn-text" type="button" @click="openPwd">修改口令</button>
+          <button class="btn-ghost" type="button" @click="openEdit">{{ t('ProfileView.7719bd', '编辑资料') }}</button>
+          <button class="btn-text" type="button" @click="openPwd">{{ t('ProfileView.e02661', '修改口令') }}</button>
         </div>
       </div>
 
-      <h2 class="section-title">联系方式</h2>
+      <h2 class="section-title">{{ t('ProfileView.60beed', '联系方式') }}</h2>
       <div class="card">
         <dl class="kv">
-          <dt>邮箱</dt>
+          <dt>{{ t('ProfileView.9ed627', '邮箱') }}</dt>
           <dd>{{ me.email || '—' }}</dd>
-          <dt>手机号</dt>
+          <dt>{{ t('ProfileView.5a9cc5', '手机号') }}</dt>
           <dd>{{ me.phone || '—' }}</dd>
-          <dt>账号状态</dt>
+          <dt>{{ t('ProfileView.67104f', '账号状态') }}</dt>
           <dd>{{ Number(me.status) === 0 ? '正常' : '已停用' }}</dd>
         </dl>
-        <p class="hint">联系方式默认掩码展示，完整值需在各自业务场景中按权限查看。</p>
+        <p class="hint">{{ t('ProfileView.24a0f1', '联系方式默认掩码展示，完整值需在各自业务场景中按权限查看。') }}</p>
       </div>
 
-      <h2 class="section-title">安全设置</h2>
+      <h2 class="section-title">{{ t('ProfileView.8bf435', '安全设置') }}</h2>
       <div class="card">
         <div class="sec-row">
           <div>
@@ -450,7 +451,7 @@ async function changePassword(): Promise<void> {
             ① 在验证器 App（如 Microsoft Authenticator / Google Authenticator）中手动添加密钥：
           </p>
           <code class="sec-setup__secret">{{ totpSecret }}</code>
-          <p class="hint">② 录入后输入 App 显示的 6 位动态码完成绑定：</p>
+          <p class="hint">{{ t('ProfileView.05a4a2', '② 录入后输入 App 显示的 6 位动态码完成绑定：') }}</p>
           <div class="sec-setup__row">
             <input
               v-model="totpCode"
@@ -484,12 +485,12 @@ async function changePassword(): Promise<void> {
         </button>
       </h2>
       <div class="card">
-        <p v-if="sessions.length === 0" class="hint">没有活跃会话。</p>
+        <p v-if="sessions.length === 0" class="hint">{{ t('ProfileView.564e8b', '没有活跃会话。') }}</p>
         <div v-for="s in sessions" :key="s.sid" class="sess">
           <div class="sess__main">
             <div class="sess__title">
               {{ s.userAgent || '未知设备' }}
-              <span v-if="s.current === true || s.current === 'true'" class="sess__tag">当前</span>
+              <span v-if="s.current === true || s.current === 'true'" class="sess__tag">{{ t('ProfileView.25e74d', '当前') }}</span>
             </div>
             <div class="sess__sub">{{ s.ip }} · 最近活动 {{ fmtTime(s.lastActiveAt) }}</div>
           </div>
@@ -505,12 +506,12 @@ async function changePassword(): Promise<void> {
         </div>
       </div>
 
-      <h2 class="section-title">通知偏好</h2>
+      <h2 class="section-title">{{ t('ProfileView.c20439', '通知偏好') }}</h2>
       <div class="card notify">
         <div class="sec-row">
           <div>
-            <div class="sec-row__title">免打扰（静默时段）</div>
-            <div class="sec-row__sub">在设定的时间段内不推送通知（按类别静默）</div>
+            <div class="sec-row__title">{{ t('ProfileView.312264', '免打扰（静默时段）') }}</div>
+            <div class="sec-row__sub">{{ t('ProfileView.547511', '在设定的时间段内不推送通知（按类别静默）') }}</div>
           </div>
           <label class="switch">
             <input v-model="notifyPrefs.dndEnabled" type="checkbox" />
@@ -519,42 +520,42 @@ async function changePassword(): Promise<void> {
         </div>
         <div v-if="notifyPrefs.dndEnabled" class="notify__times">
           <label class="field field--inline">
-            <span class="field__label">开始</span>
+            <span class="field__label">{{ t('ProfileView.79cc87', '开始') }}</span>
             <input v-model="notifyPrefs.dndStart" class="field-control" type="time" />
           </label>
           <label class="field field--inline">
-            <span class="field__label">结束</span>
+            <span class="field__label">{{ t('ProfileView.76b988', '结束') }}</span>
             <input v-model="notifyPrefs.dndEnd" class="field-control" type="time" />
           </label>
         </div>
 
         <div class="sec-row">
           <div>
-            <div class="sec-row__title">接收渠道</div>
-            <div class="sec-row__sub">选择希望接收通知的方式</div>
+            <div class="sec-row__title">{{ t('ProfileView.9c8134', '接收渠道') }}</div>
+            <div class="sec-row__sub">{{ t('ProfileView.db5c3b', '选择希望接收通知的方式') }}</div>
           </div>
         </div>
         <div class="notify__channels">
           <label class="chk">
             <input v-model="notifyPrefs.channelInApp" type="checkbox" />
-            <span>站内信</span>
+            <span>{{ t('ProfileView.ab2bf5', '站内信') }}</span>
           </label>
           <label class="chk">
             <input v-model="notifyPrefs.channelEmail" type="checkbox" />
-            <span>邮件</span>
+            <span>{{ t('ProfileView.1c8e46', '邮件') }}</span>
           </label>
         </div>
 
         <div class="sec-row">
           <div>
-            <div class="sec-row__title">推送频率</div>
-            <div class="sec-row__sub">合并通知以降低打扰</div>
+            <div class="sec-row__title">{{ t('ProfileView.af094e', '推送频率') }}</div>
+            <div class="sec-row__sub">{{ t('ProfileView.c010ca', '合并通知以降低打扰') }}</div>
           </div>
           <select v-model="notifyPrefs.freq" class="field-control notify__freq">
-            <option value="realtime">实时</option>
-            <option value="digest_daily">每日汇总</option>
-            <option value="digest_weekly">每周汇总</option>
-            <option value="off">关闭</option>
+            <option value="realtime">{{ t('ProfileView.bd1ab1', '实时') }}</option>
+            <option value="digest_daily">{{ t('ProfileView.e2ddbc', '每日汇总') }}</option>
+            <option value="digest_weekly">{{ t('ProfileView.5ee4d3', '每周汇总') }}</option>
+            <option value="off">{{ t('ProfileView.6c14bd', '关闭') }}</option>
           </select>
         </div>
 
@@ -565,7 +566,7 @@ async function changePassword(): Promise<void> {
         </div>
       </div>
 
-      <h2 class="section-title">权限点（{{ me.perms.length }}）</h2>
+      <h2 class="section-title">{{ t('ProfileView.51cb2d', '权限点（') }}{{ me.perms.length }}{{ t('ProfileView.fa354c', '）') }}</h2>
       <div class="card">
         <div v-for="(list, domain) in groupedPerms" :key="domain" class="perm-group">
           <div class="perm-group__domain">{{ domain }}</div>
@@ -577,30 +578,30 @@ async function changePassword(): Promise<void> {
     </template>
 
     <!-- 编辑资料 -->
-    <AppSheet v-model="showEdit" title="编辑资料" size="sm" :dismissible="!savingProfile">
+    <AppSheet v-model="showEdit" :title="t('ProfileView.7719bd', '编辑资料')" size="sm" :dismissible="!savingProfile">
       <div class="form">
         <label class="field">
-          <span class="field__label">昵称</span>
+          <span class="field__label">{{ t('ProfileView.25124e', '昵称') }}</span>
           <input v-model="editForm.nickname" class="field-control" maxlength="32" />
         </label>
         <label class="field">
-          <span class="field__label">邮箱</span>
+          <span class="field__label">{{ t('ProfileView.9ed627', '邮箱') }}</span>
           <input
             v-model="editForm.email"
             class="field-control"
             type="email"
             autocomplete="email"
-            :placeholder="me?.email || '未设置'"
+            ::placeholder="t('ProfileView.9dd0bc', 'me?.email || \'未设置\'')"
           />
         </label>
         <label class="field">
-          <span class="field__label">手机号</span>
+          <span class="field__label">{{ t('ProfileView.5a9cc5', '手机号') }}</span>
           <input
             v-model="editForm.phone"
             class="field-control"
             type="tel"
             autocomplete="tel"
-            :placeholder="me?.phone || '未设置'"
+            ::placeholder="me?.phone || t('ProfileView.72a414', '未设置')"
           />
         </label>
       </div>
@@ -618,10 +619,10 @@ async function changePassword(): Promise<void> {
     </AppSheet>
 
     <!-- 修改口令 -->
-    <AppSheet v-model="showPwd" title="修改口令" size="sm" :dismissible="!savingPwd">
+    <AppSheet v-model="showPwd" :title="t('ProfileView.e02661', '修改口令')" size="sm" :dismissible="!savingPwd">
       <div class="form">
         <label class="field">
-          <span class="field__label">原口令</span>
+          <span class="field__label">{{ t('ProfileView.e48fed', '原口令') }}</span>
           <input
             v-model="pwdForm.old"
             class="field-control"
@@ -630,7 +631,7 @@ async function changePassword(): Promise<void> {
           />
         </label>
         <label class="field">
-          <span class="field__label">新口令</span>
+          <span class="field__label">{{ t('ProfileView.2a1f04', '新口令') }}</span>
           <input
             v-model="pwdForm.next"
             class="field-control"
@@ -639,7 +640,7 @@ async function changePassword(): Promise<void> {
           />
         </label>
         <label class="field">
-          <span class="field__label">确认新口令</span>
+          <span class="field__label">{{ t('ProfileView.2109a9', '确认新口令') }}</span>
           <input
             v-model="pwdForm.confirm"
             class="field-control"
@@ -650,13 +651,13 @@ async function changePassword(): Promise<void> {
       </div>
 
       <ul class="policy">
-        <li :class="{ done: pwdPolicy.length }">至少 12 位</li>
-        <li :class="{ done: pwdPolicy.classes }">含至少 3 类字符（大小写 / 数字 / 符号）</li>
-        <li :class="{ done: pwdPolicy.noRepeat }">不含连续重复字符</li>
-        <li :class="{ done: pwdPolicy.different }">与原口令不同</li>
-        <li :class="{ done: pwdPolicy.match }">两次输入一致</li>
+        <li :class="{ done: pwdPolicy.length }">{{ t('ProfileView.f8249b', '至少 12 位') }}</li>
+        <li :class="{ done: pwdPolicy.classes }">{{ t('ProfileView.8b1883', '含至少 3 类字符（大小写 / 数字 / 符号）') }}</li>
+        <li :class="{ done: pwdPolicy.noRepeat }">{{ t('ProfileView.197776', '不含连续重复字符') }}</li>
+        <li :class="{ done: pwdPolicy.different }">{{ t('ProfileView.eafb20', '与原口令不同') }}</li>
+        <li :class="{ done: pwdPolicy.match }">{{ t('ProfileView.e6778c', '两次输入一致') }}</li>
       </ul>
-      <p class="hint">修改成功后全部会话将失效，需要重新登录；两次修改间隔不得少于 24 小时。</p>
+      <p class="hint">{{ t('ProfileView.977720', '修改成功后全部会话将失效，需要重新登录；两次修改间隔不得少于 24 小时。') }}</p>
 
       <div class="sheet-actions">
         <button class="btn-ghost" type="button" :disabled="savingPwd" @click="showPwd = false">

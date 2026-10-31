@@ -4,13 +4,16 @@
  *
  * Apple 质感要点（见 apple-design 技能 + docs §9.8）：
  *   - 材质：半透明玻璃层（backdrop-filter 模糊）+ 更强阴影，承载层级
- *   - 圆角：G3 连续曲线（corner-style:continuous + --g3-lg）
+ *   - 圆角：统一 G3 scale（--g3-lg）
+ *     注：Web 无标准 corner-style 属性，圆角实为圆弧（G1 连续）；
+ *     真正的连续曲率需 SVG mask 等方案，属「美观 vs 性能」权衡，暂不全局启用。
  *   - 进场：从 0.96 缩放 + 淡入（临界阻尼、无过冲，等效 damping 1.0 / response 0.25）
  *   - 遮罩：--material-scrim，背后内容后退变暗
  *   - 焦点：打开时焦点移入、Tab 循环、Esc 关闭、关闭后焦点还原
  *   - 无障碍：role="dialog" aria-modal，body 滚动锁定
  */
 import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { t } from '../i18n'
 
 const props = withDefaults(
   defineProps<{
@@ -115,7 +118,7 @@ onBeforeUnmount(() => {
               v-if="dismissible"
               class="sheet-close"
               type="button"
-              aria-label="关闭"
+              :aria-label="t('AppSheet.6c14bd', '关闭')"
               @click="close"
             >
               ✕
@@ -169,7 +172,6 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-pop);
   overflow: hidden;
   color: var(--text-primary);
-  corner-style: continuous;
 }
 .sheet-root--sm .sheet-panel { max-width: 380px; }
 .sheet-root--lg .sheet-panel { max-width: 760px; }

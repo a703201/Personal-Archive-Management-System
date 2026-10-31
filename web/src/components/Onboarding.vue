@@ -12,6 +12,7 @@
  *    链接坏了。公开页的访客不是「本系统的新用户」，不该给他看产品介绍。
  */
 import { ref, computed } from 'vue'
+import { t } from '../i18n'
 import { useRoute } from 'vue-router'
 import { getToken } from '../api/client'
 
@@ -86,7 +87,7 @@ function finish(): void {
       </div>
 
       <div class="onboard__actions">
-        <button class="btn-ghost" type="button" @click="finish">跳过</button>
+        <button class="btn-ghost" type="button" @click="finish">{{ t('Onboarding.31a985', '跳过') }}</button>
         <button class="btn-primary" type="button" @click="next">
           {{ isLast ? '开始使用' : '下一步' }}
         </button>

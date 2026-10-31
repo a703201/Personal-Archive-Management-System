@@ -17,6 +17,7 @@
  *   · 套用上限 50 条（后端硬约束），超过应走 CSV 导入（那边有预检与错误报告）。
  */
 import { computed, onMounted, ref } from 'vue'
+import { t as tr } from '../i18n'
 import { api } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
 import {
@@ -276,15 +277,15 @@ onMounted(load)
   <section>
     <div class="page-head">
       <div>
-        <h1 class="page-title">条目模板</h1>
+        <h1 class="page-title">{{ tr('TemplateView.dad23e', '条目模板') }}</h1>
         <p class="page-desc">
           把常用档案的骨架存成模板，套用时一次生成多条，省去重复填写。
         </p>
       </div>
-      <button class="btn-primary" type="button" @click="openCreate">+ 新建模板</button>
+      <button class="btn-primary" type="button" @click="openCreate">{{ tr('TemplateView.1eaf5c', '+ 新建模板') }}</button>
     </div>
 
-    <p v-if="loading" class="hint">加载中…</p>
+    <p v-if="loading" class="hint">{{ tr('TemplateView.300ee3', '加载中…') }}</p>
     <p v-else-if="loadError" class="hint hint--error">{{ loadError }}</p>
     <p v-else-if="templates.length === 0" class="hint">
       还没有模板。点「新建模板」把常建的档案存下来（如「身份证」「职业资格证」）。
@@ -306,14 +307,14 @@ onMounted(load)
             <span v-if="Number(t.expiresOffsetDays) > 0">
               有效期 +{{ t.expiresOffsetDays }} 天
             </span>
-            <span v-if="t.issuer">签发：{{ t.issuer }}</span>
-            <span>更新 {{ formatTime(t.updatedAt) }}</span>
+            <span v-if="t.issuer">{{ tr('TemplateView.89de45', '签发：') }}{{ t.issuer }}</span>
+            <span>{{ tr('TemplateView.d9db02', '更新') }} {{ formatTime(t.updatedAt) }}</span>
           </div>
         </div>
         <div class="tpl-item__actions">
-          <button class="btn-text" type="button" @click="openApply(t)">套用</button>
+          <button class="btn-text" type="button" @click="openApply(t)">{{ tr('TemplateView.ed8305', '套用') }}</button>
           <button class="btn-text" type="button" @click="openEdit(t)">编辑</button>
-          <button class="btn-text danger" type="button" @click="askDelete(t)">删除</button>
+          <button class="btn-text danger" type="button" @click="askDelete(t)">{{ tr('TemplateView.3755f5', '删除') }}</button>
         </div>
       </li>
     </ul>
@@ -321,36 +322,36 @@ onMounted(load)
     <!-- 新建 / 编辑 -->
     <AppSheet
       v-model="showEdit"
-      :title="isEditing ? '编辑模板' : '新建模板'"
+      ::title="isEditing ? tr('TemplateView.bbc586.edit', '编辑模板') : tr('TemplateView.bbc586.new', '新建模板')"
       size="md"
       :dismissible="!saving"
     >
       <div class="form-grid">
         <label class="field field--full">
-          <span class="field__label">模板名称 <em>*</em></span>
+          <span class="field__label">{{ tr('TemplateView.bbc511', '模板名称') }} <em>*</em></span>
           <input
             v-model="form.name"
             class="field-control"
             type="text"
             maxlength="100"
-            placeholder="如 身份证（本人）"
+            :placeholder="tr('TemplateView.635d03', '如 身份证（本人）')"
           />
         </label>
 
         <label class="field field--full">
-          <span class="field__label">标题模板 <em>*</em></span>
+          <span class="field__label">{{ tr('TemplateView.016b05', '标题模板') }} <em>*</em></span>
           <input
             v-model="form.title"
             class="field-control"
             type="text"
             maxlength="200"
-            placeholder="如 身份证-{n}，{n} 会替换为序号"
+            :placeholder="tr('TemplateView.a339e5', '如 身份证-{n}，{n} 会替换为序号')"
           />
-          <span v-if="titlePreview" class="field__hint">预览：{{ titlePreview }}</span>
+          <span v-if="titlePreview" class="field__hint">{{ tr('TemplateView.ad5aba', '预览：') }}{{ titlePreview }}</span>
         </label>
 
         <label class="field">
-          <span class="field__label">分类</span>
+          <span class="field__label">{{ tr('TemplateView.435c52', '分类') }}</span>
           <select v-model.number="form.category" class="field-control" @change="onCategoryChange">
             <option v-for="c in categoryOptions" :key="c.code" :value="c.code">
               {{ c.name }}
@@ -358,7 +359,7 @@ onMounted(load)
           </select>
         </label>
         <label class="field">
-          <span class="field__label">敏感度</span>
+          <span class="field__label">{{ tr('TemplateView.c8165b', '敏感度') }}</span>
           <select v-model.number="form.sensitivity" class="field-control">
             <option v-for="s in sensitivityOptions" :key="s.value" :value="s.value">
               {{ s.label }}
@@ -367,13 +368,13 @@ onMounted(load)
         </label>
 
         <label class="field">
-          <span class="field__label">初始状态</span>
+          <span class="field__label">{{ tr('TemplateView.a6bc04', '初始状态') }}</span>
           <select v-model.number="form.status" class="field-control">
             <option v-for="s in statusOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
           </select>
         </label>
         <label class="field">
-          <span class="field__label">有效期偏移（天）</span>
+          <span class="field__label">{{ tr('TemplateView.236128', '有效期偏移（天）') }}</span>
           <input
             v-model.number="form.expiresOffsetDays"
             class="field-control"
@@ -381,21 +382,21 @@ onMounted(load)
             min="0"
             max="3650"
           />
-          <span class="field__hint">0 表示不设有效期；否则按套用当天 + N 天计算</span>
+          <span class="field__hint">{{ tr('TemplateView.91745b', '0 表示不设有效期；否则按套用当天 + N 天计算') }}</span>
         </label>
 
         <label class="field field--full">
-          <span class="field__label">签发机构</span>
-          <input v-model="form.issuer" class="field-control" type="text" placeholder="选填" />
+          <span class="field__label">{{ tr('TemplateView.8eb731', '签发机构') }}</span>
+          <input v-model="form.issuer" class="field-control" type="text" :placeholder="tr('TemplateView.924b8c', '选填')" />
         </label>
 
         <label class="field field--full">
-          <span class="field__label">备注</span>
-          <textarea v-model="form.remark" class="field-control" rows="2" placeholder="选填" />
+          <span class="field__label">{{ tr('TemplateView.e03614', '备注') }}</span>
+          <textarea v-model="form.remark" class="field-control" rows="2" :placeholder="tr('TemplateView.924b8c', '选填')" />
         </label>
 
         <label class="field field--full">
-          <span class="field__label">扩展字段默认值（JSON 对象）</span>
+          <span class="field__label">{{ tr('TemplateView.dd1b8e', '扩展字段默认值（JSON 对象）') }}</span>
           <textarea
             v-model="form.extraText"
             class="field-control field-control--mono"
@@ -403,7 +404,7 @@ onMounted(load)
             spellcheck="false"
             placeholder='{"发证机关": "市公安局"}'
           />
-          <span class="field__hint">套用时会原样写入每个新条目的扩展字段</span>
+          <span class="field__hint">{{ tr('TemplateView.63ac22', '套用时会原样写入每个新条目的扩展字段') }}</span>
         </label>
       </div>
 
@@ -420,7 +421,7 @@ onMounted(load)
     <!-- 套用 -->
     <AppSheet
       v-model="showApply"
-      :title="`套用模板 · ${applyTarget?.name ?? ''}`"
+      ::title="tr('TemplateView.f8231a', '`套用模板 · ${applyTarget?.name ?? \'\'}`')"
       size="sm"
       :dismissible="!applying"
     >
@@ -429,13 +430,13 @@ onMounted(load)
       </div>
       <div class="form-grid">
         <label class="field field--full">
-          <span class="field__label">目标主体 <em>*</em></span>
+          <span class="field__label">{{ tr('TemplateView.3a138d', '目标主体') }} <em>*</em></span>
           <select v-model="applyForm.subjectId" class="field-control">
             <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
           </select>
         </label>
         <label class="field field--full">
-          <span class="field__label">生成条数（1–50）</span>
+          <span class="field__label">{{ tr('TemplateView.918e10', '生成条数（1–50）') }}</span>
           <input
             v-model.number="applyForm.count"
             class="field-control"
@@ -464,7 +465,7 @@ onMounted(load)
     </AppSheet>
 
     <!-- 删除 -->
-    <AppSheet v-model="showDelete" title="确认删除模板" size="sm" :dismissible="!deleting">
+    <AppSheet v-model="showDelete" :title="tr('TemplateView.be7d83', '确认删除模板')" size="sm" :dismissible="!deleting">
       <p v-if="deleteTarget" class="hint">
         确定删除模板 <b>{{ deleteTarget.name }}</b> 吗？已按该模板生成的档案不受影响。
       </p>

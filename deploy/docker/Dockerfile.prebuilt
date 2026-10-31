@@ -1,0 +1,71 @@
+# ============================================================
+# AMS · 运行镜像（使用预编译的 Linux 产物）
+#
+# 与同目录 Dockerfile 的区别：
+#   Dockerfile          —— 多阶段，在容器内跑 build-linux.sh（需 Linux 仓颉 SDK）
+#   Dockerfile.prebuilt —— 不再编译，直接把宿主已产出的
+#                          build/linux/（ams-server + 仓颉运行时 .so）
+#                          与 web/dist/ 装入运行镜像
+#
+# 为什么要这条路径：
+#   仓颉不支持交叉编译，Windows 开发机必须先借工具链镜像编出 Linux
+#   二进制（deploy/scripts/build-linux-docker.sh）；把「编译」与
+#   「打包」拆开后，打镜像只要几秒，也便于在 CI 里缓存编译产物。
+#
+# 构建前置：
+#   bash deploy/scripts/build-linux-docker.sh     # 产出 build/linux/
+#
+# 构建镜像：
+#   docker build -t ams:0.1.0 -f deploy/docker/Dockerfile.prebuilt .
+#
+# 说明：web/dist 为平台无关的静态产物，直接复用宿主的 `npm run build`
+#       结果，容器内不再装 Node（省 ~200MB 与一次网络安装）。
+# ============================================================
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 运行期依赖：
+#   curl        —— HEALTHCHECK 探针（原 Dockerfile 漏装，导致健康检查恒为 unhealthy）
+#   libstdc++6  —— 仓颉运行时依赖
+#   tzdata      —— 审计时间戳需要正确时区
+# 换中科大源：直连 archive.ubuntu.com 极慢（实测 Docker Hub 拉取都要数分钟）
+RUN set -eux; \
+    sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.ustc.edu.cn/ubuntu|g; \
+            s|http://security.ubuntu.com/ubuntu|http://mirrors.ustc.edu.cn/ubuntu|g' \
+        /etc/apt/sources.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl libstdc++6 libgcc-s1 tzdata; \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 二进制与仓颉运行时 / stdx 动态库必须同目录（或进 LD_LIBRARY_PATH），
+# 漏发会报 `error while loading shared libraries`。
+COPY build/linux/ /app/bin/
+
+# 前端 SPA（单进程同时提供 /api/* 与静态资源）
+COPY web/dist/ /app/web/
+
+# 配置模板（不含密钥）
+COPY deploy/config/ /app/config
+COPY LICENSE /app/LICENSE
+COPY README.md /app/README.md
+
+# 运行期默认值（生产必须覆盖 AMS_TOKEN_SECRET / AMS_KEK / AMS_DB_PASSWORD）
+ENV AMS_HTTP_HOST=0.0.0.0 \
+    AMS_HTTP_PORT=8080 \
+    AMS_DB_HOST=db \
+    AMS_DB_PORT=5432 \
+    AMS_DB_NAME=ams \
+    AMS_DB_USER=gaussdb \
+    AMS_WEB_DIR=/app/web \
+    LD_LIBRARY_PATH=/app/bin
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -fSs http://127.0.0.1:8080/api/health || exit 1
+
+CMD ["/app/bin/ams-server"]

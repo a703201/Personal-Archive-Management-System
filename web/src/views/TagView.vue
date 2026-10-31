@@ -18,6 +18,7 @@
  *   白屏是最难排查的一类缺陷，多一层判断几乎零成本。
  */
 import { computed, onMounted, ref } from 'vue'
+import { t as tr } from '../i18n'
 import { api } from '../api/client'
 import { useToast } from '../composables/useToast'
 
@@ -253,7 +254,7 @@ async function confirmMerge(t: TagNode): Promise<void> {
   <section>
     <div class="page-head">
       <div>
-        <h1 class="page-title">标签管理</h1>
+        <h1 class="page-title">{{ tr('TagView.4e02a9', '标签管理') }}</h1>
         <p class="page-sub">
           支持父子层级（最多 {{ maxDepth }} 层）。移动时会拒绝形成环的层级，深度超限也会被拦下。
         </p>
@@ -262,47 +263,47 @@ async function confirmMerge(t: TagNode): Promise<void> {
 
     <!-- 统计（FR-TAG-004） -->
     <div v-if="stats" class="card block">
-      <h2 class="block__title">使用统计</h2>
+      <h2 class="block__title">{{ tr('TagView.65a834', '使用统计') }}</h2>
       <div class="stats">
         <div class="stat">
           <span class="stat__n">{{ stats.total }}</span>
-          <span class="stat__k">标签总数</span>
+          <span class="stat__k">{{ tr('TagView.745416', '标签总数') }}</span>
         </div>
         <div class="stat stat--ok">
           <span class="stat__n">{{ stats.used }}</span>
-          <span class="stat__k">已使用</span>
+          <span class="stat__k">{{ tr('TagView.004f7f', '已使用') }}</span>
         </div>
         <div class="stat stat--muted">
           <span class="stat__n">{{ stats.unused }}</span>
-          <span class="stat__k">未使用</span>
+          <span class="stat__k">{{ tr('TagView.13cec8', '未使用') }}</span>
         </div>
         <div class="stat">
           <span class="stat__n">{{ stats.totalUsage }}</span>
-          <span class="stat__k">累计打标次数</span>
+          <span class="stat__k">{{ tr('TagView.5352e6', '累计打标次数') }}</span>
         </div>
       </div>
-      <p class="hint">最近使用：{{ fmtTime(stats.lastUsedAt) }}；未使用的标签可直接清理。</p>
+      <p class="hint">{{ tr('TagView.3de4e1', '最近使用：') }}{{ fmtTime(stats.lastUsedAt) }}{{ tr('TagView.872da6', '；未使用的标签可直接清理。') }}</p>
     </div>
 
     <!-- 新建 -->
     <div class="card block">
-      <h2 class="block__title">新建标签</h2>
+      <h2 class="block__title">{{ tr('TagView.616054', '新建标签') }}</h2>
       <div class="form">
         <label class="field">
-          <span class="field__label">标签名</span>
-          <input v-model="newName" class="field-control" placeholder="如：学历 / 本科" />
+          <span class="field__label">{{ tr('TagView.8290b4', '标签名') }}</span>
+          <input v-model="newName" class="field-control" :placeholder="tr('TagView.1f2a83', '如：学历 / 本科')" />
         </label>
         <label class="field">
-          <span class="field__label">父标签（可选）</span>
+          <span class="field__label">{{ tr('TagView.9aa429', '父标签（可选）') }}</span>
           <select v-model="newParent" class="field-control">
-            <option value="">（顶层标签）</option>
+            <option value="">{{ tr('TagView.6b81b9', '（顶层标签）') }}</option>
             <option v-for="t in createParentOptions" :key="t.id" :value="t.id">
               {{ '　'.repeat(Math.max(0, t.depth - 1)) }}{{ t.name }}
             </option>
           </select>
         </label>
         <div class="actions">
-          <button class="btn-primary" :disabled="busy" @click="createTag">创建</button>
+          <button class="btn-primary" :disabled="busy" @click="createTag">{{ tr('TagView.fcbd09', '创建') }}</button>
         </div>
       </div>
     </div>
@@ -310,18 +311,18 @@ async function confirmMerge(t: TagNode): Promise<void> {
     <!-- 层级树（FR-TAG-005） -->
     <div class="card block">
       <div class="block__head">
-        <h2 class="block__title">标签层级</h2>
-        <button class="btn-ghost" type="button" :disabled="busy" @click="load">刷新</button>
+        <h2 class="block__title">{{ tr('TagView.6eba89', '标签层级') }}</h2>
+        <button class="btn-ghost" type="button" :disabled="busy" @click="load">{{ tr('TagView.38108e', '刷新') }}</button>
       </div>
-      <div v-if="!tags.length" class="empty">还没有标签。</div>
+      <div v-if="!tags.length" class="empty">{{ tr('TagView.be5c53', '还没有标签。') }}</div>
       <table v-else class="tbl">
         <thead>
           <tr>
-            <th>标签</th>
-            <th>层级</th>
-            <th>使用次数</th>
-            <th>子标签</th>
-            <th>最近使用</th>
+            <th>{{ tr('TagView.ae0a7a', '标签') }}</th>
+            <th>{{ tr('TagView.dac36c', '层级') }}</th>
+            <th>{{ tr('TagView.2d7d18', '使用次数') }}</th>
+            <th>{{ tr('TagView.1017b3', '子标签') }}</th>
+            <th>{{ tr('TagView.71265f', '最近使用') }}</th>
             <th></th>
           </tr>
         </thead>
@@ -342,8 +343,8 @@ async function confirmMerge(t: TagNode): Promise<void> {
               <td class="mono">{{ fmtTime(t.lastUsedAt) }}</td>
               <td class="row-actions">
                 <template v-if="editingId === t.id">
-                  <button class="btn-text" type="button" :disabled="busy" @click="saveEdit">保存</button>
-                  <button class="btn-text" type="button" @click="editingId = ''">取消</button>
+                  <button class="btn-text" type="button" :disabled="busy" @click="saveEdit">{{ tr('TagView.fadf24', '保存') }}</button>
+                  <button class="btn-text" type="button" @click="editingId = ''">{{ tr('TagView.4d0b46', '取消') }}</button>
                 </template>
                 <template v-else-if="mergeId === t.id">
                   <select
@@ -351,7 +352,7 @@ async function confirmMerge(t: TagNode): Promise<void> {
                     v-model="mergeTarget"
                     :disabled="busy"
                   >
-                    <option value="">合并到…</option>
+                    <option value="">{{ tr('TagView.938cd0', '合并到…') }}</option>
                     <option v-for="p in mergeTargetOptions" :key="p.id" :value="p.id">
                       {{ '　'.repeat(Math.max(0, p.depth - 1)) }}{{ p.name }}
                     </option>
@@ -359,7 +360,7 @@ async function confirmMerge(t: TagNode): Promise<void> {
                   <button class="btn-text" type="button" :disabled="busy" @click="confirmMerge(t)">
                     确认合并
                   </button>
-                  <button class="btn-text" type="button" @click="cancelMerge">取消</button>
+                  <button class="btn-text" type="button" @click="cancelMerge">{{ tr('TagView.4d0b46', '取消') }}</button>
                 </template>
                 <template v-else>
                   <button class="btn-text" type="button" @click="startEdit(t)">改名</button>
@@ -376,7 +377,7 @@ async function confirmMerge(t: TagNode): Promise<void> {
                     :disabled="busy"
                     @change="moveTag(t, ($event.target as HTMLSelectElement).value)"
                   >
-                    <option value="">移到…</option>
+                    <option value="">{{ tr('TagView.7afafc', '移到…') }}</option>
                     <option
                       v-for="p in moveParentOptions.filter((x) => x.id !== t.id && x.parentId !== t.id)"
                       :key="p.id"

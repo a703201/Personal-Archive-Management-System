@@ -11,6 +11,7 @@
  * 页面刷新即丢弃（重新走验证码），减少泄漏面。
  */
 import { computed, onBeforeUnmount, ref } from 'vue'
+import { t } from '../i18n'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
 
@@ -169,7 +170,7 @@ function goLogin(): void {
   <div class="wrap">
     <div class="card">
       <div class="brand">AMS</div>
-      <h1 class="title">找回口令</h1>
+      <h1 class="title">{{ t('ForgotPasswordView.37cccf', '找回口令') }}</h1>
 
       <ol v-if="step < 4" class="stepper">
         <li
@@ -189,13 +190,13 @@ function goLogin(): void {
       <!-- ① 验证账号 -->
       <form v-if="step === 1" class="form" @submit.prevent="sendCode">
         <label class="field">
-          <span class="field__label">用户名 / 邮箱 / 手机号</span>
+          <span class="field__label">{{ t('ForgotPasswordView.0c9acc', '用户名 / 邮箱 / 手机号') }}</span>
           <input
             v-model="account"
             class="field__input"
             type="text"
             autocomplete="username"
-            placeholder="请输入注册时使用的账号"
+            :placeholder="t('ForgotPasswordView.51d3b6', '请输入注册时使用的账号')"
           />
         </label>
         <p class="hint-block">
@@ -211,7 +212,7 @@ function goLogin(): void {
       <form v-else-if="step === 2" class="form" @submit.prevent="verifyCode">
         <p v-if="notice" class="notice">{{ notice }}</p>
         <label class="field">
-          <span class="field__label">6 位验证码</span>
+          <span class="field__label">{{ t('ForgotPasswordView.83a302', '6 位验证码') }}</span>
           <input
             v-model="code"
             class="field__input field__input--code"
@@ -227,7 +228,7 @@ function goLogin(): void {
           {{ busy ? '校验中…' : '下一步' }}
         </button>
         <div class="row">
-          <button class="btn-text" type="button" @click="back">上一步</button>
+          <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
           <button
             class="btn-text"
             type="button"
@@ -243,48 +244,48 @@ function goLogin(): void {
       <form v-else-if="step === 3" class="form" @submit.prevent="submitReset">
         <p v-if="notice" class="notice">{{ notice }}</p>
         <label class="field">
-          <span class="field__label">新口令</span>
+          <span class="field__label">{{ t('ForgotPasswordView.2a1f04', '新口令') }}</span>
           <input
             v-model="password"
             class="field__input"
             type="password"
             autocomplete="new-password"
-            placeholder="至少 10 位，含大小写与数字"
+            :placeholder="t('ForgotPasswordView.005732', '至少 10 位，含大小写与数字')"
           />
           <span v-if="pwdHint" class="field__hint">{{ pwdHint }}</span>
         </label>
         <label class="field">
-          <span class="field__label">确认新口令</span>
+          <span class="field__label">{{ t('ForgotPasswordView.2109a9', '确认新口令') }}</span>
           <input
             v-model="password2"
             class="field__input"
             type="password"
             autocomplete="new-password"
-            placeholder="再次输入新口令"
+            :placeholder="t('ForgotPasswordView.9ac6d3', '再次输入新口令')"
           />
         </label>
-        <p class="hint-block">重置成功后，该账号在所有设备上的登录状态将立即失效，需重新登录。</p>
+        <p class="hint-block">{{ t('ForgotPasswordView.2d7650', '重置成功后，该账号在所有设备上的登录状态将立即失效，需重新登录。') }}</p>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <button class="submit" type="submit" :disabled="busy">
           {{ busy ? '提交中…' : '重置口令' }}
         </button>
         <div class="row">
-          <button class="btn-text" type="button" @click="back">上一步</button>
+          <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
         </div>
       </form>
 
       <!-- ④ 完成 -->
       <div v-else class="form">
         <div class="done" role="status">✓</div>
-        <p class="done-text">口令已重置</p>
+        <p class="done-text">{{ t('ForgotPasswordView.19d326', '口令已重置') }}</p>
         <p class="hint-block">
           为了安全，原会话已全部下线。请使用新口令重新登录；若账号已启用双因子，登录时还需输入动态码。
         </p>
-        <button class="submit" type="button" @click="goLogin">去登录</button>
+        <button class="submit" type="button" @click="goLogin">{{ t('ForgotPasswordView.6c01b0', '去登录') }}</button>
       </div>
 
       <p v-if="step < 4" class="switch">
-        想起来了？<RouterLink to="/login">返回登录</RouterLink>
+        想起来了？<RouterLink to="/login">{{ t('ForgotPasswordView.f2fe4e', '返回登录') }}</RouterLink>
       </p>
     </div>
   </div>

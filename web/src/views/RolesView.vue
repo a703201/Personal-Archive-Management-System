@@ -19,6 +19,7 @@
  * 不是「以他人身份浏览数据」的后门。
  */
 import { ref, onMounted, computed } from 'vue'
+import { t } from '../i18n'
 import { api } from '../api/client'
 import { categoryName } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
@@ -246,11 +247,11 @@ onMounted(load)
 <template>
   <section>
     <div class="page-head">
-      <h1 class="page-title">角色与权限</h1>
-      <button class="btn-primary" type="button" @click="showCreate = true">+ 新建角色</button>
+      <h1 class="page-title">{{ t('RolesView.0c1a09', '角色与权限') }}</h1>
+      <button class="btn-primary" type="button" @click="showCreate = true">{{ t('RolesView.e40632', '+ 新建角色') }}</button>
     </div>
 
-    <p v-if="loading" class="hint">加载中…</p>
+    <p v-if="loading" class="hint">{{ t('RolesView.300ee3', '加载中…') }}</p>
     <p v-else-if="error" class="hint hint--error">{{ error }}</p>
 
     <div v-else class="grid">
@@ -265,10 +266,10 @@ onMounted(load)
           </span>
         </div>
         <p class="role-desc">{{ r.description || '（无描述）' }}</p>
-        <div class="role-meta">数据级别上限：{{ r.max_data_level }}</div>
+        <div class="role-meta">{{ t('RolesView.bff342', '数据级别上限：') }}{{ r.max_data_level }}</div>
         <div class="role-actions">
-          <button class="btn-text" type="button" @click="openPerms(r)">权限</button>
-          <button class="btn-text" type="button" @click="openPreview(r)">预览</button>
+          <button class="btn-text" type="button" @click="openPerms(r)">{{ t('RolesView.560165', '权限') }}</button>
+          <button class="btn-text" type="button" @click="openPreview(r)">{{ t('RolesView.de61aa', '预览') }}</button>
           <button
             v-if="!isBuiltin(r)"
             class="btn-text danger"
@@ -282,27 +283,27 @@ onMounted(load)
     </div>
 
     <!-- 新建角色 -->
-    <AppSheet v-model="showCreate" title="新建角色" size="sm">
+    <AppSheet v-model="showCreate" :title="t('RolesView.7a0524', '新建角色')" size="sm">
       <div class="form-grid">
         <label class="field">
-          <span class="field__label">角色编码 <em>*</em></span>
-          <input v-model="newRole.code" class="field-control" type="text" placeholder="如 org_admin" />
+          <span class="field__label">{{ t('RolesView.c12ace', '角色编码') }} <em>*</em></span>
+          <input v-model="newRole.code" class="field-control" type="text" :placeholder="t('RolesView.e330ea', '如 org_admin')" />
         </label>
         <label class="field">
-          <span class="field__label">角色名称 <em>*</em></span>
-          <input v-model="newRole.name" class="field-control" type="text" placeholder="如 机构管理员" />
+          <span class="field__label">{{ t('RolesView.3aa1f0', '角色名称') }} <em>*</em></span>
+          <input v-model="newRole.name" class="field-control" type="text" :placeholder="t('RolesView.234da4', '如 机构管理员')" />
         </label>
         <label class="field field--full">
-          <span class="field__label">描述</span>
-          <input v-model="newRole.description" class="field-control" type="text" placeholder="选填" />
+          <span class="field__label">{{ t('RolesView.412f54', '描述') }}</span>
+          <input v-model="newRole.description" class="field-control" type="text" :placeholder="t('RolesView.924b8c', '选填')" />
         </label>
         <label class="field field--full">
-          <span class="field__label">数据级别上限</span>
+          <span class="field__label">{{ t('RolesView.4f7896', '数据级别上限') }}</span>
           <input v-model.number="newRole.maxDataLevel" class="field-control" type="number" min="1" max="5" />
         </label>
       </div>
       <template #footer>
-        <button class="btn-ghost" type="button" @click="showCreate = false">取消</button>
+        <button class="btn-ghost" type="button" @click="showCreate = false">{{ t('RolesView.4d0b46', '取消') }}</button>
         <button class="btn-primary" type="button" :disabled="creating" @click="createRole">
           {{ creating ? '创建中…' : '创建' }}
         </button>
@@ -310,12 +311,12 @@ onMounted(load)
     </AppSheet>
 
     <!-- 权限设置 -->
-    <AppSheet v-model="showPerms" :title="`权限设置 · ${permTarget?.name ?? ''}`" size="lg">
+    <AppSheet v-model="showPerms" ::title="`权限设置 · ${permTarget?.name ?? ''}`" size="lg">
       <div v-if="isBuiltin(permTarget)" class="notice">
         内置角色由系统管理，此处仅展示权限目录（只读）。如需调整，请新建自定义角色后分配。
       </div>
       <p v-else class="notice notice--warn">
-        保存将<b>整集覆盖</b>该角色的权限，请完整勾选所需权限后再保存。
+        保存将<b>{{ t('RolesView.d9ba52', '整集覆盖') }}</b>该角色的权限，请完整勾选所需权限后再保存。
       </p>
 
       <div class="perm-domains">
@@ -340,7 +341,7 @@ onMounted(load)
               <span class="perm-item__body">
                 <span class="perm-item__name">
                   {{ p.name }}
-                  <span v-if="p.is_sensitive" class="tag-sens">敏感</span>
+                  <span v-if="p.is_sensitive" class="tag-sens">{{ t('RolesView.e4d1f0', '敏感') }}</span>
                 </span>
                 <span class="u-sub">{{ p.code }} · {{ p.description || '—' }}</span>
               </span>
@@ -350,8 +351,8 @@ onMounted(load)
       </div>
 
       <template #footer>
-        <span class="sel-count">已选 {{ selected.size }} 项</span>
-        <button class="btn-ghost" type="button" @click="showPerms = false">取消</button>
+        <span class="sel-count">{{ t('RolesView.f24ddc', '已选') }} {{ selected.size }} {{ t('RolesView.64728a', '项') }}</span>
+        <button class="btn-ghost" type="button" @click="showPerms = false">{{ t('RolesView.4d0b46', '取消') }}</button>
         <button
           class="btn-primary"
           type="button"
@@ -366,23 +367,23 @@ onMounted(load)
     <!-- 权限预览（FR-ACL-013 · 方案 A） -->
     <AppSheet
       v-model="showPreview"
-      :title="`权限预览 · ${previewTarget?.name ?? ''}`"
+      ::title="`权限预览 · ${previewTarget?.name ?? ''}`"
       size="md"
     >
       <div class="notice">
-        预览只统计「能看见多少」，<b>不展示任何条目内容</b>。可见性口径与档案列表页一致：
+        预览只统计「能看见多少」，<b>{{ t('RolesView.7fe718', '不展示任何条目内容') }}</b>。可见性口径与档案列表页一致：
         可访问主体内 + 敏感度 ≤ 该角色的数据级别上限。
       </div>
 
       <div class="preview-user">
         <label class="field">
-          <span class="field__label">按某用户的真实主体计算（选填用户 ID）</span>
+          <span class="field__label">{{ t('RolesView.fc8a67', '按某用户的真实主体计算（选填用户 ID）') }}</span>
           <input
             v-model="previewUserId"
             class="field-control"
             type="text"
             inputmode="numeric"
-            placeholder="留空则按角色声明的范围统计"
+            :placeholder="t('RolesView.a7caa7', '留空则按角色声明的范围统计')"
           />
         </label>
         <button class="btn-ghost" type="button" :disabled="previewLoading" @click="loadPreview">
@@ -390,42 +391,42 @@ onMounted(load)
         </button>
       </div>
 
-      <p v-if="previewLoading" class="hint">计算中…</p>
+      <p v-if="previewLoading" class="hint">{{ t('RolesView.701173', '计算中…') }}</p>
       <p v-else-if="previewError" class="hint hint--error">{{ previewError }}</p>
 
       <div v-else-if="previewData" class="preview">
         <div class="preview-stats">
           <div class="stat">
             <span class="stat__num">{{ previewData.visibleItemCount }}</span>
-            <span class="stat__label">可见条目</span>
+            <span class="stat__label">{{ t('RolesView.f1bd1d', '可见条目') }}</span>
           </div>
           <div class="stat">
             <span class="stat__num">{{ previewData.subjectCount }}</span>
-            <span class="stat__label">覆盖主体</span>
+            <span class="stat__label">{{ t('RolesView.944f85', '覆盖主体') }}</span>
           </div>
           <div class="stat">
             <span class="stat__num">{{ previewData.userCount }}</span>
-            <span class="stat__label">拥有该角色的用户</span>
+            <span class="stat__label">{{ t('RolesView.432f86', '拥有该角色的用户') }}</span>
           </div>
         </div>
 
         <dl class="kv">
-          <dt>主体范围</dt>
+          <dt>{{ t('RolesView.584428', '主体范围') }}</dt>
           <dd>{{ scopeText(previewData) }}</dd>
-          <dt>数据级别上限</dt>
+          <dt>{{ t('RolesView.4f7896', '数据级别上限') }}</dt>
           <dd>{{ previewData.fields.maxDataLevel }}</dd>
-          <dt>可见敏感度</dt>
+          <dt>{{ t('RolesView.087d90', '可见敏感度') }}</dt>
           <dd>{{ previewData.fields.visibleLevels.join(' / ') || '—' }}</dd>
-          <dt>掩码敏感度</dt>
+          <dt>{{ t('RolesView.79255c', '掩码敏感度') }}</dt>
           <dd>
             {{ previewData.fields.maskedLevels.join(' / ') || '无（该角色可见全部级别）' }}
           </dd>
-          <dt>权限点数</dt>
+          <dt>{{ t('RolesView.b298af', '权限点数') }}</dt>
           <dd>{{ previewData.perms.length }} 项</dd>
         </dl>
 
-        <h3 class="form__section">可见条目按分类分布</h3>
-        <p v-if="previewCategories.length === 0" class="hint">该范围内没有可见条目。</p>
+        <h3 class="form__section">{{ t('RolesView.6c3aef', '可见条目按分类分布') }}</h3>
+        <p v-if="previewCategories.length === 0" class="hint">{{ t('RolesView.85d965', '该范围内没有可见条目。') }}</p>
         <ul v-else class="cat-list">
           <li v-for="c in previewCategories" :key="c.category" class="cat-row">
             <span class="cat-row__name">{{ categoryName(c.category) }}</span>
@@ -446,17 +447,17 @@ onMounted(load)
       </div>
 
       <template #footer>
-        <button class="btn-ghost" type="button" @click="showPreview = false">关闭</button>
+        <button class="btn-ghost" type="button" @click="showPreview = false">{{ t('RolesView.6c14bd', '关闭') }}</button>
       </template>
     </AppSheet>
 
     <!-- 删除确认 -->
-    <AppSheet v-model="showDelete" title="确认删除" size="sm" :dismissible="!deleting">
+    <AppSheet v-model="showDelete" :title="t('RolesView.3c06ab', '确认删除')" size="sm" :dismissible="!deleting">
       <p class="hint" v-if="deleteTarget">
         确定删除自定义角色 <b>{{ deleteTarget.name }}</b>（{{ deleteTarget.code }}）吗？
       </p>
       <template #footer>
-        <button class="btn-ghost" type="button" :disabled="deleting" @click="showDelete = false">取消</button>
+        <button class="btn-ghost" type="button" :disabled="deleting" @click="showDelete = false">{{ t('RolesView.4d0b46', '取消') }}</button>
         <button class="btn-danger" type="button" :disabled="deleting" @click="confirmDelete">
           {{ deleting ? '删除中…' : '删除' }}
         </button>

@@ -17,7 +17,18 @@
 --   这里用「竖线分隔 + base64」是自描述且可调试的表示，
 --   与项目既有做法一致（口令哈希用 "$sm3-pbkdf2$v1$..."、令牌用 base64url）。
 --
--- 幂等：ADD COLUMN IF NOT EXISTS，可重复执行。
+-- 幂等：openGauss 5.0.0 **不支持** PostgreSQL 的
+--   ALTER TABLE ... ADD COLUMN IF NOT EXISTS
+--   （实测报 `syntax error at or near "NOT EXISTS"`，会让迁移整段失败）。
+--   故改用 DO 块 + information_schema 存在性判断，保证可重复执行。
 -- ============================================================
 
-ALTER TABLE arc_attachments ADD COLUMN IF NOT EXISTS wrapped_dek TEXT;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'arc_attachments' AND column_name = 'wrapped_dek'
+    ) THEN
+        ALTER TABLE arc_attachments ADD COLUMN wrapped_dek TEXT;
+    END IF;
+END $$;

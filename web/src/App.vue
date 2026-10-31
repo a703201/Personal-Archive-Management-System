@@ -11,6 +11,7 @@
  * 顶栏常驻全局搜索入口与主题开关（FR-UX-005 / FR-UX-002）。
  */
 import { ref, computed, onMounted } from 'vue'
+import { t } from './i18n'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
 import GlobalSearch from './components/GlobalSearch.vue'
 import ToastHost from './components/ToastHost.vue'
@@ -66,29 +67,29 @@ onMounted(async () => {
 
 <template>
   <div v-if="!route.meta.public" class="app-shell">
-    <a class="skip-link" href="#main-content">跳到主内容</a>
+    <a class="skip-link" href="#main-content">{{ t('App.01f027', '跳到主内容') }}</a>
     <!-- 侧栏：desktop 及以上显示 -->
     <aside class="sidebar">
       <div class="brand">AMS</div>
         <nav class="nav">
-          <p class="nav__group">个人</p>
-          <RouterLink class="nav__item" to="/archive">档案</RouterLink>
-          <RouterLink class="nav__item" to="/overview">概览</RouterLink>
+          <p class="nav__group">{{ t('App.2d7c0c', '个人') }}</p>
+          <RouterLink class="nav__item" to="/archive">{{ t('App.3ca928', '档案') }}</RouterLink>
+          <RouterLink class="nav__item" to="/overview">{{ t('App.506042', '概览') }}</RouterLink>
           <RouterLink class="nav__item" to="/notifications">
             通知
             <span v-if="unread > 0" class="nav__badge">{{ unread > 99 ? '99+' : unread }}</span>
           </RouterLink>
-          <RouterLink class="nav__item" to="/import">批量导入</RouterLink>
-          <RouterLink class="nav__item" to="/templates">条目模板</RouterLink>
-          <RouterLink class="nav__item" to="/family">家庭协作</RouterLink>
-          <RouterLink class="nav__item" to="/tags">标签管理</RouterLink>
-          <RouterLink class="nav__item" to="/profile">个人主页</RouterLink>
+          <RouterLink class="nav__item" to="/import">{{ t('App.14b196', '批量导入') }}</RouterLink>
+          <RouterLink class="nav__item" to="/templates">{{ t('App.dad23e', '条目模板') }}</RouterLink>
+          <RouterLink class="nav__item" to="/family">{{ t('App.e686bb', '家庭协作') }}</RouterLink>
+          <RouterLink class="nav__item" to="/tags">{{ t('App.4e02a9', '标签管理') }}</RouterLink>
+          <RouterLink class="nav__item" to="/profile">{{ t('App.d04c1f', '个人主页') }}</RouterLink>
         <template v-if="hasAdmin">
-          <p class="nav__group">管理</p>
-          <RouterLink v-if="canUsers" class="nav__item" to="/users">用户管理</RouterLink>
-          <RouterLink v-if="canRoles" class="nav__item" to="/roles">角色与权限</RouterLink>
-          <RouterLink v-if="canAudit" class="nav__item" to="/audit">审计日志</RouterLink>
-          <RouterLink v-if="canSystem" class="nav__item" to="/system">系统运维</RouterLink>
+          <p class="nav__group">{{ t('App.4989b5', '管理') }}</p>
+          <RouterLink v-if="canUsers" class="nav__item" to="/users">{{ t('App.baf847', '用户管理') }}</RouterLink>
+          <RouterLink v-if="canRoles" class="nav__item" to="/roles">{{ t('App.0c1a09', '角色与权限') }}</RouterLink>
+          <RouterLink v-if="canAudit" class="nav__item" to="/audit">{{ t('App.7666cd', '审计日志') }}</RouterLink>
+          <RouterLink v-if="canSystem" class="nav__item" to="/system">{{ t('App.08f206', '系统运维') }}</RouterLink>
         </template>
       </nav>
     </aside>
@@ -97,27 +98,27 @@ onMounted(async () => {
       <header class="topbar">
         <!-- 移动端顶部导航 -->
         <nav class="nav nav--inline">
-          <RouterLink class="nav__item" to="/archive">档案</RouterLink>
-          <RouterLink class="nav__item" to="/overview">概览</RouterLink>
+          <RouterLink class="nav__item" to="/archive">{{ t('App.3ca928', '档案') }}</RouterLink>
+          <RouterLink class="nav__item" to="/overview">{{ t('App.506042', '概览') }}</RouterLink>
           <RouterLink class="nav__item" to="/notifications">
             通知
             <span v-if="unread > 0" class="nav__badge">{{ unread > 99 ? '99+' : unread }}</span>
           </RouterLink>
-          <RouterLink class="nav__item" to="/import">导入</RouterLink>
-          <RouterLink class="nav__item" to="/templates">模板</RouterLink>
-          <RouterLink class="nav__item" to="/family">家庭</RouterLink>
-          <RouterLink class="nav__item" to="/profile">个人主页</RouterLink>
-          <RouterLink v-if="canUsers" class="nav__item" to="/users">用户</RouterLink>
-          <RouterLink v-if="canRoles" class="nav__item" to="/roles">角色</RouterLink>
-          <RouterLink v-if="canAudit" class="nav__item" to="/audit">审计</RouterLink>
-          <RouterLink v-if="canSystem" class="nav__item" to="/system">系统</RouterLink>
+          <RouterLink class="nav__item" to="/import">{{ t('App.60e2bc', '导入') }}</RouterLink>
+          <RouterLink class="nav__item" to="/templates">{{ t('App.06d0f3', '模板') }}</RouterLink>
+          <RouterLink class="nav__item" to="/family">{{ t('App.7cc8d6', '家庭') }}</RouterLink>
+          <RouterLink class="nav__item" to="/profile">{{ t('App.d04c1f', '个人主页') }}</RouterLink>
+          <RouterLink v-if="canUsers" class="nav__item" to="/users">{{ t('App.9ba763', '用户') }}</RouterLink>
+          <RouterLink v-if="canRoles" class="nav__item" to="/roles">{{ t('App.6b2669', '角色') }}</RouterLink>
+          <RouterLink v-if="canAudit" class="nav__item" to="/audit">{{ t('App.3a96c5', '审计') }}</RouterLink>
+          <RouterLink v-if="canSystem" class="nav__item" to="/system">{{ t('App.1a1f6d', '系统') }}</RouterLink>
         </nav>
 
         <div class="topbar__right">
           <RouterLink
             to="/notifications"
             class="bell"
-            :aria-label="`通知（${unread} 条未读）`"
+            ::aria-label="`通知（${unread} 条未读）`"
           >
             <span class="bell__icon" aria-hidden="true">🔔</span>
             <span v-if="unread > 0" class="bell__badge">{{ unread > 99 ? '99+' : unread }}</span>
@@ -126,7 +127,7 @@ onMounted(async () => {
           <button
             class="theme-btn"
             type="button"
-            :aria-label="resolved === 'dark' ? '切换到浅色' : '切换到深色'"
+            ::aria-label="resolved === 'dark' ? '切换到浅色' : '切换到深色'"
             @click="toggle"
           >
             {{ resolved === 'dark' ? '☀' : '☾' }}
@@ -134,20 +135,20 @@ onMounted(async () => {
           <select
             class="theme-select"
             :value="mode"
-            aria-label="主题模式"
+            :aria-label="t('App.c6e31a', '主题模式')"
             @change="setMode(($event.target as HTMLSelectElement).value as 'light' | 'dark' | 'system')"
           >
-            <option value="light">浅色</option>
-            <option value="dark">深色</option>
-            <option value="system">跟随系统</option>
+            <option value="light">{{ t('App.80ec9e', '浅色') }}</option>
+            <option value="dark">{{ t('App.30b2c9', '深色') }}</option>
+            <option value="system">{{ t('App.f4bbd9', '跟随系统') }}</option>
           </select>
           <select
             class="theme-select"
             :value="locale"
-            aria-label="语言"
-            @change="setLocale(($event.target as HTMLSelectElement).value as 'zh-CN' | 'en')"
+            :aria-label="t('App.cd99b2', '语言')"
+            @change="setLocale(($event.target as HTMLSelectElement).value as 'zh-CN' | 'en' | 'fr')"
           >
-            <option v-for="l in supported" :key="l" :value="l">{{ l === 'zh-CN' ? '中文' : 'English' }}</option>
+            <option v-for="l in supported" :key="l" :value="l">{{ l === 'zh-CN' ? '中文' : l === 'en' ? 'English' : 'Français' }}</option>
           </select>
         </div>
       </header>

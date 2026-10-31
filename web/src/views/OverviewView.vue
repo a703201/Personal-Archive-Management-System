@@ -6,6 +6,7 @@
  * 全部由**服务端按可访问主体**统计，前端不做任何越权拼接。
  */
 import { ref, onMounted, computed } from 'vue'
+import { t } from '../i18n'
 import { api } from '../api/client'
 import { categoryName, formatTime } from '../composables/useCatalog'
 
@@ -64,28 +65,28 @@ onMounted(load)
 
 <template>
   <section>
-    <h1 class="page-title">概览</h1>
+    <h1 class="page-title">{{ t('OverviewView.506042', '概览') }}</h1>
 
-    <p v-if="loading" class="hint">加载中…</p>
+    <p v-if="loading" class="hint">{{ t('OverviewView.300ee3', '加载中…') }}</p>
     <p v-else-if="error" class="hint hint--error">{{ error }}</p>
 
     <template v-else-if="data">
       <!-- 关键指标 -->
       <div class="grid">
         <div class="card stat">
-          <div class="stat__label">档案总数</div>
+          <div class="stat__label">{{ t('OverviewView.cf2efb', '档案总数') }}</div>
           <div class="stat__value">{{ data.total }}</div>
         </div>
         <div class="card stat">
-          <div class="stat__label">未读提醒</div>
+          <div class="stat__label">{{ t('OverviewView.7ee3be', '未读提醒') }}</div>
           <div class="stat__value">{{ data.unreadNotifications }}</div>
         </div>
         <div class="card stat">
-          <div class="stat__label">有数据分类</div>
+          <div class="stat__label">{{ t('OverviewView.d19b98', '有数据分类') }}</div>
           <div class="stat__value">{{ topCategories.length }}</div>
         </div>
         <div class="card stat">
-          <div class="stat__label">最近更新</div>
+          <div class="stat__label">{{ t('OverviewView.80920c', '最近更新') }}</div>
           <div class="stat__value stat__value--sm">
             {{ data.recent.length ? formatTime(data.recent[0].updatedAt) : '—' }}
           </div>
@@ -93,9 +94,9 @@ onMounted(load)
       </div>
 
       <!-- 分类分布 -->
-      <h2 class="section-title">分类分布</h2>
+      <h2 class="section-title">{{ t('OverviewView.245475', '分类分布') }}</h2>
       <div class="card">
-        <p v-if="topCategories.length === 0" class="hint">还没有档案，先去创建一条吧。</p>
+        <p v-if="topCategories.length === 0" class="hint">{{ t('OverviewView.2e545d', '还没有档案，先去创建一条吧。') }}</p>
         <ul v-else class="bars">
           <li v-for="c in topCategories" :key="c.category" class="bar">
             <span class="bar__name">{{ categoryName(c.category) }}</span>
@@ -111,9 +112,9 @@ onMounted(load)
       </div>
 
       <!-- 最近更新 -->
-      <h2 class="section-title">最近更新</h2>
+      <h2 class="section-title">{{ t('OverviewView.80920c', '最近更新') }}</h2>
       <div class="card">
-        <p v-if="data.recent.length === 0" class="hint">暂无更新记录。</p>
+        <p v-if="data.recent.length === 0" class="hint">{{ t('OverviewView.4952df', '暂无更新记录。') }}</p>
         <ul v-else class="recent">
           <li v-for="it in data.recent" :key="it.id" class="recent__row">
             <span class="recent__title">{{ it.title }}</span>

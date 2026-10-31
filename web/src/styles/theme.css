@@ -20,19 +20,32 @@
   --sp-4: 16px;
   --sp-5: 24px;
   --sp-6: 32px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
+  /* ---- 圆角：统一走 G3 scale（单一事实来源）----
+     【几何现实澄清 · 重要】
+       border-radius 画的是**圆弧**：曲率在「直边 ↔ 圆角」衔接处是突变的，
+       仅 G1（切线）连续；所谓 G3（曲率导数连续）在 Web 上无法仅靠
+       border-radius 达成。`corner-style: continuous` **不是标准 CSS 属性**
+       （浏览器直接忽略），此前写在本文件和 LoginView 里的该声明均无效，
+       不要依赖它 —— 否则会误以为「连续曲线已生效」。
+       本工程取舍：**用统一且成比例的圆角 scale 逼近观感一致性**，
+       并把所有圆角收敛到单一 token 家族（--g3-*）。
+       若将来确需真正的超椭圆/G3 曲面，可选叠加 SVG mask（有额外绘制成本，
+       属「美观 vs 性能」的显式权衡），届时按面板粒度开启而非全局。
 
-  /* ---- G3 连续曲线（几何连续，曲率导数连续）----
-     苹果的 continuous 圆角：圆角用超椭圆（superellipse）而非圆弧，
-     corner-style:continuous 在 WebKit/新版 Chrome 原生支持；
-     不支持时退化为普通 border-radius（仍为平滑 G2 曲线，不破版）。 */
+     --radius-* 保留作向后兼容别名：历史组件（App.vue / ImportView /
+     LoginView / ProfileView / ToastHost …）仍在引用，统一指向 g3 值，
+     实现「改一处即全局生效」，也避免两套体系造成视觉杂乱。
+     注意：不要再新增 --radius-* 的使用，新增一律用 --g3-*。 */
+  --g3-xs: 8px;
   --g3-sm: 12px;
   --g3-md: 18px;
   --g3-lg: 24px;
   --g3-xl: 30px;
   --g3-pill: 999px;
+
+  --radius-sm: var(--g3-xs);
+  --radius-md: var(--g3-sm);
+  --radius-lg: var(--g3-md);
 
   /* ---- 缓动（动效从当前值出发，可打断；见 docs §8.5 + apple-design）----
      --ease-apple 为苹果常用中幅位移曲线（曲率连续，G2+），
@@ -312,7 +325,6 @@ input,
 select,
 textarea,
 .g3 {
-  corner-style: continuous;
 }
 
 /* 聚焦可见性（§11.1）：2px 强调色 + 2px 偏移，禁止 outline:none */
@@ -573,10 +585,78 @@ button:active:not(:disabled) {
   margin-top: var(--sp-4);
 }
 
-/* ---- 尊重「减少动态效果」偏好 ---- */
+/* ============================================================
+   全局交互动效（Apple 风格）
+   ------------------------------------------------------------
+   原则（apple-design §1 / §11 / §14）：
+     ① 反馈落在 pointer-down（按下瞬间就有反馈），不等 click 结束才动；
+     ② 只动合成友好的属性（transform / opacity），避免触发布局重排；
+     ③ 一切动效可被 prefers-reduced-motion 降级 —— 降级不等于「没反馈」，
+        而是换成不引起眩动、但保留可理解性的等价物（颜色/透明度）。
+   ============================================================ */
+
+/* 按压反馈：按下即刻响应（scale 属 transform，走合成层，不触发重排） */
+button:not(:disabled),
+[role='button'],
+.btn,
+.clickable {
+  transition: transform var(--spring-fast) var(--ease-out-soft),
+    background-color var(--spring-mid) var(--ease-out-soft),
+    box-shadow var(--spring-mid) var(--ease-out-soft);
+}
+
+button:not(:disabled):active,
+[role='button']:active,
+.btn:active,
+.clickable:active {
+  transform: scale(0.97);
+}
+
+/* 键盘可达性焦点环：只在键盘焦点时出现，不干扰鼠标点击 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: 2px;
+}
+
+/* 面板/内容进入：只跑 opacity + transform（合成友好） */
+@keyframes ams-enter-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes ams-enter-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---- 尊重「减少动态效果」偏好 ----
+   Apple §14：reduced-motion 不是「抹掉一切反馈」，而是改用不引起眩动的
+   等价物。这里取消位移/缩放/循环动画，但**保留**颜色与透明度过渡
+   —— 它们有助于理解状态变化，且不会造成眩晕。
+   （此前写成 `transition:none !important` 属于过度降级。） */
 @media (prefers-reduced-motion: reduce) {
-  * {
-    transition: none !important;
-    animation: none !important;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+
+  button:not(:disabled):active,
+  [role='button']:active,
+  .btn:active,
+  .clickable:active {
+    transform: none !important;
   }
 }

@@ -12,6 +12,7 @@
  *   ③ 密码错误次数由后端累计并落库，本页只显示后端返回的剩余次数。
  */
 import { onMounted, ref } from 'vue'
+import { t } from '../i18n'
 import { useRoute } from 'vue-router'
 import { api, ApiError } from '../api/client'
 import { categoryName, formatTime as fmtTime, sensitivityName, statusName } from '../composables/useCatalog'
@@ -106,11 +107,11 @@ onMounted(load)
   <div class="share-page">
     <header class="share-page__head">
       <span class="share-page__brand">AMS</span>
-      <span class="share-page__tag">共享只读</span>
+      <span class="share-page__tag">{{ t('ShareView.8d281f', '共享只读') }}</span>
     </header>
 
     <main class="share-card">
-      <p v-if="loading" class="share-hint">加载中…</p>
+      <p v-if="loading" class="share-hint">{{ t('ShareView.300ee3', '加载中…') }}</p>
 
       <!-- 链接不可用：不区分原因 -->
       <div v-else-if="dead" class="share-dead">
@@ -122,13 +123,13 @@ onMounted(load)
 
       <!-- 需要密码 -->
       <form v-else-if="needPassword" class="share-pwd" @submit.prevent="submit">
-        <h1 class="share-pwd__title">该链接需要访问密码</h1>
-        <p class="share-pwd__desc">请输入分享者提供的密码。多次输错会使链接失效。</p>
+        <h1 class="share-pwd__title">{{ t('ShareView.368498', '该链接需要访问密码') }}</h1>
+        <p class="share-pwd__desc">{{ t('ShareView.fded6f', '请输入分享者提供的密码。多次输错会使链接失效。') }}</p>
         <input
           v-model="password"
           class="field-control"
           type="password"
-          placeholder="访问密码"
+          :placeholder="t('ShareView.c737b7', '访问密码')"
           autocomplete="off"
           autofocus
         />
@@ -151,19 +152,19 @@ onMounted(load)
 
         <dl class="share-kv">
           <template v-if="item.issuer">
-            <dt>签发机构</dt>
+            <dt>{{ t('ShareView.8eb731', '签发机构') }}</dt>
             <dd>{{ item.issuer }}</dd>
           </template>
           <template v-if="item.issuedDate">
-            <dt>签发日期</dt>
+            <dt>{{ t('ShareView.0b8bcd', '签发日期') }}</dt>
             <dd>{{ item.issuedDate }}</dd>
           </template>
           <template v-if="item.expiresAt">
-            <dt>有效期至</dt>
+            <dt>{{ t('ShareView.37eb47', '有效期至') }}</dt>
             <dd>{{ item.expiresAt }}</dd>
           </template>
           <template v-if="item.remark">
-            <dt>备注</dt>
+            <dt>{{ t('ShareView.e03614', '备注') }}</dt>
             <dd class="share-kv__multi">{{ item.remark }}</dd>
           </template>
         </dl>
@@ -173,15 +174,15 @@ onMounted(load)
         </p>
 
         <footer class="share-item__foot">
-          <span>链接到期：{{ fmtTime(item.linkExpiresAt) }}</span>
-          <span>已被查看 {{ item.viewCount }} 次</span>
+          <span>{{ t('ShareView.f23884', '链接到期：') }}{{ fmtTime(item.linkExpiresAt) }}</span>
+          <span>{{ t('ShareView.849b13', '已被查看') }} {{ item.viewCount }} {{ t('ShareView.5e5b81', '次') }}</span>
         </footer>
       </article>
 
       <p v-else-if="errorText" class="share-error">{{ errorText }}</p>
     </main>
 
-    <p class="share-page__foot">本页由 AMS 个人档案管理系统生成 · 仅展示只读信息</p>
+    <p class="share-page__foot">{{ t('ShareView.f562ce', '本页由 AMS 个人档案管理系统生成 · 仅展示只读信息') }}</p>
   </div>
 </template>
 

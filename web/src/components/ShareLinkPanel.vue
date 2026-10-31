@@ -16,6 +16,7 @@
  *     能拿到的机会（后端不存明文 token 以外的凭据），避免用户撤销后无法核对。
  */
 import { computed, ref } from 'vue'
+import { t } from '../i18n'
 import { api } from '../api/client'
 import { formatTime as fmtTime } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
@@ -154,7 +155,7 @@ defineExpose({ load })
 <template>
   <section class="share">
     <div class="share__head">
-      <h3 class="share__title">共享链接</h3>
+      <h3 class="share__title">{{ t('ShareLinkPanel.e7b1c3', '共享链接') }}</h3>
       <button class="btn-ghost share__new" type="button" @click="showForm = !showForm">
         {{ showForm ? '收起' : '+ 创建链接' }}
       </button>
@@ -167,24 +168,24 @@ defineExpose({ load })
     <!-- 创建表单 -->
     <div v-if="showForm" class="share__form">
       <label class="field">
-        <span class="field__label">访问密码（选填）</span>
+        <span class="field__label">{{ t('ShareLinkPanel.2a8f82', '访问密码（选填）') }}</span>
         <input
           v-model="form.password"
           class="field-control"
           type="text"
-          placeholder="留空则任何人拿到链接即可查看"
+          :placeholder="t('ShareLinkPanel.6b65e8', '留空则任何人拿到链接即可查看')"
           autocomplete="new-password"
         />
       </label>
       <div class="share__row">
         <label class="field">
-          <span class="field__label">有效期</span>
+          <span class="field__label">{{ t('ShareLinkPanel.222460', '有效期') }}</span>
           <select v-model.number="form.days" class="field-control">
             <option v-for="d in DAY_OPTIONS" :key="d.value" :value="d.value">{{ d.label }}</option>
           </select>
         </label>
         <label class="field">
-          <span class="field__label">密码错误上限</span>
+          <span class="field__label">{{ t('ShareLinkPanel.ff0e99', '密码错误上限') }}</span>
           <input
             v-model.number="form.maxFails"
             class="field-control"
@@ -210,32 +211,32 @@ defineExpose({ load })
     <div v-if="created" class="share__result">
       <div class="share__result-top">
         <span class="share__result-badge">{{ created.protected ? '密码保护' : '公开只读' }}</span>
-        <button class="btn-text" type="button" @click="created = null">关闭</button>
+        <button class="btn-text" type="button" @click="created = null">{{ t('ShareLinkPanel.6c14bd', '关闭') }}</button>
       </div>
       <code class="share__url">{{ created.fullUrl }}</code>
-      <button class="btn-ghost" type="button" @click="copy(created.fullUrl)">复制链接</button>
+      <button class="btn-ghost" type="button" @click="copy(created.fullUrl)">{{ t('ShareLinkPanel.abb22b', '复制链接') }}</button>
     </div>
 
     <!-- 已有链接 -->
-    <p v-if="loading" class="hint">加载中…</p>
+    <p v-if="loading" class="hint">{{ t('ShareLinkPanel.300ee3', '加载中…') }}</p>
     <p v-else-if="loadError" class="hint hint--error">{{ loadError }}</p>
-    <p v-else-if="myLinks.length === 0" class="hint">该条目还没有共享链接。</p>
+    <p v-else-if="myLinks.length === 0" class="hint">{{ t('ShareLinkPanel.ef4fa7', '该条目还没有共享链接。') }}</p>
 
     <ul v-else class="share__list">
       <li v-for="l in myLinks" :key="l.id" class="share__item">
         <div class="share__item-main">
           <div class="share__item-top">
             <span class="chip" :class="stateOf(l).cls">{{ stateOf(l).text }}</span>
-            <span class="u-sub">浏览 {{ l.viewCount }} 次</span>
+            <span class="u-sub">{{ t('ShareLinkPanel.ef23ea', '浏览') }} {{ l.viewCount }} {{ t('ShareLinkPanel.5e5b81', '次') }}</span>
             <span v-if="l.failCount > 0" class="u-sub u-sub--warn">
               密码错误 {{ l.failCount }} 次
             </span>
           </div>
           <code class="share__token">{{ fullUrlOf(l.token) }}</code>
-          <span class="u-sub">到期 {{ fmtTime(l.expiresAt) }}</span>
+          <span class="u-sub">{{ t('ShareLinkPanel.8066e0', '到期') }} {{ fmtTime(l.expiresAt) }}</span>
         </div>
         <div class="share__item-actions">
-          <button class="btn-text" type="button" @click="copy(fullUrlOf(l.token))">复制</button>
+          <button class="btn-text" type="button" @click="copy(fullUrlOf(l.token))">{{ t('ShareLinkPanel.4edd1d', '复制') }}</button>
           <button
             v-if="!l.revoked && !l.expired"
             class="btn-text danger"

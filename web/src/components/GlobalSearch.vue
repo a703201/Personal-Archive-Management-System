@@ -8,6 +8,7 @@
  *   前端不持有、也不缓存任何明文（FR-SRC-006）
  */
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { t } from '../i18n'
 import { api } from '../api/client'
 
 interface SearchItem {
@@ -114,29 +115,29 @@ watch(open, (v) => {
 <template>
   <!-- 触发按钮：同时提示快捷键 -->
   <button class="search-trigger" type="button" @click="show">
-    <span>搜索档案…</span>
+    <span>{{ t('GlobalSearch.0d8465', '搜索档案…') }}</span>
     <kbd>⌘K</kbd>
   </button>
 
   <div v-if="open" class="mask" @click.self="hide">
-    <div class="dialog" role="dialog" aria-modal="true" aria-label="全局搜索">
+    <div class="dialog" role="dialog" aria-modal="true" :aria-label="t('GlobalSearch.a38e3c', '全局搜索')">
       <div class="dialog__head">
         <input
           id="global-search-input"
           v-model="keyword"
           class="dialog__input"
           type="search"
-          placeholder="输入关键词搜索标题、机构、字段内容…"
+          :placeholder="t('GlobalSearch.e80e90', '输入关键词搜索标题、机构、字段内容…')"
           @input="onInput"
         />
-        <button class="dialog__close" type="button" aria-label="关闭" @click="hide">✕</button>
+        <button class="dialog__close" type="button" :aria-label="t('GlobalSearch.6c14bd', '关闭')" @click="hide">✕</button>
       </div>
 
       <div class="dialog__body">
-        <p v-if="loading" class="hint">搜索中…</p>
+        <p v-if="loading" class="hint">{{ t('GlobalSearch.8a88cd', '搜索中…') }}</p>
         <p v-else-if="error" class="hint hint--error">{{ error }}</p>
-        <p v-else-if="items.length === 0 && keyword" class="hint">没有匹配的档案</p>
-        <p v-else-if="items.length === 0" class="hint">输入关键词开始搜索</p>
+        <p v-else-if="items.length === 0 && keyword" class="hint">{{ t('GlobalSearch.acc634', '没有匹配的档案') }}</p>
+        <p v-else-if="items.length === 0" class="hint">{{ t('GlobalSearch.ea13f4', '输入关键词开始搜索') }}</p>
 
         <ul v-else class="results">
           <li v-for="it in items" :key="it.id" class="result">
@@ -144,13 +145,13 @@ watch(open, (v) => {
             <div class="result__meta">
               <span :class="SENS_CLASS[it.sensitivity]">{{ SENS_LABEL[it.sensitivity] }}</span>
               <span v-if="it.issuer">· {{ it.issuer }}</span>
-              <span v-if="it.expiresDate">· 到期 {{ it.expiresDate }}</span>
-              <span>· 附件 {{ it.attachmentCount }}</span>
+              <span v-if="it.expiresDate">{{ t('GlobalSearch.fe3baf', '· 到期') }} {{ it.expiresDate }}</span>
+              <span>{{ t('GlobalSearch.af31a0', '· 附件') }} {{ it.attachmentCount }}</span>
             </div>
           </li>
         </ul>
 
-        <p v-if="hasMore" class="hint">还有更多结果，请细化关键词</p>
+        <p v-if="hasMore" class="hint">{{ t('GlobalSearch.2ca07b', '还有更多结果，请细化关键词') }}</p>
       </div>
     </div>
   </div>

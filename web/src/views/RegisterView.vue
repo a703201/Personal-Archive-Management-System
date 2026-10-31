@@ -9,6 +9,7 @@
  * 成功 → Toast 提示 → 跳登录页。
  */
 import { ref, computed } from 'vue'
+import { t } from '../i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { api } from '../api/client'
 import { useToast } from '../composables/useToast'
@@ -102,46 +103,46 @@ async function onSubmit(): Promise<void> {
   <div class="reg-wrap">
     <div class="reg-card">
       <div class="brand">AMS</div>
-      <h1 class="title">创建账号</h1>
-      <p class="subtitle">个人档案管理系统</p>
+      <h1 class="title">{{ t('RegisterView.4742b5', '创建账号') }}</h1>
+      <p class="subtitle">{{ t('RegisterView.cc6127', '个人档案管理系统') }}</p>
 
       <form class="form" @submit.prevent="onSubmit">
         <label class="field">
-          <span class="field__label">用户名 <em>*</em></span>
-          <input v-model="username" class="field-control" type="text" autocomplete="username" placeholder="登录用户名" />
+          <span class="field__label">{{ t('RegisterView.a1aaf3', '用户名') }} <em>*</em></span>
+          <input v-model="username" class="field-control" type="text" autocomplete="username" :placeholder="t('RegisterView.e9fe4d', '登录用户名')" />
         </label>
 
         <label class="field">
-          <span class="field__label">昵称</span>
-          <input v-model="nickname" class="field-control" type="text" placeholder="选填，默认同用户名" />
+          <span class="field__label">{{ t('RegisterView.25124e', '昵称') }}</span>
+          <input v-model="nickname" class="field-control" type="text" :placeholder="t('RegisterView.439569', '选填，默认同用户名')" />
         </label>
 
         <label class="field">
-          <span class="field__label">邮箱</span>
-          <input v-model="email" class="field-control" type="email" autocomplete="email" placeholder="选填" />
+          <span class="field__label">{{ t('RegisterView.9ed627', '邮箱') }}</span>
+          <input v-model="email" class="field-control" type="email" autocomplete="email" :placeholder="t('RegisterView.924b8c', '选填')" />
         </label>
 
         <label class="field">
-          <span class="field__label">手机号</span>
-          <input v-model="phone" class="field-control" type="tel" autocomplete="tel" placeholder="选填" />
+          <span class="field__label">{{ t('RegisterView.5a9cc5', '手机号') }}</span>
+          <input v-model="phone" class="field-control" type="tel" autocomplete="tel" :placeholder="t('RegisterView.924b8c', '选填')" />
         </label>
 
         <label class="field">
-          <span class="field__label">密码 <em>*</em></span>
-          <input v-model="password" class="field-control" type="password" autocomplete="new-password" placeholder="设置登录密码" />
+          <span class="field__label">{{ t('RegisterView.c839a8', '密码') }} <em>*</em></span>
+          <input v-model="password" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.1ef3fd', '设置登录密码')" />
         </label>
 
         <ul class="policy" :class="{ 'policy--ok': passwordOk }">
-          <li :class="{ done: policy.length }">至少 12 位</li>
-          <li :class="{ done: policy.classes }">含至少 3 类字符（大小写/数字/符号）</li>
-          <li :class="{ done: policy.noRepeat }">无连续重复字符（如 aaa）</li>
-          <li :class="{ done: policy.noUsername }">不包含用户名</li>
+          <li :class="{ done: policy.length }">{{ t('RegisterView.f8249b', '至少 12 位') }}</li>
+          <li :class="{ done: policy.classes }">{{ t('RegisterView.8e568b', '含至少 3 类字符（大小写/数字/符号）') }}</li>
+          <li :class="{ done: policy.noRepeat }">{{ t('RegisterView.bb306f', '无连续重复字符（如 aaa）') }}</li>
+          <li :class="{ done: policy.noUsername }">{{ t('RegisterView.00fcd5', '不包含用户名') }}</li>
         </ul>
 
         <label class="field">
-          <span class="field__label">确认密码 <em>*</em></span>
-          <input v-model="confirm" class="field-control" type="password" autocomplete="new-password" placeholder="再次输入密码" />
-          <span v-if="policy.match === false" class="field__err">两次输入的密码不一致</span>
+          <span class="field__label">{{ t('RegisterView.1d0167', '确认密码') }} <em>*</em></span>
+          <input v-model="confirm" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.f27a15', '再次输入密码')" />
+          <span v-if="policy.match === false" class="field__err">{{ t('RegisterView.3e2b22', '两次输入的密码不一致') }}</span>
         </label>
 
         <p v-if="serverError" class="error">{{ serverError }}</p>
@@ -152,7 +153,7 @@ async function onSubmit(): Promise<void> {
       </form>
 
       <p class="switch">
-        已有账号？<RouterLink to="/login">去登录</RouterLink>
+        已有账号？<RouterLink to="/login">{{ t('RegisterView.6c01b0', '去登录') }}</RouterLink>
       </p>
     </div>
   </div>
@@ -175,7 +176,6 @@ async function onSubmit(): Promise<void> {
   border-radius: var(--g3-lg, 24px);
   padding: 32px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
-  corner-style: continuous;
 }
 .brand {
   font-weight: 700;

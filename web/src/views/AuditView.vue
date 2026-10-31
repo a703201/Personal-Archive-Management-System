@@ -9,6 +9,7 @@
  * result 字段：0=成功，非 0=失败（后端约定）。链校验返回 ok/broken/tampered/missing。
  */
 import { ref, onMounted, computed } from 'vue'
+import { t } from '../i18n'
 import { api } from '../api/client'
 import { useToast } from '../composables/useToast'
 
@@ -111,7 +112,7 @@ onMounted(load)
 <template>
   <section>
     <div class="page-head">
-      <h1 class="page-title">审计日志</h1>
+      <h1 class="page-title">{{ t('AuditView.7666cd', '审计日志') }}</h1>
       <button class="btn-ghost" type="button" :disabled="verifying" @click="verifyChain">
         {{ verifying ? '校验中…' : '校验审计链' }}
       </button>
@@ -123,34 +124,34 @@ onMounted(load)
     </div>
 
     <div class="filters card">
-      <input v-model="filters.actorId" class="field-control" type="text" placeholder="操作者 ID" />
-      <input v-model="filters.action" class="field-control" type="text" placeholder="操作（如 login）" />
-      <input v-model="filters.clientIp" class="field-control" type="text" placeholder="客户端 IP" />
+      <input v-model="filters.actorId" class="field-control" type="text" :placeholder="t('AuditView.8c90c0', '操作者 ID')" />
+      <input v-model="filters.action" class="field-control" type="text" :placeholder="t('AuditView.7294c6', '操作（如 login）')" />
+      <input v-model="filters.clientIp" class="field-control" type="text" :placeholder="t('AuditView.2d1de5', '客户端 IP')" />
       <select v-model="filters.result" class="field-control">
-        <option value="">全部结果</option>
-        <option value="0">成功</option>
-        <option value="1">失败</option>
+        <option value="">{{ t('AuditView.4b70d0', '全部结果') }}</option>
+        <option value="0">{{ t('AuditView.51991a', '成功') }}</option>
+        <option value="1">{{ t('AuditView.3e3c80', '失败') }}</option>
       </select>
       <div class="filters__btns">
-        <button class="btn-primary" type="button" @click="search">查询</button>
-        <button class="btn-ghost" type="button" @click="reset">重置</button>
+        <button class="btn-primary" type="button" @click="search">{{ t('AuditView.711363', '查询') }}</button>
+        <button class="btn-ghost" type="button" @click="reset">{{ t('AuditView.3d8134', '重置') }}</button>
       </div>
     </div>
 
-    <p v-if="loading" class="hint">加载中…</p>
+    <p v-if="loading" class="hint">{{ t('AuditView.300ee3', '加载中…') }}</p>
     <p v-else-if="error" class="hint hint--error">{{ error }}</p>
 
     <div v-else class="card table-card">
       <table class="tbl">
         <thead>
           <tr>
-            <th>链序号</th>
-            <th>时间</th>
-            <th>操作</th>
-            <th>描述</th>
-            <th>目标</th>
-            <th>操作者</th>
-            <th>结果</th>
+            <th>{{ t('AuditView.305e94', '链序号') }}</th>
+            <th>{{ t('AuditView.89b4aa', '时间') }}</th>
+            <th>{{ t('AuditView.f3ea6d', '操作') }}</th>
+            <th>{{ t('AuditView.412f54', '描述') }}</th>
+            <th>{{ t('AuditView.941f08', '目标') }}</th>
+            <th>{{ t('AuditView.ffb50d', '操作者') }}</th>
+            <th>{{ t('AuditView.0a2c91', '结果') }}</th>
             <th>IP</th>
           </tr>
         </thead>
@@ -173,15 +174,15 @@ onMounted(load)
             <td class="u-sub">{{ a.clientIp || '—' }}</td>
           </tr>
           <tr v-if="rows.length === 0">
-            <td colspan="8" class="empty">暂无审计记录</td>
+            <td colspan="8" class="empty">{{ t('AuditView.2c1869', '暂无审计记录') }}</td>
           </tr>
         </tbody>
       </table>
 
       <div class="pager">
-        <button class="btn-ghost" type="button" :disabled="page <= 1" @click="changePage(-1)">上一页</button>
-        <span class="pager__info">第 {{ page }} / {{ totalPages }} 页 · 共 {{ total }} 条</span>
-        <button class="btn-ghost" type="button" :disabled="page >= totalPages" @click="changePage(1)">下一页</button>
+        <button class="btn-ghost" type="button" :disabled="page <= 1" @click="changePage(-1)">{{ t('AuditView.b41561', '上一页') }}</button>
+        <span class="pager__info">{{ t('AuditView.dae828', '第') }} {{ page }} {{ t('AuditView.42099b', '/') }} {{ totalPages }} {{ t('AuditView.eaa96d', '页 · 共') }} {{ total }} {{ t('AuditView.bce2ef', '条') }}</span>
+        <button class="btn-ghost" type="button" :disabled="page >= totalPages" @click="changePage(1)">{{ t('AuditView.67a246', '下一页') }}</button>
       </div>
     </div>
   </section>

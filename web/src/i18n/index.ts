@@ -13,10 +13,15 @@
  */
 import { ref, watch } from 'vue'
 
-export type Locale = 'zh-CN' | 'en'
+// codemod 自动生成/增量维护的目录（.tmp/i18n_codemod.py 产出，勿手改）
+import catalogZh from './catalog.zh-CN'
+import catalogEn from './catalog.en'
+import catalogFr from './catalog.fr'
+
+export type Locale = 'zh-CN' | 'en' | 'fr'
 
 export const defaultLocale: Locale = 'zh-CN'
-export const supported: Locale[] = ['zh-CN', 'en']
+export const supported: Locale[] = ['zh-CN', 'en', 'fr']
 const STORAGE_KEY = 'ams.locale'
 
 function detectInitial(): Locale {
@@ -47,6 +52,15 @@ export const catalogs: Record<Locale, Record<string, string>> = {
     'common.save': '保存',
     'archive.title': '档案管理',
     'profile.title': '个人主页',
+    'dp.placeholder': '选择日期',
+    'dp.dialog': '选择日期',
+    'dp.titleYear': '选择年份',
+    'dp.prevMonth': '上一月',
+    'dp.nextMonth': '下一月',
+    'dp.prevYear': '上一年',
+    'dp.nextYear': '下一年',
+    'dp.today': '今天',
+    'dp.clear': '清除',
   },
   en: {
     'app.name': 'Archive Manager',
@@ -65,13 +79,62 @@ export const catalogs: Record<Locale, Record<string, string>> = {
     'common.save': 'Save',
     'archive.title': 'Archive',
     'profile.title': 'Profile',
+    'dp.placeholder': 'Select date',
+    'dp.dialog': 'Select date',
+    'dp.titleYear': 'Select year',
+    'dp.prevMonth': 'Previous month',
+    'dp.nextMonth': 'Next month',
+    'dp.prevYear': 'Previous year',
+    'dp.nextYear': 'Next year',
+    'dp.today': 'Today',
+    'dp.clear': 'Clear',
+  },
+  fr: {
+    'app.name': 'Gestion des archives',
+    'nav.archive': 'Archives',
+    'nav.overview': 'Vue d’ensemble',
+    'nav.import': 'Import',
+    'nav.tags': 'Étiquettes',
+    'nav.audit': 'Audit',
+    'nav.profile': 'Profil',
+    'nav.system': 'Système',
+    'login.title': 'Gestion des archives personnelles',
+    'login.subtitle': 'Connectez-vous pour continuer',
+    'login.submit': 'Se connecter',
+    'common.query': 'Rechercher',
+    'common.cancel': 'Annuler',
+    'common.save': 'Enregistrer',
+    'archive.title': 'Archives',
+    'profile.title': 'Profil',
+    'dp.placeholder': 'Choisir une date',
+    'dp.dialog': 'Choisir une date',
+    'dp.titleYear': 'Choisir une année',
+    'dp.prevMonth': 'Mois précédent',
+    'dp.nextMonth': 'Mois suivant',
+    'dp.prevYear': 'Année précédente',
+    'dp.nextYear': 'Année suivante',
+    'dp.today': "Aujourd’hui",
+    'dp.clear': 'Effacer',
   },
 }
+
+// 合并 codemod 生成的目录：**手写基线优先**（后者覆盖前者），
+// 生成目录里未翻译的条目是空串，由 t() 负责回退，不会显示空白。
+catalogs['zh-CN'] = { ...catalogZh, ...catalogs['zh-CN'] }
+catalogs['en'] = { ...catalogEn, ...catalogs['en'] }
+catalogs['fr'] = { ...catalogFr, ...catalogs['fr'] }
 
 /** 取文案：目录缺键时回退到 fallback（默认传中文文案），保证不空白。 */
 export function t(key: string, fallback?: string): string {
   const dict = catalogs[locale.value] ?? catalogs[defaultLocale]
-  return dict[key] ?? fallback ?? catalogs[defaultLocale][key] ?? key
+  // 【关键】空串必须视为「未翻译」：codemod 产出的 en 目录默认全为空串，
+  // 若直接返回，界面会大片空白（原实现用 ?? 只判 null/undefined，会踩这个坑）。
+  const v = dict[key]
+  if (typeof v === 'string' && v.trim() !== '') return v
+  if (fallback && fallback.trim() !== '') return fallback
+  const base = catalogs[defaultLocale][key]
+  if (typeof base === 'string' && base.trim() !== '') return base
+  return key
 }
 
 export function setLocale(v: Locale): void {

@@ -14,6 +14,7 @@
  * 提前摊开；否则一步导入会静默挂错条目，而附件挂错后没有撤销。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { t as tr } from '../i18n'
 import { api, apiBinary, apiBlob } from '../api/client'
 import { useToast } from '../composables/useToast'
 
@@ -771,7 +772,7 @@ async function cloneTemplate(): Promise<void> {
   <section>
     <div class="page-head">
       <div>
-        <h1 class="page-title">批量导入</h1>
+        <h1 class="page-title">{{ tr('ImportView.14b196', '批量导入') }}</h1>
         <p class="page-sub">
           先预检、确认后再落库。附件包按「一级目录名 = 条目名」映射，重名条目需手动指定。
         </p>
@@ -806,7 +807,7 @@ async function cloneTemplate(): Promise<void> {
 
     <div class="card form">
       <label class="field">
-        <span class="field__label">目标主体</span>
+        <span class="field__label">{{ tr('ImportView.3a138d', '目标主体') }}</span>
         <select v-model="subjectId" class="field-control">
           <option v-for="s in subjects" :key="s.id" :value="s.id">
             {{ s.name }}{{ s.isPrimary ? '（本人）' : '' }}
@@ -814,7 +815,7 @@ async function cloneTemplate(): Promise<void> {
         </select>
       </label>
       <label v-if="tab === 'zip'" class="field">
-        <span class="field__label">新建条目的分类</span>
+        <span class="field__label">{{ tr('ImportView.20c66a', '新建条目的分类') }}</span>
         <select v-model.number="zipCategory" class="field-control">
           <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ c.name }}</option>
         </select>
@@ -824,9 +825,9 @@ async function cloneTemplate(): Promise<void> {
     <!-- ---------------- ZIP ---------------- -->
     <template v-if="tab === 'zip'">
       <div class="card block">
-        <h2 class="block__title">① 选择压缩包</h2>
+        <h2 class="block__title">{{ tr('ImportView.26cc88', '① 选择压缩包') }}</h2>
         <p class="hint">
-          包内请按 <code>条目名/文件.jpg</code> 组织。支持 jpg/jpeg/png/pdf，单文件 ≤ 50MB，
+          包内请按 <code>{{ tr('ImportView.3eac4f', '条目名/文件.jpg') }}</code> 组织。支持 jpg/jpeg/png/pdf，单文件 ≤ 50MB，
           单个压缩包 ≤ 64MB（超出请拆分成多个包分批导入）；
           文件名需为 UTF-8 或 GBK（7-Zip、macOS、Windows 资源管理器均可）。
         </p>
@@ -838,11 +839,11 @@ async function cloneTemplate(): Promise<void> {
             class="picker__input"
             @change="pickZip"
           />
-          <label for="zipfile" class="btn-primary picker__btn">选择 ZIP 文件</label>
+          <label for="zipfile" class="btn-primary picker__btn">{{ tr('ImportView.af8a46', '选择 ZIP 文件') }}</label>
           <span v-if="zipName" class="picker__name">
             {{ zipName }} · {{ fmtSize(zipSize) }}
           </span>
-          <span v-else class="hint">尚未选择</span>
+          <span v-else class="hint">{{ tr('ImportView.22c7d7', '尚未选择') }}</span>
         </div>
         <div class="actions">
           <button class="btn-primary" :disabled="busy || !zipFile" @click="zipPrecheck">
@@ -853,37 +854,37 @@ async function cloneTemplate(): Promise<void> {
 
       <template v-if="attachPlan">
         <div class="card block">
-          <h2 class="block__title">② 映射预览（尚未写入任何数据）</h2>
+          <h2 class="block__title">{{ tr('ImportView.e98f0b', '② 映射预览（尚未写入任何数据）') }}</h2>
           <div class="stats">
             <div class="stat">
               <span class="stat__n">{{ attachPlan.total }}</span>
-              <span class="stat__k">文件</span>
+              <span class="stat__k">{{ tr('ImportView.49deaf', '文件') }}</span>
             </div>
             <div class="stat stat--ok">
               <span class="stat__n">{{ attachPlan.match }}</span>
-              <span class="stat__k">挂已有条目</span>
+              <span class="stat__k">{{ tr('ImportView.edf716', '挂已有条目') }}</span>
             </div>
             <div class="stat stat--new">
               <span class="stat__n">{{ attachPlan.create }}</span>
-              <span class="stat__k">将新建条目</span>
+              <span class="stat__k">{{ tr('ImportView.079be7', '将新建条目') }}</span>
             </div>
             <div class="stat stat--warn">
               <span class="stat__n">{{ attachPlan.conflict }}</span>
-              <span class="stat__k">重名待指定</span>
+              <span class="stat__k">{{ tr('ImportView.d7db20', '重名待指定') }}</span>
             </div>
             <div class="stat stat--muted">
               <span class="stat__n">{{ attachPlan.skip }}</span>
-              <span class="stat__k">跳过</span>
+              <span class="stat__k">{{ tr('ImportView.31a985', '跳过') }}</span>
             </div>
             <div class="stat">
               <span class="stat__n">{{ attachPlan.dirs }}</span>
-              <span class="stat__k">涉及条目</span>
+              <span class="stat__k">{{ tr('ImportView.8ce308', '涉及条目') }}</span>
             </div>
           </div>
-          <p class="hint">合计 {{ fmtSize(attachPlan.bytes) }}；跳过项不会写入数据库。</p>
+          <p class="hint">{{ tr('ImportView.92bcbf', '合计') }} {{ fmtSize(attachPlan.bytes) }}{{ tr('ImportView.51b1c2', '；跳过项不会写入数据库。') }}</p>
 
           <div v-if="attachPlan.newTitles.length" class="tagline">
-            <span class="tag tag--new">将新建</span>
+            <span class="tag tag--new">{{ tr('ImportView.fb8782', '将新建') }}</span>
             <span v-for="t in attachPlan.newTitles" :key="t" class="tag">{{ t }}</span>
           </div>
 
@@ -891,10 +892,10 @@ async function cloneTemplate(): Promise<void> {
             <thead>
               <tr>
                 <th>#</th>
-                <th>包内路径</th>
-                <th>目标条目</th>
-                <th>动作</th>
-                <th>说明</th>
+                <th>{{ tr('ImportView.d22207', '包内路径') }}</th>
+                <th>{{ tr('ImportView.d05f4c', '目标条目') }}</th>
+                <th>{{ tr('ImportView.d9d982', '动作') }}</th>
+                <th>{{ tr('ImportView.26670d', '说明') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -918,7 +919,7 @@ async function cloneTemplate(): Promise<void> {
         </div>
 
         <div v-if="attachPlan.conflicts.length" class="card block">
-          <h2 class="block__title">③ 指定重名目录的目标条目</h2>
+          <h2 class="block__title">{{ tr('ImportView.cdd9d8', '③ 指定重名目录的目标条目') }}</h2>
           <p class="hint">
             下列目录名在库中存在多个同名条目，系统不做猜测，请逐个指定；
             选择「新建条目」则会再建一个同名条目。
@@ -926,8 +927,8 @@ async function cloneTemplate(): Promise<void> {
           <div v-for="c in attachPlan.conflicts" :key="c.title" class="conflict">
             <div class="conflict__title">{{ c.title }}</div>
             <select v-model="resolutions[c.title]" class="field-control">
-              <option :value="undefined" disabled>请选择…</option>
-              <option value="0">新建条目</option>
+              <option :value="undefined" disabled>{{ tr('ImportView.fc7288', '请选择…') }}</option>
+              <option value="0">{{ tr('ImportView.69dff1', '新建条目') }}</option>
               <option v-for="k in c.candidates" :key="k.id" :value="k.id">
                 {{ k.title }} · #{{ k.id }}
               </option>
@@ -936,7 +937,7 @@ async function cloneTemplate(): Promise<void> {
         </div>
 
         <div class="card block">
-          <h2 class="block__title">④ 确认导入</h2>
+          <h2 class="block__title">{{ tr('ImportView.3c0d1f', '④ 确认导入') }}</h2>
           <p class="hint">
             确认后才会建条目、写附件。执行是异步的，可在下方任务列表看进度与错误报告。
           </p>
@@ -961,7 +962,7 @@ async function cloneTemplate(): Promise<void> {
       <!-- 导入模板（FR-IMP-005）：保存/套用「CSV 表头 → 字段键」映射 -->
       <div class="card block">
         <div class="block__head">
-          <h2 class="block__title">导入模板</h2>
+          <h2 class="block__title">{{ tr('ImportView.a939e0', '导入模板') }}</h2>
           <button class="btn-ghost" type="button" :disabled="busy || tplBusy" @click="openMapper">
             {{ activeTemplate ? '编辑当前映射' : '新建模板' }}
           </button>
@@ -971,7 +972,7 @@ async function cloneTemplate(): Promise<void> {
         </p>
         <div class="tpl-bar">
           <select v-model="activeTemplateId" class="field-control" @change="applyTemplate(activeTemplateId)">
-            <option value="">— 不使用模板（固定列序）—</option>
+            <option value="">{{ tr('ImportView.9a22de', '— 不使用模板（固定列序）—') }}</option>
             <option v-for="t in templates" :key="t.id" :value="String(t.id)">{{ t.name }}</option>
           </select>
           <button
@@ -1018,7 +1019,7 @@ async function cloneTemplate(): Promise<void> {
             </button>
           </template>
           <template v-else>
-            <span class="tag tag--match">已套用「{{ activeTemplate.name }}」</span>
+            <span class="tag tag--match">{{ tr('ImportView.effa3c', '已套用「') }}{{ activeTemplate.name }}{{ tr('ImportView.4c02bd', '」') }}</span>
             <span class="hint">
               映射 {{ Object.keys(activeTemplate.mapping).length }} 个字段；
               预检与提交将按此模板解析（不再要求固定列序）。
@@ -1030,15 +1031,15 @@ async function cloneTemplate(): Promise<void> {
       <!-- 映射编辑器（新建 / 编辑） -->
       <template v-if="showMapper">
         <div class="card block">
-          <h2 class="block__title">① 设置表头映射</h2>
+          <h2 class="block__title">{{ tr('ImportView.57ee70', '① 设置表头映射') }}</h2>
           <p class="hint">
             为每个 CSV 表头选择目标字段。系统字段固定；自定义字段请从下方「参考分类」加载对应分类的字段定义。
           </p>
           <table class="tbl">
             <thead>
               <tr>
-                <th>CSV 表头</th>
-                <th>目标字段</th>
+                <th>{{ tr('ImportView.b07c4d', 'CSV 表头') }}</th>
+                <th>{{ tr('ImportView.167c3f', '目标字段') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -1046,7 +1047,7 @@ async function cloneTemplate(): Promise<void> {
                 <td class="mono">{{ h }}</td>
                 <td>
                   <select v-model="headerField[h]" class="field-control">
-                    <option :value="SKIP">（不导入）</option>
+                    <option :value="SKIP">{{ tr('ImportView.cf92ff', '（不导入）') }}</option>
                     <option v-for="o in fieldOptions" :key="o.key" :value="o.key">
                       {{ o.name }}（{{ o.key }}）
                     </option>
@@ -1056,37 +1057,37 @@ async function cloneTemplate(): Promise<void> {
             </tbody>
           </table>
 
-          <h3 class="block__title">参考分类（用于加载自定义字段）</h3>
+          <h3 class="block__title">{{ tr('ImportView.c92c92', '参考分类（用于加载自定义字段）') }}</h3>
           <label class="field" style="max-width: 240px">
-            <span class="field__label">分类</span>
+            <span class="field__label">{{ tr('ImportView.435c52', '分类') }}</span>
             <select v-model.number="refCategory" class="field-control" @change="refreshRefFieldDefs">
               <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ c.name }}</option>
             </select>
           </label>
 
-          <h3 class="block__title">系统字段默认值（CSV 缺列时回落）</h3>
+          <h3 class="block__title">{{ tr('ImportView.180dfd', '系统字段默认值（CSV 缺列时回落）') }}</h3>
           <div class="defaults">
             <label class="field">
               <span class="field__label">subject_id</span>
-              <input v-model="tplDefaultSubject" class="field-control" placeholder="如 100" />
+              <input v-model="tplDefaultSubject" class="field-control" :placeholder="tr('ImportView.9657cf', '如 100')" />
             </label>
             <label class="field">
               <span class="field__label">category</span>
-              <input v-model="tplDefaultCategory" class="field-control" placeholder="如 3" />
+              <input v-model="tplDefaultCategory" class="field-control" :placeholder="tr('ImportView.7adc21', '如 3')" />
             </label>
             <label class="field">
               <span class="field__label">status</span>
-              <input v-model="tplDefaultStatus" class="field-control" placeholder="如 0" />
+              <input v-model="tplDefaultStatus" class="field-control" :placeholder="tr('ImportView.4ffdc4', '如 0')" />
             </label>
             <label class="field">
               <span class="field__label">sensitivity</span>
-              <input v-model="tplDefaultSensitivity" class="field-control" placeholder="如 1" />
+              <input v-model="tplDefaultSensitivity" class="field-control" :placeholder="tr('ImportView.996309', '如 1')" />
             </label>
           </div>
 
           <label class="field" style="max-width: 360px">
-            <span class="field__label">模板名称</span>
-            <input v-model="tplName" class="field-control" placeholder="给这套映射起个名字" />
+            <span class="field__label">{{ tr('ImportView.bbc511', '模板名称') }}</span>
+            <input v-model="tplName" class="field-control" :placeholder="tr('ImportView.27a87d', '给这套映射起个名字')" />
           </label>
 
           <div class="actions">
@@ -1101,17 +1102,17 @@ async function cloneTemplate(): Promise<void> {
       </template>
 
       <div class="card block">
-        <h2 class="block__title">② 选择 CSV 文件</h2>
+        <h2 class="block__title">{{ tr('ImportView.9a75fc', '② 选择 CSV 文件') }}</h2>
         <p class="hint">
           <template v-if="activeTemplate">
             已套用模板「{{ activeTemplate.name }}」——表头由模板映射决定，无需固定列序。
-            <button class="btn-text" type="button" @click="openMapper">查看 / 调整映射</button>
+            <button class="btn-text" type="button" @click="openMapper">{{ tr('ImportView.b7deac', '查看 / 调整映射') }}</button>
           </template>
           <template v-else>
             未套用模板时，表头固定为
             <code>subject_id,category,title,status,sensitivity,issued_date,expires_at,issuer,remark</code>。
           </template>
-          <button class="btn-text" type="button" @click="downloadTemplate">下载空模板</button>
+          <button class="btn-text" type="button" @click="downloadTemplate">{{ tr('ImportView.ae79d2', '下载空模板') }}</button>
         </p>
         <div class="picker">
           <input
@@ -1121,9 +1122,9 @@ async function cloneTemplate(): Promise<void> {
             class="picker__input"
             @change="pickCsv"
           />
-          <label for="csvfile" class="btn-primary picker__btn">选择 CSV 文件</label>
+          <label for="csvfile" class="btn-primary picker__btn">{{ tr('ImportView.37c922', '选择 CSV 文件') }}</label>
           <span v-if="csvName" class="picker__name">{{ csvName }}</span>
-          <span v-else class="hint">尚未选择</span>
+          <span v-else class="hint">{{ tr('ImportView.22c7d7', '尚未选择') }}</span>
         </div>
         <div class="actions">
           <button class="btn-primary" :disabled="busy || !csvText" @click="csvPrecheck">
@@ -1133,31 +1134,31 @@ async function cloneTemplate(): Promise<void> {
       </div>
 
       <div v-if="csvPlan" class="card block">
-        <h2 class="block__title">③ 预检结果</h2>
+        <h2 class="block__title">{{ tr('ImportView.acc7aa', '③ 预检结果') }}</h2>
         <div class="stats">
           <div class="stat">
             <span class="stat__n">{{ csvPlan.total }}</span>
-            <span class="stat__k">数据行</span>
+            <span class="stat__k">{{ tr('ImportView.0ac61c', '数据行') }}</span>
           </div>
           <div class="stat stat--ok">
             <span class="stat__n">{{ csvPlan.valid }}</span>
-            <span class="stat__k">可导入</span>
+            <span class="stat__k">{{ tr('ImportView.414db0', '可导入') }}</span>
           </div>
           <div class="stat stat--warn">
             <span class="stat__n">{{ csvPlan.invalid }}</span>
-            <span class="stat__k">有问题</span>
+            <span class="stat__k">{{ tr('ImportView.ec0235', '有问题') }}</span>
           </div>
           <div class="stat stat--muted">
             <span class="stat__n">{{ csvPlan.duplicate }}</span>
-            <span class="stat__k">重复跳过</span>
+            <span class="stat__k">{{ tr('ImportView.2d5448', '重复跳过') }}</span>
           </div>
         </div>
         <table v-if="csvPlan.errors.length" class="tbl">
           <thead>
             <tr>
-              <th>行号</th>
-              <th>字段</th>
-              <th>问题</th>
+              <th>{{ tr('ImportView.f81e57', '行号') }}</th>
+              <th>{{ tr('ImportView.77a49f', '字段') }}</th>
+              <th>{{ tr('ImportView.2fb49e', '问题') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -1168,16 +1169,16 @@ async function cloneTemplate(): Promise<void> {
             </tr>
           </tbody>
         </table>
-        <p v-if="csvPlan.truncated" class="hint">仅显示前 50 条错误，完整清单见任务报告。</p>
+        <p v-if="csvPlan.truncated" class="hint">{{ tr('ImportView.7a01c2', '仅显示前 50 条错误，完整清单见任务报告。') }}</p>
 
         <!-- FR-IMP-004：重复行清单（同主体 + 同标题已存在） -->
         <template v-if="csvPlan.duplicates.length">
-          <h3 class="block__title">重复行（已存在，将跳过）</h3>
+          <h3 class="block__title">{{ tr('ImportView.5b2a65', '重复行（已存在，将跳过）') }}</h3>
           <table class="tbl">
             <thead>
               <tr>
-                <th>行号</th>
-                <th>说明</th>
+                <th>{{ tr('ImportView.f81e57', '行号') }}</th>
+                <th>{{ tr('ImportView.26670d', '说明') }}</th>
               </tr>
             </thead>
             <tbody>
@@ -1206,11 +1207,11 @@ async function cloneTemplate(): Promise<void> {
     <!-- ---------------- 导出包回导（FR-EXP-008）---------------- -->
     <template v-else>
       <div class="card block">
-        <h2 class="block__title">① 选择导出包</h2>
+        <h2 class="block__title">{{ tr('ImportView.09761a', '① 选择导出包') }}</h2>
         <p class="hint">
           导出包为 <code>.amsx.json</code> 单文件（由「导出」生成的可携带包）。
-          回导前会先校验 <strong>签名（HMAC-SM3）</strong>与
-          <strong>items 段 sha256 指纹</strong>，任一不匹配即拒绝导入 ——
+          回导前会先校验 <strong>{{ tr('ImportView.efdc9c', '签名（HMAC-SM3）') }}</strong>与
+          <strong>{{ tr('ImportView.84518e', 'items 段 sha256 指纹') }}</strong>，任一不匹配即拒绝导入 ——
           被篡改过的包一个字节都不会落库。
         </p>
         <div class="picker">
@@ -1221,9 +1222,9 @@ async function cloneTemplate(): Promise<void> {
             class="picker__input"
             @change="pickBundle"
           />
-          <label for="bundlefile" class="btn-primary picker__btn">选择导出包</label>
+          <label for="bundlefile" class="btn-primary picker__btn">{{ tr('ImportView.9c9003', '选择导出包') }}</label>
           <span v-if="bundleName" class="picker__name">{{ bundleName }}</span>
-          <span v-else class="hint">尚未选择</span>
+          <span v-else class="hint">{{ tr('ImportView.22c7d7', '尚未选择') }}</span>
         </div>
         <div class="actions">
           <button class="btn-primary" :disabled="busy || !bundleText" @click="bundlePrecheck">
@@ -1233,31 +1234,31 @@ async function cloneTemplate(): Promise<void> {
       </div>
 
       <div v-if="bundlePlan" class="card block">
-        <h2 class="block__title">② 回导预检结果（签名与指纹已通过）</h2>
+        <h2 class="block__title">{{ tr('ImportView.8caa5f', '② 回导预检结果（签名与指纹已通过）') }}</h2>
         <div class="stats">
           <div class="stat">
             <span class="stat__n">{{ bundlePlan.total }}</span>
-            <span class="stat__k">条目</span>
+            <span class="stat__k">{{ tr('ImportView.4e5f90', '条目') }}</span>
           </div>
           <div class="stat stat--ok">
             <span class="stat__n">{{ bundlePlan.valid }}</span>
-            <span class="stat__k">可回导</span>
+            <span class="stat__k">{{ tr('ImportView.1cef02', '可回导') }}</span>
           </div>
           <div class="stat stat--warn">
             <span class="stat__n">{{ bundlePlan.invalid }}</span>
-            <span class="stat__k">有问题</span>
+            <span class="stat__k">{{ tr('ImportView.ec0235', '有问题') }}</span>
           </div>
           <div class="stat stat--muted">
             <span class="stat__n">{{ bundlePlan.duplicate }}</span>
-            <span class="stat__k">重复跳过</span>
+            <span class="stat__k">{{ tr('ImportView.2d5448', '重复跳过') }}</span>
           </div>
         </div>
         <table v-if="bundlePlan.errors.length" class="tbl">
           <thead>
             <tr>
               <th>#</th>
-              <th>字段</th>
-              <th>问题</th>
+              <th>{{ tr('ImportView.77a49f', '字段') }}</th>
+              <th>{{ tr('ImportView.2fb49e', '问题') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -1276,7 +1277,7 @@ async function cloneTemplate(): Promise<void> {
           >
             {{ busy ? '提交中…' : `确认回导 ${bundlePlan.valid} 条` }}
           </button>
-          <span class="hint">包内主体若不在你的可写范围，将统一落到上方选择的「目标主体」。</span>
+          <span class="hint">{{ tr('ImportView.ac221e', '包内主体若不在你的可写范围，将统一落到上方选择的「目标主体」。') }}</span>
         </div>
       </div>
     </template>
@@ -1284,21 +1285,21 @@ async function cloneTemplate(): Promise<void> {
     <!-- ---------------- 任务列表 ---------------- -->
     <div class="card block">
       <div class="block__head">
-        <h2 class="block__title">导入任务</h2>
+        <h2 class="block__title">{{ tr('ImportView.c92a5d', '导入任务') }}</h2>
         <button class="btn-ghost" type="button" :disabled="tasksLoading" @click="loadTasks">
           刷新
         </button>
       </div>
-      <div v-if="!tasks.length" class="empty">还没有导入任务。</div>
+      <div v-if="!tasks.length" class="empty">{{ tr('ImportView.827096', '还没有导入任务。') }}</div>
       <table v-else class="tbl">
         <thead>
           <tr>
-            <th>任务号</th>
-            <th>类型</th>
-            <th>状态</th>
-            <th>进度</th>
-            <th>成功 / 失败</th>
-            <th>创建时间</th>
+            <th>{{ tr('ImportView.9b53e5', '任务号') }}</th>
+            <th>{{ tr('ImportView.e4e46c', '类型') }}</th>
+            <th>{{ tr('ImportView.62e951', '状态') }}</th>
+            <th>{{ tr('ImportView.acf014', '进度') }}</th>
+            <th>{{ tr('ImportView.96bb74', '成功 / 失败') }}</th>
+            <th>{{ tr('ImportView.84e380', '创建时间') }}</th>
             <th></th>
           </tr>
         </thead>
@@ -1348,7 +1349,7 @@ async function cloneTemplate(): Promise<void> {
           </tr>
         </tbody>
       </table>
-      <p v-if="taskTotal > tasks.length" class="hint">共 {{ taskTotal }} 个任务，显示最近 {{ tasks.length }} 个。</p>
+      <p v-if="taskTotal > tasks.length" class="hint">{{ tr('ImportView.3b6ef8', '共') }} {{ taskTotal }} {{ tr('ImportView.4b939c', '个任务，显示最近') }} {{ tasks.length }} {{ tr('ImportView.17865c', '个。') }}</p>
     </div>
   </section>
 </template>

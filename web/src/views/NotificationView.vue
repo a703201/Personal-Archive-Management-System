@@ -13,6 +13,7 @@
  * 布尔 is_read 序列化为 "t"/"f" 字符串，需按值判断。
  */
 import { ref, onMounted } from 'vue'
+import { t, locale } from '../i18n'
 import { api } from '../api/client'
 import { useToast } from '../composables/useToast'
 
@@ -137,7 +138,7 @@ onMounted(load)
 <template>
   <section>
     <div class="page-head">
-      <h1 class="page-title">通知中心</h1>
+      <h1 class="page-title">{{ t('NotificationView.d3d59c', '通知中心') }}</h1>
       <button
         class="btn-ghost"
         type="button"
@@ -151,17 +152,17 @@ onMounted(load)
     <div class="toolbar">
       <label class="switch">
         <input v-model="onlyUnread" type="checkbox" @change="changeFilter" />
-        <span>仅看未读</span>
+        <span>{{ t('NotificationView.75fa10', '仅看未读') }}</span>
       </label>
-      <span class="count">共 {{ total }} 条</span>
+      <span class="count">{{ t('NotificationView.3b6ef8', '共') }} {{ total }} {{ t('NotificationView.bce2ef', '条') }}</span>
     </div>
 
-    <p v-if="loading" class="hint">加载中…</p>
+    <p v-if="loading" class="hint">{{ t('NotificationView.300ee3', '加载中…') }}</p>
     <p v-else-if="error" class="hint hint--error">{{ error }}</p>
 
     <div v-else-if="items.length === 0" class="card empty">
-      <div class="empty__title">暂无通知</div>
-      <p class="empty__sub">档案到期提醒、安全预警等都会出现在这里。</p>
+      <div class="empty__title">{{ t('NotificationView.652ef0', '暂无通知') }}</div>
+      <p class="empty__sub">{{ t('NotificationView.e6e4fb', '档案到期提醒、安全预警等都会出现在这里。') }}</p>
     </div>
 
     <div v-else class="list">
@@ -181,7 +182,7 @@ onMounted(load)
           <p class="note__text">{{ n.body }}</p>
           <div class="note__foot">
             <span class="note__time">{{ fmtTime(n.created_at_ms) }}</span>
-            <a v-if="n.link" class="btn-text" :href="n.link">查看</a>
+            <a v-if="n.link" class="btn-text" :href="n.link">{{ t('NotificationView.f7acef', '查看') }}</a>
           </div>
         </div>
         <div class="note__actions" v-if="isUnread(n)">
@@ -201,7 +202,7 @@ onMounted(load)
       <button class="btn-ghost" type="button" :disabled="page <= 1" @click="changePage(-1)">
         上一页
       </button>
-      <span class="pager__info">第 {{ page }} / {{ totalPages() }} 页</span>
+      <span class="pager__info">{{ t('NotificationView.dae828', '第') }} {{ page }} {{ t('NotificationView.42099b', '/') }} {{ totalPages() }} {{ locale === 'zh-CN' ? t('NotificationView.734221', '页') : '' }}</span>
       <button
         class="btn-ghost"
         type="button"

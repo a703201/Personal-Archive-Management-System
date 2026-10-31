@@ -1,0 +1,82 @@
+# ============================================================
+# AMS · 仓颉工具链基础镜像（Linux）
+#
+# 说明：本文件刻意不写 `# syntax=docker/dockerfile:1`。
+#   该指令会让 BuildKit 去拉取外部 frontend 镜像，在本机配置的
+#   镜像加速器（docker.xuanyuan.me 免费节点）偶发 403 时直接
+#   导致构建失败；而本 Dockerfile 用到的全部特性（含
+#   --build-context 命名构建上下文）均由内置 frontend 支持。
+#
+# 目的：把「Linux 版 cjc + stdx + 编译依赖」一次性固化成一个镜像，
+#       供 Dockerfile（源码构建）与本机容器内编译复用，
+#       避免每次构建都重新下载 200MB SDK。
+#
+# 为什么不直接在 Dockerfile 里 curl 下载：
+#   gitcode 的 200MB 资产在多轮实测中会在 30~60MB 处被对端断开
+#   （curl: (56) schannel: server closed abruptly），
+#   因此改为「宿主机断点续传下载 → 作 build context 传入」。
+#
+# 构建（SDK 目录通过 named build context 传入，不进 git）：
+#   docker build -t ams-cj:1.2.0-beta.03 \
+#     --build-context sdksrc=.tmp/sdk \
+#     -f deploy/docker/Dockerfile.cjbase .
+#
+# 产物镜像内的关键路径：
+#   /opt/cangjie/bin/cjc                                 编译器
+#   /opt/cangjie/runtime/lib/linux_x86_64_cjnative/*.so  运行时
+#   /opt/cangjie-stdx/linux_x86_64_cjnative/dynamic/stdx stdx（.cjo + .so）
+#
+# 版本说明：
+#   SDK 与 stdx 必须来自同一版本线（cjc 会校验 .cjo 的编译器版本），
+#   本文件取 1.2.0-beta.03 + stdx 1.2.0-beta.03.1（成对发布）。
+# ============================================================
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 清空继承来的 LD_LIBRARY_PATH：
+# 若 BASE 镜像（如 enmotech/opengauss）注入了自带 libstdc++，
+# 会让 apt 报 `GLIBCXX_3.4.26 not found` 而无法装包。
+ENV LD_LIBRARY_PATH=
+
+# 仓颉 Linux 编译所需的系统依赖：
+#   gcc/g++/libc6-dev/make —— C 运行时头文件与链接
+#   binutils                —— ld / ar（cjc 链接阶段依赖）
+#   unzip                   —— stdx 以 .zip 分发
+#
+# 换中科大源：直连 archive.ubuntu.com 在本机实测极慢（Docker Hub
+# 拉取都要数分钟），ustc 源实测 ~4MB/s。
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list ]; then \
+        sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.ustc.edu.cn/ubuntu|g; \
+                s|http://security.ubuntu.com/ubuntu|http://mirrors.ustc.edu.cn/ubuntu|g' \
+            /etc/apt/sources.list; \
+    fi; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl xz-utils unzip \
+        binutils gcc g++ libc6-dev make; \
+    rm -rf /var/lib/apt/lists/*
+
+# 从外部 build context 取两个压缩包（该目录被 .dockerignore 排除，不进仓库）
+COPY --from=sdksrc cangjie-sdk-linux-x64-1.2.0-beta.03.tar.gz /tmp/cj.tar.gz
+COPY --from=sdksrc cangjie-stdx-linux-x64-1.2.0-beta.03.1.zip  /tmp/stdx.zip
+
+RUN set -eux; \
+    mkdir -p /opt/cangjie; \
+    tar -xzf /tmp/cj.tar.gz -C /opt/cangjie --strip-components=1; \
+    mkdir -p /tmp/stdx /opt/cangjie-stdx; \
+    unzip -q /tmp/stdx.zip -d /tmp/stdx; \
+    mv /tmp/stdx/linux_x86_64_cjnative /opt/cangjie-stdx/linux_x86_64_cjnative; \
+    rm -rf /tmp/cj.tar.gz /tmp/stdx.zip /tmp/stdx; \
+    test -x /opt/cangjie/bin/cjc; \
+    test -d /opt/cangjie-stdx/linux_x86_64_cjnative/dynamic/stdx
+
+ENV CANGJIE_HOME=/opt/cangjie \
+    CANGJIE_STDX=/opt/cangjie-stdx/linux_x86_64_cjnative \
+    PATH="/opt/cangjie/bin:${PATH}"
+
+# 构建期自检：编译器能跑、目标三元组是 linux
+RUN cjc --version
+
+WORKDIR /src

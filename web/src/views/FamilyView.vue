@@ -29,6 +29,7 @@
  *      所以界面上它必须选主体之后才可选。
  */
 import { computed, onMounted, ref, watch } from 'vue'
+import { t } from '../i18n'
 import { api, ApiError } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
 import { CATEGORY_DEFS, categoryName, formatTime, sensitivityName, statusName } from '../composables/useCatalog'
@@ -637,7 +638,7 @@ onMounted(async () => {
   <section class="family-page">
     <header class="page-head">
       <div>
-        <h1 class="page-title">家庭协作</h1>
+        <h1 class="page-title">{{ t('FamilyView.e686bb', '家庭协作') }}</h1>
         <p class="page-desc">
           把家人拉进家庭组，再按「整个主体 / 某分类 / 单条条目」逐级缩小范围授予只读权限。
           成员不会因此获得系统角色，也看不到任何未被授权的档案。
@@ -675,7 +676,7 @@ onMounted(async () => {
 
     <!-- ---------- 我的家庭组 ---------- -->
     <template v-if="tab === 'groups'">
-      <p v-if="loading" class="hint">加载中…</p>
+      <p v-if="loading" class="hint">{{ t('FamilyView.300ee3', '加载中…') }}</p>
       <p v-else-if="loadError" class="hint hint--error">{{ loadError }}</p>
       <p v-else-if="groups.length === 0" class="hint">
         你还没有加入任何家庭组。创建一个，或让组所有者把邀请码发给你。
@@ -692,7 +693,7 @@ onMounted(async () => {
             </span>
             <span class="grp-item__meta">
               <span>{{ g.memberCount }} 位成员</span>
-              <span>创建于 {{ formatTime(g.createdAt) }}</span>
+              <span>{{ t('FamilyView.f3b01f', '创建于') }} {{ formatTime(g.createdAt) }}</span>
             </span>
           </button>
           <span class="grp-item__arrow" aria-hidden="true">›</span>
@@ -702,7 +703,7 @@ onMounted(async () => {
 
     <!-- ---------- 共享给我的 ---------- -->
     <template v-else>
-      <p v-if="sharedLoading" class="hint">加载中…</p>
+      <p v-if="sharedLoading" class="hint">{{ t('FamilyView.300ee3', '加载中…') }}</p>
       <p v-else-if="sharedError" class="hint hint--error">{{ sharedError }}</p>
       <p v-else-if="shared.length === 0" class="hint">
         还没有人向你共享档案。当家庭成员为你授权后，这里会出现对应条目（只读）。
@@ -720,24 +721,24 @@ onMounted(async () => {
             </span>
             <span class="grp-item__meta">
               <span>{{ statusName(it.status) }}</span>
-              <span v-if="it.issuer">签发：{{ it.issuer }}</span>
-              <span>更新于 {{ formatTime(it.updatedAt) }}</span>
+              <span v-if="it.issuer">{{ t('FamilyView.89de45', '签发：') }}{{ it.issuer }}</span>
+              <span>{{ t('FamilyView.1e1ed7', '更新于') }} {{ formatTime(it.updatedAt) }}</span>
             </span>
           </button>
           <span class="grp-item__arrow" aria-hidden="true">›</span>
         </li>
       </ul>
-      <p class="hint hint--foot">家庭成员视角只读：不能编辑、导出或再分享。</p>
+      <p class="hint hint--foot">{{ t('FamilyView.e5daa2', '家庭成员视角只读：不能编辑、导出或再分享。') }}</p>
     </template>
 
     <!-- ---------- 组详情 ---------- -->
     <AppSheet
       v-model="showDetail"
-      :title="detail?.name ?? '家庭组'"
+      ::title="t('FamilyView.f95cbd', 'detail?.name ?? \'家庭组\'')"
       size="lg"
       @close="closeDetail"
     >
-      <p v-if="detailLoading && !detail" class="hint">加载中…</p>
+      <p v-if="detailLoading && !detail" class="hint">{{ t('FamilyView.300ee3', '加载中…') }}</p>
       <p v-else-if="detailError" class="hint hint--error">{{ detailError }}</p>
 
       <div v-else-if="detail" class="detail">
@@ -745,7 +746,7 @@ onMounted(async () => {
           <span class="chip" :class="{ 'chip--own': detail.myRole === 'owner' }">
             {{ roleLabel(detail.myRole) }}
           </span>
-          <span>创建于 {{ formatTime(detail.createdAt) }}</span>
+          <span>{{ t('FamilyView.f3b01f', '创建于') }} {{ formatTime(detail.createdAt) }}</span>
         </div>
 
         <div class="seg seg--sub" role="tablist">
@@ -791,7 +792,7 @@ onMounted(async () => {
                 </span>
                 <span class="row__meta">
                   <span>{{ m.username }}</span>
-                  <span>加入于 {{ formatTime(m.joinedAt) }}</span>
+                  <span>{{ t('FamilyView.c5d3fe', '加入于') }} {{ formatTime(m.joinedAt) }}</span>
                 </span>
               </div>
               <button
@@ -824,12 +825,12 @@ onMounted(async () => {
                 <span class="row__title">
                   {{ memberName[g.granteeId] ?? `用户 ${g.granteeId}` }}
                   <span class="chip">{{ grantScopeText(g) }}</span>
-                  <span v-if="!g.active" class="chip chip--off">已失效</span>
+                  <span v-if="!g.active" class="chip chip--off">{{ t('FamilyView.a09345', '已失效') }}</span>
                 </span>
                 <span class="row__meta">
-                  <span>主体 #{{ g.subjectId }}</span>
+                  <span>{{ t('FamilyView.e88715', '主体 #') }}{{ g.subjectId }}</span>
                   <span>{{ g.expiresAt ? `到期 ${formatTime(g.expiresAt)}` : '长期有效' }}</span>
-                  <span>授予于 {{ formatTime(g.grantedAt) }}</span>
+                  <span>{{ t('FamilyView.1d4d5d', '授予于') }} {{ formatTime(g.grantedAt) }}</span>
                 </span>
               </div>
               <button
@@ -849,7 +850,7 @@ onMounted(async () => {
           <!-- 刚生成：明文只显示这一次 -->
           <div v-if="createdInvite" class="invite-new">
             <p class="invite-new__warn">
-              邀请码与链接<strong>只显示这一次</strong>，关闭后无法再次查看；如需重发请撤销后重新生成。
+              邀请码与链接<strong>{{ t('FamilyView.3ebcff', '只显示这一次') }}</strong>，关闭后无法再次查看；如需重发请撤销后重新生成。
             </p>
             <div class="invite-new__code">{{ createdInvite.code }}</div>
             <div class="invite-new__acts">
@@ -884,9 +885,9 @@ onMounted(async () => {
                   <span class="chip">{{ roleLabel(inv.targetRole) }}</span>
                 </span>
                 <span class="row__meta">
-                  <span>已用 {{ inv.usedCount }}/{{ inv.maxUses }}</span>
-                  <span>失败 {{ inv.failCount }} 次</span>
-                  <span>到期 {{ formatTime(inv.expiresAt) }}</span>
+                  <span>{{ t('FamilyView.4c9426', '已用') }} {{ inv.usedCount }}{{ t('FamilyView.42099b', '/') }}{{ inv.maxUses }}</span>
+                  <span>{{ t('FamilyView.3e3c80', '失败') }} {{ inv.failCount }} {{ t('FamilyView.5e5b81', '次') }}</span>
+                  <span>{{ t('FamilyView.8066e0', '到期') }} {{ formatTime(inv.expiresAt) }}</span>
                 </span>
               </div>
               <button
@@ -902,25 +903,25 @@ onMounted(async () => {
         </div>
 
         <div v-if="detail.canDissolve" class="detail__foot">
-          <button class="btn-text danger" type="button" @click="dissolve">解散家庭组</button>
+          <button class="btn-text danger" type="button" @click="dissolve">{{ t('FamilyView.75274f', '解散家庭组') }}</button>
         </div>
       </div>
     </AppSheet>
 
     <!-- ---------- 创建家庭组 ---------- -->
-    <AppSheet v-model="showCreate" title="创建家庭组" size="sm" :dismissible="!creating">
+    <AppSheet v-model="showCreate" :title="t('FamilyView.ee508f', '创建家庭组')" size="sm" :dismissible="!creating">
       <div class="field">
-        <label class="field__label" for="fam-name">名称 <em>*</em></label>
+        <label class="field__label" for="fam-name">{{ t('FamilyView.1be7ae', '名称') }} <em>*</em></label>
         <input
           id="fam-name"
           v-model="newName"
           class="field-control"
           maxlength="32"
-          placeholder="例如：何家、我的小家庭"
+          :placeholder="t('FamilyView.37b795', '例如：何家、我的小家庭')"
           autofocus
           @keyup.enter="submitCreate"
         />
-        <p class="field__hint">最多 32 个字符。名称仅组内成员可见。</p>
+        <p class="field__hint">{{ t('FamilyView.9269c0', '最多 32 个字符。名称仅组内成员可见。') }}</p>
       </div>
       <p v-if="createError" class="hint hint--error">{{ createError }}</p>
       <template #footer>
@@ -934,11 +935,11 @@ onMounted(async () => {
     </AppSheet>
 
     <!-- ---------- 生成邀请 ---------- -->
-    <AppSheet v-model="showInviteForm" title="生成邀请" :dismissible="!creatingInvite">
+    <AppSheet v-model="showInviteForm" :title="t('FamilyView.83dc50', '生成邀请')" :dismissible="!creatingInvite">
       <!-- 结果已出：只展示结果，不再显示表单，避免误以为还能再点一次 -->
       <div v-if="createdInvite" class="invite-new">
         <p class="invite-new__warn">
-          邀请码与链接<strong>只显示这一次</strong>，关闭后无法再次查看。
+          邀请码与链接<strong>{{ t('FamilyView.3ebcff', '只显示这一次') }}</strong>，关闭后无法再次查看。
         </p>
         <div class="invite-new__code">{{ createdInvite.code }}</div>
         <div class="invite-new__acts">
@@ -958,15 +959,15 @@ onMounted(async () => {
 
       <div v-else class="form-grid">
         <div class="field">
-          <label class="field__label" for="inv-role">加入后的角色</label>
+          <label class="field__label" for="inv-role">{{ t('FamilyView.121b61', '加入后的角色') }}</label>
           <select id="inv-role" v-model="inviteRole" class="field-control">
-            <option value="member">成员（只看被授权内容）</option>
-            <option value="manager">管理员（可邀请与授权）</option>
+            <option value="member">{{ t('FamilyView.e61e87', '成员（只看被授权内容）') }}</option>
+            <option value="manager">{{ t('FamilyView.d02c90', '管理员（可邀请与授权）') }}</option>
           </select>
-          <p class="field__hint">不能通过邀请直接产生第二个所有者。</p>
+          <p class="field__hint">{{ t('FamilyView.728184', '不能通过邀请直接产生第二个所有者。') }}</p>
         </div>
         <div class="field">
-          <label class="field__label" for="inv-min">有效分钟数</label>
+          <label class="field__label" for="inv-min">{{ t('FamilyView.f27221', '有效分钟数') }}</label>
           <input
             id="inv-min"
             v-model.number="inviteMinutes"
@@ -975,10 +976,10 @@ onMounted(async () => {
             min="1"
             max="1440"
           />
-          <p class="field__hint">默认 15 分钟，上限 1440（1 天）。</p>
+          <p class="field__hint">{{ t('FamilyView.739ecc', '默认 15 分钟，上限 1440（1 天）。') }}</p>
         </div>
         <div class="field">
-          <label class="field__label" for="inv-uses">可用次数</label>
+          <label class="field__label" for="inv-uses">{{ t('FamilyView.e49a4e', '可用次数') }}</label>
           <input
             id="inv-uses"
             v-model.number="inviteUses"
@@ -987,10 +988,10 @@ onMounted(async () => {
             min="1"
             max="10"
           />
-          <p class="field__hint">默认 1 次，上限 10 次。</p>
+          <p class="field__hint">{{ t('FamilyView.066f2c', '默认 1 次，上限 10 次。') }}</p>
         </div>
         <div class="field">
-          <label class="field__label" for="inv-fails">错误次数上限</label>
+          <label class="field__label" for="inv-fails">{{ t('FamilyView.7a52f1', '错误次数上限') }}</label>
           <input
             id="inv-fails"
             v-model.number="inviteFails"
@@ -999,7 +1000,7 @@ onMounted(async () => {
             min="1"
             max="20"
           />
-          <p class="field__hint">输错达到该次数即自动作废。</p>
+          <p class="field__hint">{{ t('FamilyView.5e3e27', '输错达到该次数即自动作废。') }}</p>
         </div>
       </div>
 
@@ -1027,12 +1028,12 @@ onMounted(async () => {
     </AppSheet>
 
     <!-- ---------- 新增授权 ---------- -->
-    <AppSheet v-model="showGrantForm" title="新增授权" :dismissible="!creatingGrant">
+    <AppSheet v-model="showGrantForm" :title="t('FamilyView.f31d07', '新增授权')" :dismissible="!creatingGrant">
       <div class="form-grid">
         <div class="field">
-          <label class="field__label" for="gr-grantee">被授权人 <em>*</em></label>
+          <label class="field__label" for="gr-grantee">{{ t('FamilyView.810d0e', '被授权人') }} <em>*</em></label>
           <select id="gr-grantee" v-model="grantGrantee" class="field-control">
-            <option value="">请选择成员</option>
+            <option value="">{{ t('FamilyView.257d2c', '请选择成员') }}</option>
             <option v-for="m in granteeOptions" :key="m.userId" :value="m.userId">
               {{ m.nickname || m.username }}（{{ roleLabel(m.role) }}）
             </option>
@@ -1042,36 +1043,36 @@ onMounted(async () => {
           </p>
         </div>
         <div class="field">
-          <label class="field__label" for="gr-subject">档案主体 <em>*</em></label>
+          <label class="field__label" for="gr-subject">{{ t('FamilyView.74bc27', '档案主体') }} <em>*</em></label>
           <select id="gr-subject" v-model="grantSubject" class="field-control">
-            <option value="">请选择主体</option>
+            <option value="">{{ t('FamilyView.518358', '请选择主体') }}</option>
             <option v-for="s in subjects" :key="s.id" :value="s.id">
               {{ s.name }}{{ s.isPrimary ? '（本人）' : '' }}
             </option>
           </select>
-          <p class="field__hint">只能授权自己名下的主体。</p>
+          <p class="field__hint">{{ t('FamilyView.4b82ee', '只能授权自己名下的主体。') }}</p>
         </div>
 
         <div class="field field--full">
-          <span class="field__label">授权粒度</span>
+          <span class="field__label">{{ t('FamilyView.6483bf', '授权粒度') }}</span>
           <div class="radios">
             <label class="radio">
               <input v-model="grantScope" type="radio" value="subject" />
-              <span>整个主体（该主体下全部条目）</span>
+              <span>{{ t('FamilyView.2a9637', '整个主体（该主体下全部条目）') }}</span>
             </label>
             <label class="radio">
               <input v-model="grantScope" type="radio" value="category" />
-              <span>某个分类（同主体内按分类收窄）</span>
+              <span>{{ t('FamilyView.996773', '某个分类（同主体内按分类收窄）') }}</span>
             </label>
             <label class="radio">
               <input v-model="grantScope" type="radio" value="item" />
-              <span>单条条目（最小范围）</span>
+              <span>{{ t('FamilyView.2204ad', '单条条目（最小范围）') }}</span>
             </label>
           </div>
         </div>
 
         <div v-if="grantScope === 'category'" class="field field--full">
-          <label class="field__label" for="gr-cat">分类</label>
+          <label class="field__label" for="gr-cat">{{ t('FamilyView.435c52', '分类') }}</label>
           <select id="gr-cat" v-model.number="grantCategory" class="field-control">
             <option v-for="c in CATEGORY_DEFS" :key="c.code" :value="c.code">
               {{ c.name }}
@@ -1080,7 +1081,7 @@ onMounted(async () => {
         </div>
 
         <div v-if="grantScope === 'item'" class="field field--full">
-          <label class="field__label" for="gr-item">条目 <em>*</em></label>
+          <label class="field__label" for="gr-item">{{ t('FamilyView.4e5f90', '条目') }} <em>*</em></label>
           <select id="gr-item" v-model="grantItem" class="field-control" :disabled="grantItemsLoading">
             <option value="">
               {{ grantItemsLoading ? '加载中…' : grantSubject ? '请选择条目' : '请先选择档案主体' }}
@@ -1092,17 +1093,17 @@ onMounted(async () => {
         </div>
 
         <div class="field field--full">
-          <label class="field__label" for="gr-hours">有效期</label>
+          <label class="field__label" for="gr-hours">{{ t('FamilyView.222460', '有效期') }}</label>
           <select id="gr-hours" v-model.number="grantHours" class="field-control">
-            <option :value="0">长期有效（直到手动撤销）</option>
-            <option :value="24">24 小时</option>
-            <option :value="168">7 天</option>
-            <option :value="720">30 天</option>
+            <option :value="0">{{ t('FamilyView.b6444d', '长期有效（直到手动撤销）') }}</option>
+            <option :value="24">{{ t('FamilyView.284b07', '24 小时') }}</option>
+            <option :value="168">{{ t('FamilyView.e45a81', '7 天') }}</option>
+            <option :value="720">{{ t('FamilyView.9401ee', '30 天') }}</option>
           </select>
         </div>
       </div>
 
-      <p class="notice">授权为只读：对方可以查看被共享的条目，但不能编辑、导出或再分享。</p>
+      <p class="notice">{{ t('FamilyView.48f774', '授权为只读：对方可以查看被共享的条目，但不能编辑、导出或再分享。') }}</p>
       <p v-if="grantError" class="hint hint--error">{{ grantError }}</p>
 
       <template #footer>
@@ -1116,8 +1117,8 @@ onMounted(async () => {
     </AppSheet>
 
     <!-- ---------- 共享条目详情（只读） ---------- -->
-    <AppSheet v-model="showSharedItem" :title="sharedDetail?.title ?? '档案'" @close="sharedDetail = null">
-      <p v-if="!sharedDetail && !sharedDetailError" class="hint">加载中…</p>
+    <AppSheet v-model="showSharedItem" ::title="sharedDetail?.title ?? t('FamilyView.f104e4', '档案')" @close="sharedDetail = null">
+      <p v-if="!sharedDetail && !sharedDetailError" class="hint">{{ t('FamilyView.300ee3', '加载中…') }}</p>
       <p v-else-if="sharedDetailError" class="hint hint--error">{{ sharedDetailError }}</p>
       <div v-else-if="sharedDetail" class="shared-detail">
         <div class="shared-detail__tags">
@@ -1129,22 +1130,22 @@ onMounted(async () => {
         </div>
         <dl class="kv">
           <template v-if="sharedDetail.issuer">
-            <dt>签发机构</dt>
+            <dt>{{ t('FamilyView.8eb731', '签发机构') }}</dt>
             <dd>{{ sharedDetail.issuer }}</dd>
           </template>
           <template v-if="sharedDetail.issuedDate">
-            <dt>签发日期</dt>
+            <dt>{{ t('FamilyView.0b8bcd', '签发日期') }}</dt>
             <dd>{{ sharedDetail.issuedDate }}</dd>
           </template>
           <template v-if="sharedDetail.expiresAt">
-            <dt>有效期至</dt>
+            <dt>{{ t('FamilyView.37eb47', '有效期至') }}</dt>
             <dd>{{ sharedDetail.expiresAt }}</dd>
           </template>
           <template v-if="sharedDetail.remark">
-            <dt>备注</dt>
+            <dt>{{ t('FamilyView.e03614', '备注') }}</dt>
             <dd class="kv__multi">{{ sharedDetail.remark }}</dd>
           </template>
-          <dt>更新时间</dt>
+          <dt>{{ t('FamilyView.093dea', '更新时间') }}</dt>
           <dd>{{ formatTime(sharedDetail.updatedAt) }}</dd>
         </dl>
         <p v-if="sharedDetail.sensitivity >= 3" class="notice notice--warn">

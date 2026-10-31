@@ -15,7 +15,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 DRV_SRC="tools/vendor/opengauss-driver/src"
-DRV_OUT="build/drv"
+DRV_OUT="${AMS_BUILD_DIR:-build}/drv"
 
 # Linux 下无需 MSYS 路径转换，passthrough。
 win_path() {

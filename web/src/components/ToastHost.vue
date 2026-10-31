@@ -4,6 +4,7 @@
  * 全局只挂一次：在 App.vue 中 <ToastHost />。
  */
 import { useToast } from '../composables/useToast'
+import { t as tr } from '../i18n'
 
 const { items, remove } = useToast()
 
@@ -40,7 +41,7 @@ const ICONS: Record<string, string> = {
             v-if="t.duration === 0 || t.type === 'error'"
             class="toast__close"
             type="button"
-            aria-label="关闭提示"
+            :aria-label="tr('ToastHost.c62089', '关闭提示')"
             @click="remove(t.id)"
           >
             ✕
@@ -80,7 +81,6 @@ const ICONS: Record<string, string> = {
   box-shadow: var(--shadow-pop);
   color: var(--text-primary);
   font-size: var(--font-size-sm);
-  corner-style: continuous;
 }
 
 .toast__icon {

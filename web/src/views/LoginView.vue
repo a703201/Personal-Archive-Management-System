@@ -73,6 +73,9 @@ async function onSubmit(): Promise<void> {
     const res = await api<{ accessToken: string }>('/auth/login', {
       method: 'POST',
       auth: false,
+      // 后端要跑 PBKDF2-SM3 600k 迭代做口令校验，给足预算（默认 15s 偏紧）；
+      // 超时后会抛 TIMEOUT 并由下面的 catch 正常显示错误，不会卡在「登录中…」。
+      timeoutMs: 30000,
       body: {
         username: username.value,
         password: password.value,
@@ -110,29 +113,29 @@ async function onSubmit(): Promise<void> {
 
       <form class="form" @submit.prevent="onSubmit">
         <label class="field">
-          <span class="field__label">用户名</span>
+          <span class="field__label">{{ t('LoginView.a1aaf3', '用户名') }}</span>
           <input
             v-model="username"
             class="field__input"
             type="text"
             autocomplete="username"
-            placeholder="请输入用户名"
+            :placeholder="t('LoginView.ad5f05', '请输入用户名')"
           />
         </label>
 
         <label class="field">
-          <span class="field__label">密码</span>
+          <span class="field__label">{{ t('LoginView.c839a8', '密码') }}</span>
           <input
             v-model="password"
             class="field__input"
             type="password"
             autocomplete="current-password"
-            placeholder="请输入密码"
+            :placeholder="t('LoginView.713b73', '请输入密码')"
           />
         </label>
 
         <label v-if="needTotp" class="field">
-          <span class="field__label">动态码</span>
+          <span class="field__label">{{ t('LoginView.08f63a', '动态码') }}</span>
           <input
             v-model="totpCode"
             class="field__input field__input--code"
@@ -140,7 +143,7 @@ async function onSubmit(): Promise<void> {
             inputmode="numeric"
             maxlength="6"
             autocomplete="one-time-code"
-            placeholder="6 位动态码"
+            :placeholder="t('LoginView.39adbf', '6 位动态码')"
           />
         </label>
 
@@ -152,9 +155,9 @@ async function onSubmit(): Promise<void> {
       </form>
 
       <p class="switch">
-        <RouterLink to="/forgot">忘记口令？</RouterLink>
+        <RouterLink to="/forgot">{{ t('LoginView.926eea', '忘记口令？') }}</RouterLink>
       </p>
-      <p class="switch">还没有账号？<RouterLink to="/register">立即注册</RouterLink></p>
+      <p class="switch">{{ t('LoginView.1e58e9', '还没有账号？') }}<RouterLink to="/register">{{ t('LoginView.8573cd', '立即注册') }}</RouterLink></p>
 
       <!-- 页脚与备案号（FR-CFG-008） -->
       <footer v-if="branding.footerText || branding.icpNo" class="login-foot">
@@ -182,7 +185,6 @@ async function onSubmit(): Promise<void> {
   border-radius: var(--g3-lg, 24px);
   padding: 32px;
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
-  corner-style: continuous;
 }
 .switch {
   margin: 16px 0 0;

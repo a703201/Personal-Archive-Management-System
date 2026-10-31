@@ -38,8 +38,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-BUILD_DIR="build"
-DRV_DIR="build/drv"
+BUILD_DIR="${AMS_BUILD_DIR:-build}"
+DRV_DIR="$BUILD_DIR/drv"
 
 # ---- 路径风格转换 ----
 # Linux 下 cjc/lld 直接用原生绝对路径即可，无需 MSYS 转换。
@@ -265,9 +265,25 @@ BUILT=()
 CASCADE_REBUILD=0
 
 # ---- stdx 动态库的链接参数（Linux：原生路径 + .so）----
+# ⚠️ 不能像 Windows 那样把 stdx 下所有 libstdx*.so 全链上：
+#    Linux 的 ld 不允许共享库存在「链接期无法解析」的符号，而
+#    syntax / unittest / plugin.manager / 切面编织(fuzz/aspect_*) 等
+#    是**编译期/工具链**专用模块，依赖 Cangjie 编译器前端
+#    （Cangjie::Parser/Lexer/AST），运行时根本不该进链接，否则报
+#    "undefined reference to Cangjie::Parser::..."。
+#    故这里只链运行时真正需要的模块，剔除上述工具链模块。
 if [ -d "$STDX_DIR" ]; then
     for so in "$STDX_DIR"/libstdx*.so; do
-        [ -f "$so" ] && STDX_LIBS_ALL="$STDX_LIBS_ALL -l:$(basename "$so")"
+        [ -f "$so" ] || continue
+        base="$(basename "$so")"
+        case "$base" in
+            libstdx.syntax.so|libstdx.unittest*.so|libstdx.plugin.manager.so| \
+            libstdx.wave_aspects.so|libstdx.aspect_cj.so|libstdx.collect_aspects.so| \
+            libstdx.fuzz.so)
+                # 编译期/工具链专用，跳过
+                continue ;;
+        esac
+        STDX_LIBS_ALL="$STDX_LIBS_ALL -l:$base"
     done
     STDX_LIBS_ALL="-L${STDX_DIR} $STDX_LIBS_ALL"
 fi
@@ -293,8 +309,17 @@ for top in "${TOPS[@]}"; do
 
         if [ "$pkgname" = "ams.server" ]; then
             [ -f "$BUILD_DIR/ams-server" ] && mv -f "$BUILD_DIR/ams-server" "$BUILD_DIR/ams-server.old" 2>/dev/null
-            _link="$LINK_LIBS $DRV_LIBS $STDX_LIBS_ALL"
-            "$CJC" -p "$subdir" \
+            # 把「项目静态库 + 驱动静态库」整体包进 --start-group/--end-group：
+            #   ① 驱动内部存在相互引用（pgconn/proto3 引用 error/chunkreader），
+            #      单遍 ld 按字母序展开无法跨库解析，会报
+            #      "undefined reference to cangjie_tpc::opengauss.*"。
+            #   ② 项目库之间也存在「被依赖方排在依赖方之前」的反序（LINK_LIBS
+            #      按构建/分层顺序展开，而 ld 静态链接要求「被引用方在后」），
+            #      单遍 ld 同样会漏解析（如 ams.api.routes 引用 ams.core.search）。
+            #   Windows 的 link.exe 是多遍扫描、容忍该顺序；GNU ld/lld 不是，
+            #   故此处显式用分组让 ld 反复扫描直到全部解析。
+            _link="--start-group $LINK_LIBS $DRV_LIBS --end-group $STDX_LIBS_ALL"
+            "$CJC" -O2 -p "$subdir" \
                   --import-path "$BUILD_DIR" \
                   --import-path "$STDX_DIR" \
                   --import-path "$DRV_DIR" \
@@ -305,7 +330,8 @@ for top in "${TOPS[@]}"; do
                 echo "OK -> build/ams-server"
             else
                 echo "FAILED"
-                head -15 /tmp/ams_build.log | sed 's/^/           /'
+                echo "----- ams_build.log (tail) -----"
+                tail -50 /tmp/ams_build.log | sed 's/^/           /'
                 exit 1
             fi
         else
@@ -332,14 +358,14 @@ for top in "${TOPS[@]}"; do
                     echo "FAILED（缺 opengauss-driver：请先执行 bash scripts/build-driver-linux.sh）"
                     exit 1
                 fi
-                "$CJC" -p "$subdir" \
+                "$CJC" -O2 -p "$subdir" \
                       --import-path "$BUILD_DIR" \
                       --import-path "$STDX_DIR" \
                       --import-path "$DRV_DIR" \
                       --output-type staticlib \
                       --output-dir "$BUILD_DIR" > /tmp/ams_build.log 2>&1
             else
-                "$CJC" -p "$subdir" \
+                "$CJC" -O2 -p "$subdir" \
                       --import-path "$BUILD_DIR" \
                       --import-path "$STDX_DIR" \
                       --output-type staticlib \
