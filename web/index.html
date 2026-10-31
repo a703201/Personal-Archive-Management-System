@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AMS · 个人档案管理系统</title>
+    <script>
+      /* 无闪烁主题：在首帧绘制前根据已保存偏好设置 data-theme，避免浅色闪烁（FR-UX-002） */
+      (function () {
+        try {
+          var m = localStorage.getItem('ams.theme') || 'system';
+          var dark =
+            m === 'dark' ||
+            (m === 'system' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

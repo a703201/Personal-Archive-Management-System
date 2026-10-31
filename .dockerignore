@@ -1,0 +1,31 @@
+# ============================================================
+# AMS · Docker 构建上下文裁剪
+#
+# 目的：把 build/ 801MB 的中间产物、web/node_modules 99MB、
+# SDK 临时下载目录挡在上下文之外，避免每次 docker build
+# 都要把数百 MB 传给 daemon。
+#
+# 注意：build/linux/ 是「宿主机预编译的 Linux 产物」，
+# 需要保留给 Dockerfile 的 PREBUILT 路径使用，故单独放行。
+# ============================================================
+
+# 版本控制与工具链缓存
+.git
+.gitignore
+.github
+.workbuddy
+
+# 构建中间产物（保留 Linux 预编译产物）
+build/*
+!build/linux
+
+# 临时目录（SDK 压缩包等大文件）
+.tmp
+
+# 前端依赖（dist 保留，源码保留以便可选地在容器内构建）
+web/node_modules
+node_modules
+
+# 本地演示数据库与日志
+data-*
+*.log

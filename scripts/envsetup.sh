@@ -50,15 +50,28 @@ _msys_to_win() {
 }
 
 # ---- 1. 定位 SDK ----
-# 优先级：环境变量 CANGJIE_HOME → 默认安装位置 E:/Cangjie → 旧版安装位置
-if [ -n "${CANGJIE_HOME:-}" ] && [ -d "${CANGJIE_HOME}" ]; then
-    :
+# 优先级：仓库内副本 tools/cangjie → E:/Cangjie → 环境变量 → 旧版安装位置
+# 说明：
+#   ① 仓库内副本优先 —— 团队成员克隆后跑 scripts/install-sdk.sh 即可获得
+#      一致的编译环境，且副本路径不含空格；
+#   ② 环境变量在长驻终端里可能是旧值（会话启动时固定），
+#      故把已知安装位置放在环境变量之前。
+_SCRIPT_DIR_="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_PROJECT_ROOT_="$(cd "${_SCRIPT_DIR_}/.." && pwd)"
+
+if [ -d "${_PROJECT_ROOT_}/tools/cangjie" ]; then
+    export CANGJIE_HOME="${_PROJECT_ROOT_}/tools/cangjie"
+    export AMS_CANGJIE_SOURCE="repo"
 elif [ -d "E:/Cangjie" ]; then
     export CANGJIE_HOME="E:/Cangjie"
+    export AMS_CANGJIE_SOURCE="system"
+elif [ -n "${CANGJIE_HOME:-}" ] && [ -d "${CANGJIE_HOME}" ]; then
+    export AMS_CANGJIE_SOURCE="env"
 elif [ -d "E:/Program Files (x86)/Cangjie" ]; then
     export CANGJIE_HOME="E:/Program Files (x86)/Cangjie"
+    export AMS_CANGJIE_SOURCE="legacy"
 else
-    echo "[ERROR] 未找到仓颉 SDK。请设置 CANGJIE_HOME 指向 SDK 目录。"
+    echo "[ERROR] 未找到仓颉 SDK。请执行 scripts/install-sdk.sh 或设置 CANGJIE_HOME。"
     return 1 2>/dev/null || exit 1
 fi
 

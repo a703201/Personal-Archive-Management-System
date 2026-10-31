@@ -1,0 +1,149 @@
+# ============================================================
+# AMS · 容器编排（统一栈，对应 ReturnGuard 的 returnguard 组）
+#
+# 一个 compose project（默认项目名 ams）把三类容器归到一个组里，
+# 容器管理界面上显示为单个「ams」容器组，内含：
+#   - ams_opengauss   数据库（复用既有命名卷 ams_ogdata，演示数据不丢）
+#   - ams_db_init     一次性迁移任务（对应 rg_realdb_init，跑完即退出）
+#   - ams-server      应用服务
+#
+# 启动（单条命令，产生单个分组）：
+#   docker compose -p ams -f deploy/compose/docker-compose.yml up -d
+#   # 访问 http://localhost:8080  健康检查 http://localhost:8080/api/health
+#
+# 数据保护：
+#   - 数据库数据在命名卷 ams_ogdata（external，不随容器删除而消失），
+#     无论怎么重建 db 容器，演示数据都在。
+#   - 迁移脚本 /migrations 幂等：检测到 sys_users 已存在即跳过。
+#
+# ⚠️ 仓颉(Cangjie)网络层只认 IP 字面量，不解析服务名 / /etc/hosts，
+#    故 AMS_DB_HOST 必须填 db 的静态 IP 172.28.0.10（详见 deploy/README.md §4.3）。
+#
+# ⚠️ 生产部署务必覆盖 AMS_TOKEN_SECRET / AMS_KEK / AMS_DB_PASSWORD，
+#    不要把口令写进本文件，改用 env_file 或 Docker secrets。
+# ============================================================
+services:
+  db:
+    # openGauss 社区镜像（基于 Ubuntu 20.04）。内网有仓库请改用内部地址。
+    image: enmotech/opengauss:5.0.0
+    container_name: ams_opengauss
+    environment:
+      GS_PASSWORD: "${AMS_DB_PASSWORD:-Ams@Gauss2026}"
+      GS_USERNAME: gaussdb
+      GS_DBNAME: ams
+      # gs_ctl / gsql 依赖此 lib 路径（健康检查与迁移脚本都靠它找 libxml2.so.2）
+      LD_LIBRARY_PATH: /usr/local/opengauss/lib
+    ports:
+      # 宿主机 15432 → 容器 5432；与 scripts/db.py 默认端口对齐，
+      # 这样 `python scripts/db.py sql -s "..."` 对容器库同样可用。
+      - "15432:5432"
+    # ⚠️ 必须提权：openGauss 的 MOT 内存引擎启动时会调用 mbind 做 NUMA
+    #    绑核，需要 CAP_SYS_NICE / SYS_RESOURCE 等能力，否则报
+    #    "mbind: Operation not permitted" 导致恢复管理器初始化失败、
+    #    服务器起不来（无限重启）。原先独立运行的 ams_opengauss 也是
+    #    以等价提权方式启动的，这里对齐。仅本地开发 / 演示库使用。
+    privileged: true
+    # 以 openGauss 预期用户 omm 运行：① gs_ctl 健康检查拒绝 root；
+    # ② 数据卷本就归属 omm。privileged 仍提供 MOT 所需 CAP_SYS_NICE。
+    user: omm
+    volumes:
+      # 复用既有命名卷，演示数据不丢（external 见底部 volumes 声明）
+      - ams_ogdata:/var/lib/opengauss
+      # 只读挂载迁移脚本，供 init 服务在容器内执行
+      - ../../db/migrations:/migrations:ro
+    # 仓颉只认 IP 字面量 → 在自定义网络上给 db 分配静态 IP
+    networks:
+      ams-net:
+        ipv4_address: 172.28.0.10
+    healthcheck:
+      # gs_ctl 不在默认 PATH，必须写全路径
+      # 注意：本版 openGauss 的 `gs_ctl query` 输出是 `db_state : Normal`
+      # （不是 server_status），故按 db_state 匹配。
+      test: ["CMD-SHELL", "/usr/local/opengauss/bin/gs_ctl query -D /var/lib/opengauss/data 2>/dev/null | grep -q 'db_state.*Normal'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
+  init:
+    # 与 db 同源镜像，自带 gsql 客户端；跑完迁移即退出（对应 rg_realdb_init）
+    image: enmotech/opengauss:5.0.0
+    container_name: ams_db_init
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      AMS_DB_HOST: 172.28.0.10
+      AMS_DB_PORT: "5432"
+      AMS_DB_NAME: ams
+      AMS_DB_USER: gaussdb
+      AMS_DB_PASSWORD: "${AMS_DB_PASSWORD:-Ams@Gauss2026}"
+    volumes:
+      - ../../db/migrations:/migrations:ro
+      # 容器内迁移执行脚本（相对路径相对本 compose 文件目录）
+      - ../scripts/migrate.sh:/migrate.sh:ro
+    networks:
+      - ams-net
+    entrypoint: ["/bin/bash", "/migrate.sh"]
+    restart: "no"
+
+  ams:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.prebuilt
+    image: ams:0.1.0
+    container_name: ams-server
+    depends_on:
+      # 等迁移任务成功跑完再起应用（对应 returnguard 的 app 依赖 init）
+      init:
+        condition: service_completed_successfully
+    environment:
+      AMS_HTTP_HOST: "0.0.0.0"
+      AMS_HTTP_PORT: "8080"
+      # 必须是 IP 字面量：仓颉解析主机名时忽略 Docker 内置 DNS(127.0.0.11)
+      # 与 /etc/hosts，服务名 db 无法解析（见 deploy/README.md §4.3）。
+      AMS_DB_HOST: 172.28.0.10
+      # 容器网络内 openGauss 监听 5432（宿主映射才是 15432）
+      AMS_DB_PORT: "5432"
+      AMS_DB_NAME: ams
+      AMS_DB_USER: gaussdb
+      AMS_DB_PASSWORD: "${AMS_DB_PASSWORD:-Ams@Gauss2026}"
+      AMS_TOKEN_SECRET: "${AMS_TOKEN_SECRET:-change-me-in-production-at-least-32-bytes}"
+      AMS_KEK: "${AMS_KEK:-change-me-in-production}"
+      AMS_WEB_DIR: /app/web
+      # 附件 / 导出 / 备份的落盘目录（容器内），建议挂卷持久化
+      AMS_STORAGE_DIR: /app/data-attachments
+      AMS_EXPORT_DIR: /app/data-exports
+      AMS_BACKUP_DIR: /app/data-backups
+    ports:
+      - "8080:8080"
+    volumes:
+      - ams-config:/app/config
+      - ams-data:/app/data-attachments
+      - ams-exports:/app/data-exports
+    networks:
+      - ams-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fSs http://127.0.0.1:8080/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+networks:
+  ams-net:
+    name: ams-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  # 既有命名卷（数据库数据），声明为 external 以免 compose 误删 / 重建
+  ams_ogdata:
+    external: true
+  ams-config:
+  ams-data:
+  ams-exports:
