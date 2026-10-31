@@ -6,12 +6,12 @@
 # 流程：准备工具链 → 构建 → 测试 → 打包 → 校验 → 创建 Release 并上传资产
 #
 # 用法（本地）：
-#   git tag -a v0.2.0 -m "AMS 0.2.0"
-#   git push origin v0.2.0
+#   git tag -a v1.0.0 -m "AMS 1.0.0"
+#   git push origin v1.0.0
 #   # 本 workflow 会自动构建并发布
 #
 #   或一步到位（脚本方式，不需要配 runner）：
-#   bash scripts/release.sh --version 0.2.0
+#   bash scripts/release.sh --version 1.0.0
 #
 # 产物：
 #   ams-release-<version>-windows-x86_64.zip
@@ -26,7 +26,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（如 0.2.0），手动触发时必填'
+        description: '版本号（如 1.0.0），手动触发时必填'
         required: true
         type: string
 

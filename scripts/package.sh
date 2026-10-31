@@ -20,7 +20,7 @@
 #
 # 用法：
 #   bash scripts/package.sh                    # 用 build/ 里的现有产物
-#   bash scripts/package.sh --version 0.2.0    # 指定版本
+#   bash scripts/package.sh --version 1.0.0    # 指定版本
 #   bash scripts/package.sh --out dist
 #   bash scripts/package.sh --skip-web         # 复用 web/dist（不重新构建前端）
 #

@@ -3,7 +3,7 @@
   name = "ams_kit"
   organization = ""
   description = "AMS 通用开发框架对外 API：统一密码学能力入口（functional facade）"
-  version = "0.1.0"
+  version = "1.0.0"
   target-dir = ""
   script-dir = ""
   output-type = "static"

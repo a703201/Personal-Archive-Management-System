@@ -9,9 +9,9 @@
 # 需要自动上传时加 --upload。
 #
 # 用法：
-#   bash scripts/release.sh --version 0.2.0
-#   bash scripts/release.sh --version 0.2.0 --dry-run     # 只打包不发布
-#   bash scripts/release.sh --version 0.2.0 --remote gitcode
+#   bash scripts/release.sh --version 1.0.0
+#   bash scripts/release.sh --version 1.0.0 --dry-run     # 只打包不发布
+#   bash scripts/release.sh --version 1.0.0 --remote gitcode
 #
 # 前置条件：
 #   ① 已在 GitHub 仓库设置 token（环境变量）：
@@ -57,7 +57,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$VERSION" ]; then
-    echo "[ERROR] 必须指定版本：--version 0.2.0"
+    echo "[ERROR] 必须指定版本：--version 1.0.0"
     exit 1
 fi
 VERSION="${VERSION#v}"

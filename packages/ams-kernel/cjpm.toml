@@ -3,7 +3,7 @@
   name = "ams_kernel"
   organization = ""
   description = "AMS 通用内核：错误/日志/时间/ID/配置/工具（零业务依赖）"
-  version = "0.1.0"
+  version = "1.0.0"
   target-dir = ""
   script-dir = ""
   output-type = "static"

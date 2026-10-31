@@ -6,23 +6,23 @@
 > **发布流程**：
 > ```bash
 > # 方式一：本地脚本（不依赖 CI runner）
-> bash scripts/release.sh --version 0.2.0
+> bash scripts/release.sh --version 1.0.0
 >
 > # 方式二：打 tag 触发 GitHub Actions
-> git tag -a v0.2.0 -m "AMS 0.2.0"
-> git push origin v0.2.0
+> git tag -a v1.0.0 -m "AMS 1.0.0"
+> git push origin v1.0.0
 > ```
 
 ---
 
-## [未发布] — P1 收口 + P2 启动
+## [1.0.0] — 2026-10-31（首个正式版）
 
-P1 需求逐条落地并在 `127.0.0.1:8080` 实跑验证：**34 条中 33 条实现、1 条降级交付、0 条未做**（详见 `docs/12-P1实现状态核对.md`）。
-P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C 落地）**，台账见 `docs/13-P2实现状态核对.md`。
+P1 需求逐条落地并在 `127.0.0.1:8080` 实跑验证：**34 条中 33 条实现、1 条降级交付、0 条未做**（详见 `docs/10-实现状态核对.md`）。
+P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C 落地）**，台账见 `docs/10-实现状态核对.md`。
 
 ### 新增（家庭成员邀请 · FR-ACL-010 · 方案 B）
 
-按 `docs/15` 的推荐结论完整落地：**主体 + 条目两级授权**（分类降级为「同主体内按分类收窄」）、**不做**邀请审批流、**3 批**推进。
+按 `docs/12（方案评估）` 的推荐结论完整落地：**主体 + 条目两级授权**（分类降级为「同主体内按分类收窄」）、**不做**邀请审批流、**3 批**推进。
 
 - **迁移 `019_family_collaboration.sql`**：4 张新表 `fam_groups`（组）、`fam_members`（成员，含 `my_role` / `removed_at` / `removed_by`）、`fam_invites`（邀请，只落 code/token 摘要）、`fam_grants`（授权 → 组 的**侧表**）。种子权限 `family:manage` / `family:invite` 授予 `owner` 与 `curator`（规则：能建/改自己主体的人才能建组；`user` 角色在本系统不存在，曾误写导致除 `owner` 外谁都建不了组，详见下方「修复」）。
   > **为什么加侧表而不是给 `acl_grants` 加一列 `group_id`**：openGauss **不支持** `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`（实测 `ERROR: syntax error at or near "NOT EXISTS"`）。项目约定「每个迁移必须可反复执行」（`scripts/db.py exec` 与 CI 都依赖这一点），该 ALTER 无法写成幂等语句。用侧表既保住幂等，也不让核心 ACL 表承担可选能力的新列。理由写进了迁移文件头。
@@ -33,9 +33,9 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
   - 成员视角只读出口 `listSharedItems` / `countSharedItems` / `canReadItem` 共用同一个 `sharedPredicate()`，三处逐字一致（否则分页会错乱）。
 - **`ams.app.family.FamilyService`**：建组（立刻写入 owner 成员行，否则组变孤儿）、创建邀请（`prov.randomBytes(24)`：前 8 字节给 code、后 16 字节给 token；**邀请不能直接产出第二个 owner**，`targetRole=owner` 降为 `manager`）、接受邀请（token 定位 → 状态有效 → code 正确 → **原子 consumeOnce** → join；已入组走**幂等分支且不消耗次数**）、公开落地页元数据（失效时 `valid=false` 且**不返回组名**）、建授权（三重校验：组内 owner/manager + 必须拥有该主体 + 被授权人必须是组成员；条目级还要校验条目确属该主体）、移除成员（级联撤销授权）。
 - **`FamilyRoutes`（15 条路由）**：公开 1 条（`GET /api/family/invites/:token`）、登录即可 6 条、`family:manage` 4 条、`family:invite` 5 条。
-  > **`/api/family/shared-items` 为什么不挂功能权限**：新注册账号默认无任何角色（默认拒绝是刻意设计），而 `docs/14 §3 T3` 又明确「入组不改变全局权限」。若这条只读出口也要求 `archive:read:own`，家人必须先找管理员开角色才看得到东西 —— 功能等于不可用；若为此自动写 `sys_user_roles`，就违背了 T3。故单开一条「只认 `acl_grants`、不认角色」的通道：一条多余的数据也读不到，且**不提供任何写/删/导出/分享操作**。
+  > **`/api/family/shared-items` 为什么不挂功能权限**：新注册账号默认无任何角色（默认拒绝是刻意设计），而 `docs/12 §3 T3` 又明确「入组不改变全局权限」。若这条只读出口也要求 `archive:read:own`，家人必须先找管理员开角色才看得到东西 —— 功能等于不可用；若为此自动写 `sys_user_roles`，就违背了 T3。故单开一条「只认 `acl_grants`、不认角色」的通道：一条多余的数据也读不到，且**不提供任何写/删/导出/分享操作**。
   > 审计 detail **只写 ID 与计数，绝不写 code/token 明文**。
-- **`ItemRepo.list/count` 授权下推（B2，`docs/15` §6 标记的全局风险点）**：新增 `granteeId` 参数，把授权范围下推为 SQL 条件 `EXISTS (SELECT 1 FROM acl_grants g WHERE g.grantee_id = ? AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > CURRENT_TIMESTAMP) AND (g.item_id = arc_items.id OR (g.item_id IS NULL AND g.subject_id = arc_items.subject_id AND (g.category IS NULL OR g.category = 0 OR g.category = arc_items.category))))` —— **与 `Grant.covers()` 逐条对齐**，不允许「列表能看到、详情打不开」这类两套口径。
+- **`ItemRepo.list/count` 授权下推（B2，`docs/12（方案评估）` §6 标记的全局风险点）**：新增 `granteeId` 参数，把授权范围下推为 SQL 条件 `EXISTS (SELECT 1 FROM acl_grants g WHERE g.grantee_id = ? AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > CURRENT_TIMESTAMP) AND (g.item_id = arc_items.id OR (g.item_id IS NULL AND g.subject_id = arc_items.subject_id AND (g.category IS NULL OR g.category = 0 OR g.category = arc_items.category))))` —— **与 `Grant.covers()` 逐条对齐**，不允许「列表能看到、详情打不开」这类两套口径。
   - **新增独立 `subjectFilter` 形参（防绕过）**：主体筛选必须作为**独立 WHERE 条件**（`subject_id = ?`），不能靠缩窄「可访问主体集合」实现 —— 因为一旦 `granteeId > 0`，谓词里还有一条「被授权的条目」分支，缩窄主体集合只会让「自有」那半边变小，被授权分支依然全量命中，于是 `subjectId=99999999` 这类越权筛选会把别人的共享条目带出来。端到端脚本已固化此回归（`subjectFilter` 不绕过断言）。
 - **`SubjectRepo.grantCustodian / revokeCustodian`**：`custodian_ids` 此前**全库只有读路径、没有写入口**，是设计文档里长期存在的空档。现补上 `array_append` / `array_remove` 两个对称写入口（均带 `owner_id` 归属校验与 `NOT (? = ANY(...))` 幂等判定）与 `listCustodianIds`。
 - **审计**：`AuditAction` 新增 10 个动作码（`family.group.create/dissolve`、`family.invite.create/revoke/accept/fail`、`family.member.remove`、`family.grant.create/revoke`、`family.access.denied`），枚举成员 / `fromCode` / `code()` 三处同步。审计落痕在路由层（与 `ExportRoutes` / `SystemRoutes` 同策略），写失败只 WARN 不改业务结果。
@@ -62,7 +62,7 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
   - 缺加密提供者或签名密钥时**失败关闭**（抛错），绝不降级成「弱 token」或「带密码却存空摘要 → 静默变公开链接」。
   前端：条目详情面板内嵌「共享」区（创建 / 复制 / 撤销 / 浏览数与错误数），新增公开页 `/share/:token`（密码保护时首屏不含任何条目信息）。
 - **权限预览（FR-ACL-013 · 方案 A：仅统计口径）**：`GET /api/admin/permission-preview?role=<code>[&userId=]`（权限 `acl:manage`），返回角色元数据、主体范围（`any` / `own` / `user:<id>`）、`userCount/subjectCount/visibleItemCount`、按分类分布、字段可见上限与掩码级别、权限点清单。**不返回任何条目内容** —— 预览是「验证 RBAC 配置」的工具，不是「以他人身份浏览数据」的后门。角色不含 `archive:*:any` 时默认「仅本人范围」，**不猜测他人主体集合**。前端角色卡片新增「预览」：统计卡 + 分类条形分布 + 可选用户 ID 精算。
-- **家庭成员邀请 · 安全设计（FR-ACL-010）**：交付 `docs/14-家庭成员邀请设计.md`（10 项安全原则、`fam_groups/fam_members/fam_invites` 数据模型、邀请码 vs 二维码取舍、14 项威胁模型 T1–T14、10 个审计动作码、完整 API 草案、统一错误语义、F1–F4 分批计划）。当时三处待定项（§6 授权粒度、§13 R6 审批流、§14 批次范围）已在 `docs/15` 给出推荐结论，后续按该结论完整落地，详见上方「新增（家庭成员邀请 · FR-ACL-010 · 方案 B）」。
+- **家庭成员邀请 · 安全设计（FR-ACL-010）**：交付 `docs/12-家庭成员邀请.md（设计章节）`（10 项安全原则、`fam_groups/fam_members/fam_invites` 数据模型、邀请码 vs 二维码取舍、14 项威胁模型 T1–T14、10 个审计动作码、完整 API 草案、统一错误语义、F1–F4 分批计划）。当时三处待定项（§6 授权粒度、§13 R6 审批流、§14 批次范围）已在 `docs/12（方案评估）` 给出推荐结论，后续按该结论完整落地，详见上方「新增（家庭成员邀请 · FR-ACL-010 · 方案 B）」。
 - **前端字典统一**：新增 `web/src/composables/useCatalog.ts`。分类中文名此前在 `ArchiveView` 与 `OverviewView` 各写一份且已出现漂移（分类 2 一处叫「证件信息」、另一处叫「身份证明」），现以 `docs/06 §12.3` 为唯一口径。
 
 ### 修复
@@ -84,12 +84,12 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
 
 ### 文档与许可证（P2 第三批）
 
-- **新增 `docs/15-家庭成员邀请方案评估.md`**：针对 FR-ACL-010 三处待定项（§6 授权粒度 / §13 R6 审批流 / §14 分批范围）各出 A/B/C 三案 + 推荐 + 成本表，结论为 **§6 采方案 B（主体 + 条目两级，分类降级为同主体内收窄）**、**§13 R6 不做（邀请本身即双人确认）**、**§14 由 4 批压缩为 3 批**。评估前先做了一次**代码现状审计**，5 条硬事实推翻了设计文档里的若干隐含假设：① `acl_grants.subject_id` 是 `NOT NULL`（分类级授权无法表达「不限主体」）；② `Grant.covers()` 连分类授权也要求主体一致（跨主体分类授权恒不命中）；③ `ItemRepo.list/count` 完全不查 `acl_grants`，FR-ACL-008 只是「详情能用、列表/检索/导出仍全量」的半成品；④ `custodian_ids` 有列有读路径但**全库无写路径**（主体级共享反而最便宜）；⑤ 列表下推要改 6 个入口，必须先收敛出统一 `AccessScope`。
-- `docs/14-家庭成员邀请设计.md` 在 §6.1 字段级说明后、§13 R6 行、§14 门槛说明后、结语共 4 处加了指向 `docs/15` 的指针，避免读者按未定稿的粒度直接开工。
+- **新增 `docs/12（方案评估）`**：针对 FR-ACL-010 三处待定项（§6 授权粒度 / §13 R6 审批流 / §14 分批范围）各出 A/B/C 三案 + 推荐 + 成本表，结论为 **§6 采方案 B（主体 + 条目两级，分类降级为同主体内收窄）**、**§13 R6 不做（邀请本身即双人确认）**、**§14 由 4 批压缩为 3 批**。评估前先做了一次**代码现状审计**，5 条硬事实推翻了设计文档里的若干隐含假设：① `acl_grants.subject_id` 是 `NOT NULL`（分类级授权无法表达「不限主体」）；② `Grant.covers()` 连分类授权也要求主体一致（跨主体分类授权恒不命中）；③ `ItemRepo.list/count` 完全不查 `acl_grants`，FR-ACL-008 只是「详情能用、列表/检索/导出仍全量」的半成品；④ `custodian_ids` 有列有读路径但**全库无写路径**（主体级共享反而最便宜）；⑤ 列表下推要改 6 个入口，必须先收敛出统一 `AccessScope`。
+- `docs/12-家庭成员邀请.md（设计章节）` 在 §6.1 字段级说明后、§13 R6 行、§14 门槛说明后、结语共 4 处加了指向 `docs/12（方案评估）` 的指针，避免读者按未定稿的粒度直接开工。
 - **新增 `README.md`**（项目门面）：目录 / 这是什么 / 当前状态（P0 54/54、P1 33+1 降级、P2 15/23，附工程面统计：115 个 `.cj` 3.76 万行、29 个 vue-ts 1.24 万行、19 个迁移、152 条路由、272 条单测）/ 功能一览 / 技术栈与九层单向依赖图 / 安全设计要点（国密落地实况：SM3 ✅、SM4-CBC/CTR ✅、SM4-GCM ❌ 已改 EtM 等价构造、SM2 ❌ 未实现）/ 快速开始 / 常用脚本 / 目录结构 / 文档索引 01–15 / 已知限制 / 参与开发 / 许可证。
 - **采用 Apache-2.0**：新增 `LICENSE`（全文与官方文本逐字一致，仅填入 `Copyright 2026 何宇翔 (a703201)`），`web/package.json` 补 `license` 字段。选 Apache-2.0 而非 MIT 的唯一决定项是**第 3 条明示专利授权**：本项目含国密实现与权限模型等可能被主张专利的部分，MIT 对此完全沉默，Apache-2.0 能让使用方获得明确的专利许可、并以第 3 条终止条款对冲专利诉讼风险。
 - `docs/README.md` 索引从 01–10 补齐到 01–15，状态行由「设计阶段（尚未进入编码实现）」改为当前实现进度。
-- `docs/13-P2实现状态核对.md` 的 FR-ACL-010 行补 `docs/15` 指针。
+- `docs/10-实现状态核对.md` 的 FR-ACL-010 行补 `docs/12（方案评估）` 指针。
 - **前端文案口径统一落地**：`OverviewView.vue`（自带一份 `CATEGORY_NAMES`）与 `ArchiveView.vue`（自带一份 `CATEGORY_DEFS`）改为统一消费 `composables/useCatalog.ts`，该文件成为分类/状态/来源/敏感度的唯一口径。
 
 ### 新增（P2 收口：安全策略 / 通知 / 导入导出 / 档案增强）
@@ -158,7 +158,7 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
 ### 文档
 
 - 新增 `db/migrations/015_password_reset.sql`、`016_attachment_tags.sql`。
-- `docs/12-P1实现状态核对.md` 更新为收口状态（含每条实测证据与唯一降级项的说明），新增 §2.6.1 记录审计哈希链复核的 5 处缺陷、定位方法与验证证据；§2.7.1 记录 ZIP 批量导入的可行性探针、实现要点与 7 个夹具的验收结果；同时修正 §1 摘要与全表统计不一致（20/14 → 33/1/0）。
+- `docs/10-实现状态核对.md` 更新为收口状态（含每条实测证据与唯一降级项的说明），新增 §2.6.1 记录审计哈希链复核的 5 处缺陷、定位方法与验证证据；§2.7.1 记录 ZIP 批量导入的可行性探针、实现要点与 7 个夹具的验收结果；同时修正 §1 摘要与全表统计不一致（20/14 → 33/1/0）。
 - 新增 `scripts/gen-gbk-table.py`：从 Python `gbk` 编解码器生成 87×94 GBK→Unicode 码表（仓颉侧 `gbk.cj`）。
 - 新增 `scripts/verify-audit-chain.py`：审计链离线独立校验（不信任服务端）。
 
@@ -172,7 +172,7 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
 ## [未发布] — 工程化与交付增强（Linux / 容器 / 对外 API / 信创）
 
 > 本批次属**工程化与交付能力**补强，不改动业务功能（FR 完成度仍为 P1 34 条 / P2 23 条）。
-> 架构级两项（提炼通用框架、SaaS/微服务化）已在 `docs/18 §三` 拍板，并落地 **Phase 1**（见下方「新增（架构演进 · Phase 1）」）；Phase 2 待办见 #87 / #89。
+> 架构级两项（提炼通用框架、SaaS/微服务化）已在 `docs/15 §三` 拍板，并落地 **Phase 1**（见下方「新增（架构演进 · Phase 1）」）；Phase 2 待办见 #87 / #89。
 
 ### 新增（Linux 构建链路）
 - `scripts/build-linux.sh`：`build.sh` 的 Linux 移植（去 cygpath/`.exe`/`.dll`，运行时与 stdx 改 `linux_x86_64_cjnative`，产物 `ams-server` 无扩展名，SDK 探测 `/opt/cangjie` 或 `tools/cangjie`），驱动构建改调 `build-driver-linux.sh`。
@@ -187,14 +187,14 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
 - `deploy/README.md`：构建 / 首次建库迁移 / 启动 / 生产 Checklist。
 
 ### 新增（对外 API 接入配套）
-- `docs/17-对外API规范-OpenAPI.yaml`：基于 156 个 method+path 自动提取生成的 OpenAPI 3.1 基线规范，含 Bearer 鉴权、通用错误包、按标签分组；request/response schema 暂以占位类型标记，待按后端 DTO 补全。
+- `docs/14-对外API规范-OpenAPI.yaml`：基于 156 个 method+path 自动提取生成的 OpenAPI 3.1 基线规范，含 Bearer 鉴权、通用错误包、按标签分组；request/response schema 暂以占位类型标记，待按后端 DTO 补全。
 
 ### 新增（信创·国家标准参考）
-- `docs/16-信创与国家密码标准参考.md`：对齐国密 SM3（GB/T 32905 / GM/T 0004）、SM4（GB/T 32907 / GM/T 0002）、SM2（GB/T 32918 / GM/T 0003）标准，显式列出已实现（SM3 / HMAC-SM3 / SM4-CBC·CTR / PBKDF2-HMAC-SM3）与未实现（SM4-GCM 受 stdx 限制、SM2 未实现，导出签名用 HMAC 对称），并声明「代码对齐 ≠ 商用密码产品认证」边界。
+- `docs/13-信创与国家密码标准参考.md`：对齐国密 SM3（GB/T 32905 / GM/T 0004）、SM4（GB/T 32907 / GM/T 0002）、SM2（GB/T 32918 / GM/T 0003）标准，显式列出已实现（SM3 / HMAC-SM3 / SM4-CBC·CTR / PBKDF2-HMAC-SM3）与未实现（SM4-GCM 受 stdx 限制、SM2 未实现，导出签名用 HMAC 对称），并声明「代码对齐 ≠ 商用密码产品认证」边界。
 
-### 新增（架构演进 · Phase 1 落地 — docs/18）
+### 新增（架构演进 · Phase 1 落地 — docs/15）
 
-> `docs/18 §三`（2026-10-29）已拍板：通用框架 → **A 独立框架库**；SaaS 第一步 → **A 多租户单体**。本批落地两项 Phase 1。
+> `docs/15 §三`（2026-10-29）已拍板：通用框架 → **A 独立框架库**；SaaS 第一步 → **A 多租户单体**。本批落地两项 Phase 1。
 
 - **多租户数据层隔离（SaaS · 方案 A · Phase 1）**
   - 迁移 `022_tenant_isolation.sql`：建 `sys_tenants`（默认租户 `id=1, code='default'`）；用幂等 `DO $$` 块（`information_schema.columns` 判定）给 `sys_users` / `arc_subjects` / `arc_items` 加 `tenant_id BIGINT NOT NULL DEFAULT 1`；补 `idx_*_tenant` 索引。复验：迁移 10/0 成功，三表列/索引齐备，存量 12 subjects / 24 items / 89 users 回填 `tenant_id=1`。
@@ -230,7 +230,7 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
   - 复验：e2e 22/23→23/23、authz 32/32、全量 338/338、build 0 error、web build OK。
 
 ### 候选（待拍板，未落地）
-- `docs/18-架构演进路线-方案候选.md`：提炼通用开发框架（A 独立框架库 / B 仓内 shared / C 脚手架）与 SaaS/微服务化（A 多租户单体 / B 模块化单体 / C 完整微服务）的 A/B/C 方案与权衡；**Phase 1、Phase 2 均已落地（见上方 #87 框架发布化 / #89 跨租户回归）**。
+- `docs/15-架构演进路线-方案候选.md`：提炼通用开发框架（A 独立框架库 / B 仓内 shared / C 脚手架）与 SaaS/微服务化（A 多租户单体 / B 模块化单体 / C 完整微服务）的 A/B/C 方案与权衡；**Phase 1、Phase 2 均已落地（见上方 #87 框架发布化 / #89 跨租户回归）**。
 
 ### 修复
 
@@ -254,7 +254,7 @@ P0 需求全量落地（54 已实现 / 0 部分 / 0 未实现），并以单元�
 
 ### 文档
 
-- 新增 `docs/10-P0实现状态核对.md`：逐条以代码为准核对 54 条 P0（结论 54/0/0），记录接线审计（§7.11）、D2/D4 落地（§7.12）、测试套件红态发现与修复（§7.13）。
+- 新增 `docs/10-实现状态核对.md`：逐条以代码为准核对 54 条 P0（结论 54/0/0），记录接线审计（§7.11）、D2/D4 落地（§7.12）、测试套件红态发现与修复（§7.13）。
 - `docs/08-SM4方案变更说明.md`：SM4-GCM → SM4-CBC+HMAC-SM3 论证（待产品签字，D3）。
 
 ### 已知限制
@@ -328,4 +328,5 @@ P0 需求全量落地（54 已实现 / 0 部分 / 0 未实现），并以单元�
 - 会话存储当前为内存实现，重启后需重新登录（生产需接 DB）
 
 [0.2.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v0.1.0...v0.2.0
+[1.0.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v0.2.0...v1.0.0
 [0.1.0]: https://github.com/a703201/Personal-Archive-Management-System/releases/tag/v0.1.0
