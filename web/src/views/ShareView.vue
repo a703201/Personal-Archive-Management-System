@@ -50,7 +50,7 @@ function handleError(e: unknown): void {
     errorText.value = '链接不存在或已失效'
     return
   }
-  errorText.value = err.message || '加载失败'
+  errorText.value = err.message || t('viewsShareView.f6b7a4', '加载失败')
 }
 
 async function load(): Promise<void> {
@@ -93,7 +93,7 @@ async function submit(): Promise<void> {
       dead.value = true
       errorText.value = '链接不存在或已失效'
     } else {
-      errorText.value = err.message || '密码不正确'
+      errorText.value = err.message || t('viewsShareView.42a70c', '密码不正确')
     }
   } finally {
     submitting.value = false

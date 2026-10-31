@@ -58,17 +58,17 @@ const created = ref<{ url: string; fullUrl: string; protected: boolean } | null>
 const myLinks = computed(() => links.value.filter((l) => String(l.itemId) === String(props.itemId)))
 
 const DAY_OPTIONS = [
-  { label: '1 天', value: 1 },
-  { label: '7 天', value: 7 },
-  { label: '30 天', value: 30 },
-  { label: '90 天', value: 90 },
-  { label: '365 天', value: 365 },
+  { label: t('componentsShareLinkPanel.11f478', '1 天'), value: 1 },
+  { label: t('componentsShareLinkPanel.e45a81', '7 天'), value: 7 },
+  { label: t('componentsShareLinkPanel.9401ee', '30 天'), value: 30 },
+  { label: t('componentsShareLinkPanel.3bf6f8', '90 天'), value: 90 },
+  { label: t('componentsShareLinkPanel.496a7c', '365 天'), value: 365 },
 ]
 
 function stateOf(l: ShareLink): { text: string; cls: string } {
-  if (l.revoked) return { text: '已失效', cls: 'chip--dead' }
-  if (l.expired) return { text: '已过期', cls: 'chip--dead' }
-  return { text: '生效中', cls: 'chip--live' }
+  if (l.revoked) return { text: t('componentsShareLinkPanel.a09345', '已失效'), cls: 'chip--dead' }
+  if (l.expired) return { text: t('componentsShareLinkPanel.135437', '已过期'), cls: 'chip--dead' }
+  return { text: t('componentsShareLinkPanel.4de07e', '生效中'), cls: 'chip--live' }
 }
 
 function fullUrlOf(token: string): string {
@@ -115,7 +115,7 @@ async function create(): Promise<void> {
     }
     showForm.value = false
     form.value = { password: '', days: 7, maxFails: 5 }
-    success('共享链接已创建')
+    success(t('componentsShareLinkPanel.30bde8', '共享链接已创建'))
     load()
   } catch (e) {
     toastError((e as Error).message)
@@ -128,7 +128,7 @@ async function revoke(l: ShareLink): Promise<void> {
   revoking.value = l.id
   try {
     await api(`/share-links/${l.id}`, { method: 'DELETE' })
-    success('链接已撤销')
+    success(t('componentsShareLinkPanel.60b82b', '链接已撤销'))
     load()
   } catch (e) {
     toastError((e as Error).message)
@@ -140,10 +140,10 @@ async function revoke(l: ShareLink): Promise<void> {
 async function copy(text: string): Promise<void> {
   try {
     await navigator.clipboard.writeText(text)
-    success('已复制到剪贴板')
+    success(t('componentsShareLinkPanel.c2bb6d', '已复制到剪贴板'))
   } catch {
     // 非安全上下文（http）下 clipboard 不可用，退回选中提示
-    toastError('复制失败，请手动选中链接复制')
+    toastError(t('componentsShareLinkPanel.e10010', '复制失败，请手动选中链接复制'))
   }
 }
 

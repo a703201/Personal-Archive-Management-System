@@ -20,11 +20,11 @@ const toast = useToast()
 type TabKey = 'health' | 'config' | 'jobs' | 'keys' | 'backup'
 
 const TABS: { key: TabKey; label: string }[] = [
-  { key: 'health', label: '健康看板' },
-  { key: 'config', label: '配置中心' },
-  { key: 'jobs', label: '定时任务' },
-  { key: 'keys', label: '密钥管理' },
-  { key: 'backup', label: '备份恢复' },
+  { key: 'health', label: tr('viewsSystemView.9ac566', '健康看板') },
+  { key: 'config', label: tr('viewsSystemView.f95386', '配置中心') },
+  { key: 'jobs', label: tr('viewsSystemView.c97ffb', '定时任务') },
+  { key: 'keys', label: tr('viewsSystemView.25c51c', '密钥管理') },
+  { key: 'backup', label: tr('viewsSystemView.823396', '备份恢复') },
 ]
 
 const tab = ref<TabKey>('health')
@@ -61,7 +61,7 @@ function fmtUptime(ms: number | string): string {
   const s = Math.floor(Number(ms ?? 0) / 1000)
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
-  return h > 0 ? `${h} 小时 ${m} 分` : `${m} 分 ${s % 60} 秒`
+  return h > 0 ? `${h} 小时 ${m} 分` : tr('viewsSystemView.b0ec90', `${m} 分 ${s % 60} 秒`)
 }
 
 const errorRateText = computed(() => {
@@ -114,17 +114,17 @@ function openSettingEdit(s: Setting): void {
 async function saveSetting(): Promise<void> {
   const f = settingForm.value
   if (!f.key.trim()) {
-    toast.warning('请填写配置键名')
+    toast.warning(tr('viewsSystemView.90df98', '请填写配置键名'))
     return
   }
   if (settingMode.value === 'edit' && !f.value) {
-    toast.warning('敏感项留空表示不修改，请先输入新值')
+    toast.warning(tr('viewsSystemView.d2c41d', '敏感项留空表示不修改，请先输入新值'))
     return
   }
   savingSetting.value = true
   try {
     await api('/admin/config', { method: 'PUT', body: { ...f, key: f.key.trim() } })
-    toast.success('配置已保存')
+    toast.success(tr('viewsSystemView.c4e4c1', '配置已保存'))
     showSetting.value = false
     await loadConfig()
   } catch (e) {
@@ -137,7 +137,7 @@ async function saveSetting(): Promise<void> {
 async function removeSetting(s: Setting): Promise<void> {
   try {
     await api(`/admin/config?scope=system&key=${encodeURIComponent(s.key)}`, { method: 'DELETE' })
-    toast.success(`已删除 ${s.key}`)
+    toast.success(tr('viewsSystemView.20c4d9', `已删除 ${s.key}`))
     await loadConfig()
   } catch (e) {
     toast.error((e as Error).message)
@@ -168,7 +168,7 @@ async function runJob(j: Job): Promise<void> {
       `/admin/jobs/${encodeURIComponent(j.name)}/run`,
       { method: 'POST', body: {} },
     )
-    toast.success(`${j.name} 执行完成，影响 ${res.affected} 条`)
+    toast.success(tr('viewsSystemView.20eed4', `${j.name} 执行完成，影响 ${res.affected} 条`))
     await loadJobs()
   } catch (e) {
     toast.error((e as Error).message)
@@ -197,9 +197,9 @@ const keys = ref<KeyRow[]>([])
 const keyBusy = ref(false)
 
 const KEY_STATUS: Record<number, { label: string; cls: string }> = {
-  1: { label: '启用中', cls: 'st st--ok' },
-  2: { label: '已退役', cls: 'st st--warn' },
-  3: { label: '已吊销', cls: 'st st--bad' },
+  1: { label: tr('viewsSystemView.595aab', '启用中'), cls: 'st st--ok' },
+  2: { label: tr('viewsSystemView.0c9e06', '已退役'), cls: 'st st--warn' },
+  3: { label: tr('viewsSystemView.7fdb5a', '已吊销'), cls: 'st st--bad' },
 }
 
 async function loadKeys(): Promise<void> {
@@ -212,9 +212,9 @@ async function rotateKey(): Promise<void> {
   try {
     const res = await api<{ id: string; version: number }>('/admin/keys/rotate', {
       method: 'POST',
-      body: { keyId: 'ams-data', purpose: 'data', note: '管理界面手动轮换' },
+      body: { keyId: 'ams-data', purpose: 'data', note: tr('viewsSystemView.2648f1', '管理界面手动轮换') },
     })
-    toast.success(`已登记新版本 v${res.version}`)
+    toast.success(tr('viewsSystemView.26ff29', `已登记新版本 v${res.version}`))
     await loadKeys()
   } catch (e) {
     toast.error((e as Error).message)
@@ -227,7 +227,7 @@ async function changeKeyStatus(k: KeyRow, kind: 'retire' | 'revoke'): Promise<vo
   keyBusy.value = true
   try {
     await api(`/admin/keys/${k.id}/${kind}`, { method: 'POST', body: {} })
-    toast.success(kind === 'retire' ? '已退役' : '已吊销')
+    toast.success(kind === 'retire' ? '已退役' : tr('viewsSystemView.7fdb5a', '已吊销'))
     await loadKeys()
   } catch (e) {
     toast.error((e as Error).message)
@@ -257,7 +257,7 @@ async function createBackup(): Promise<void> {
   backupBusy.value = true
   try {
     await api('/admin/backup', { method: 'POST', body: {} })
-    toast.success('配置快照已生成')
+    toast.success(tr('viewsSystemView.d1b36f', '配置快照已生成'))
     await loadBackups()
   } catch (e) {
     toast.error((e as Error).message)
@@ -273,7 +273,7 @@ async function restoreBackup(b: BackupMeta): Promise<void> {
       method: 'POST',
       body: { file: b.file },
     })
-    toast.success(`已恢复 ${res.restored} 项配置`)
+    toast.success(tr('viewsSystemView.a82657', `已恢复 ${res.restored} 项配置`))
     await loadConfig()
   } catch (e) {
     toast.error((e as Error).message)

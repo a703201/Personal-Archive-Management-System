@@ -40,7 +40,7 @@ const error = ref('')
 let timer: number | undefined
 let controller: AbortController | undefined
 
-const SENS_LABEL: Record<number, string> = { 1: '普通', 2: '敏感', 3: '高敏' }
+const SENS_LABEL: Record<number, string> = { 1: t('componentsGlobalSearch.7cda07', '普通'), 2: t('componentsGlobalSearch.e4d1f0', '敏感'), 3: t('componentsGlobalSearch.4bdda7', '高敏') }
 const SENS_CLASS: Record<number, string> = {
   1: 'badge badge--normal',
   2: 'badge badge--sensitive',

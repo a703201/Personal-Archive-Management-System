@@ -48,12 +48,12 @@ const acceptError = ref('')
 const accepted = ref<AcceptResult | null>(null)
 
 const ROLE_LABEL: Record<string, string> = {
-  owner: '所有者',
-  manager: '管理员',
-  member: '成员',
+  owner: t('viewsInviteView.ff3beb', '所有者'),
+  manager: t('viewsInviteView.ef84e7', '管理员'),
+  member: t('viewsInviteView.c1ee9f', '成员'),
 }
 
-const roleText = computed(() => ROLE_LABEL[accepted.value?.role ?? ''] ?? '成员')
+const roleText = computed(() => ROLE_LABEL[accepted.value?.role ?? ''] ?? t('viewsInviteView.c1ee9f', '成员'))
 
 /** 剩余可用次数为 1 时提示「仅剩最后一次」，避免分享后被别人兑掉 */
 const lastChance = computed(() => (meta.value?.remainingUses ?? 0) === 1)
@@ -80,7 +80,7 @@ async function load(): Promise<void> {
   try {
     meta.value = await api<InviteMeta>(`/family/invites/${token}`, { auth: false })
   } catch (e) {
-    metaError.value = (e as ApiError).message || '加载失败'
+    metaError.value = (e as ApiError).message || t('viewsInviteView.f6b7a4', '加载失败')
   } finally {
     loading.value = false
   }
@@ -104,7 +104,7 @@ async function accept(): Promise<void> {
       goLogin()
       return
     }
-    acceptError.value = err.message || '加入失败'
+    acceptError.value = err.message || t('viewsInviteView.e232e1', '加入失败')
     // 失败后重新拉一次元数据：可能已被他人用尽或因错误过多而作废
     await load()
   } finally {

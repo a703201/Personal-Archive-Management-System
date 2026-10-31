@@ -52,7 +52,7 @@ function fmtTime(ms: number | string): string {
   const pad = (n2: number) => String(n2).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
-const resultText = (r: number | string) => (Number(r) === 0 ? '成功' : '失败')
+const resultText = (r: number | string) => (Number(r) === 0 ? '成功' : t('viewsAuditView.3e3c80', '失败'))
 
 async function load(): Promise<void> {
   loading.value = true
@@ -97,8 +97,8 @@ async function verifyChain(): Promise<void> {
   try {
     const data = await api<{ status: string; message: string }>('/audit/verify-chain?from=1&limit=1000')
     chainStatus.value = { ok: data.status === 'ok', message: data.message }
-    if (data.status === 'ok') success('审计链完整，未被篡改')
-    else toastError(`链校验异常：${data.message}`)
+    if (data.status === 'ok') success(t('viewsAuditView.189220', '审计链完整，未被篡改'))
+    else toastError(t('viewsAuditView.9b8a5b', `链校验异常：${data.message}`))
   } catch (e) {
     toastError((e as Error).message)
   } finally {

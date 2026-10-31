@@ -87,11 +87,11 @@ async function onSubmit(): Promise<void> {
         phone: phone.value || undefined,
       },
     })
-    success('注册成功，请登录')
+    success(t('viewsRegisterView.5fcfe1', '注册成功，请登录'))
     const redirect = (route.query.redirect as string) || '/login'
     router.replace(redirect)
   } catch (e) {
-    serverError.value = (e as Error).message || '注册失败，请重试'
+    serverError.value = (e as Error).message || t('viewsRegisterView.ff3a15', '注册失败，请重试')
     toastError(serverError.value)
   } finally {
     submitting.value = false

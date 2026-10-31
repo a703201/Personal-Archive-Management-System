@@ -38,17 +38,17 @@ const cooldown = ref(0)
 let timer: number | undefined
 
 const steps = [
-  { n: 1, label: '验证账号' },
-  { n: 2, label: '输入验证码' },
-  { n: 3, label: '设置新口令' },
+  { n: 1, label: t('viewsForgotPasswordView.20cc10', '验证账号') },
+  { n: 2, label: t('viewsForgotPasswordView.5bee01', '输入验证码') },
+  { n: 3, label: t('viewsForgotPasswordView.374019', '设置新口令') },
 ]
 
 const pwdHint = computed(() => {
   if (!password.value) return ''
-  if (password.value.length < 10) return '至少 10 位'
-  if (!/[a-z]/.test(password.value)) return '需含小写字母'
-  if (!/[A-Z]/.test(password.value)) return '需含大写字母'
-  if (!/[0-9]/.test(password.value)) return '需含数字'
+  if (password.value.length < 10) return t('viewsForgotPasswordView.a7d5e8', '至少 10 位')
+  if (!/[a-z]/.test(password.value)) return t('viewsForgotPasswordView.43ff8d', '需含小写字母')
+  if (!/[A-Z]/.test(password.value)) return t('viewsForgotPasswordView.e49313', '需含大写字母')
+  if (!/[0-9]/.test(password.value)) return t('viewsForgotPasswordView.d89b80', '需含数字')
   return ''
 })
 
@@ -90,7 +90,7 @@ async function sendCode(): Promise<void> {
     })
     if (!res.sent) {
       // 后端已给出人话原因（账号不存在 / 未绑定邮箱 / 请求过频）
-      error.value = res.notice || '验证码发送失败'
+      error.value = res.notice || t('viewsForgotPasswordView.644c16', '验证码发送失败')
       return
     }
     masked.value = res.masked
@@ -98,7 +98,7 @@ async function sendCode(): Promise<void> {
     step.value = 2
     startCooldown(60)
   } catch (e) {
-    error.value = (e as Error).message || '验证码发送失败'
+    error.value = (e as Error).message || t('viewsForgotPasswordView.644c16', '验证码发送失败')
   } finally {
     busy.value = false
   }
@@ -121,7 +121,7 @@ async function verifyCode(): Promise<void> {
     notice.value = `验证通过，请在 ${Math.floor(res.expiresIn / 60)} 分钟内设置新口令`
     step.value = 3
   } catch (e) {
-    error.value = (e as Error).message || '验证码校验失败'
+    error.value = (e as Error).message || t('viewsForgotPasswordView.0cba85', '验证码校验失败')
   } finally {
     busy.value = false
   }
@@ -148,7 +148,7 @@ async function submitReset(): Promise<void> {
     notice.value = ''
     step.value = 4
   } catch (e) {
-    error.value = (e as Error).message || '口令重置失败'
+    error.value = (e as Error).message || t('viewsForgotPasswordView.e378a0', '口令重置失败')
   } finally {
     busy.value = false
   }

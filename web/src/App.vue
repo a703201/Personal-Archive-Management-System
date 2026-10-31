@@ -171,6 +171,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .sidebar {
@@ -182,14 +183,12 @@ onMounted(async () => {
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
-  /* Apple 材质：半透明玻璃层 + 模糊，承载层级（见 apple-design §12） */
+  /* Apple 材质：半透明玻璃层 + 模糊，承载层级（见 apple-design §12）。
+     顶栏已脱离滚动层（.app-main 内层滚动），不再随内容滚动逐帧重算模糊。 */
   background: var(--material-toolbar);
   backdrop-filter: blur(var(--material-blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--material-blur)) saturate(180%);
   border-bottom: 1px solid var(--border-subtle);
-  position: sticky;
-  top: 0;
-  z-index: 10;
   flex-wrap: wrap;
 }
 

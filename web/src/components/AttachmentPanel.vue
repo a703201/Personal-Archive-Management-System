@@ -152,7 +152,7 @@ async function saveMeta(): Promise<void> {
     metaOpen.value = false
     await load()
   } catch (e) {
-    error.value = (e as Error).message || '保存失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.40525a', '保存失败')
   } finally {
     busy.value = false
   }
@@ -186,7 +186,7 @@ async function load(): Promise<void> {
       }
     }
   } catch (e) {
-    error.value = (e as Error).message || '附件加载失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.01184e', '附件加载失败')
   } finally {
     loading.value = false
   }
@@ -216,12 +216,12 @@ async function upload(ev: Event): Promise<void> {
     })
     if (!res.ok) {
       const j = await res.json().catch(() => ({}))
-      throw new Error(j.message || `上传失败（${res.status}）`)
+      throw new Error(j.message || tr('componentsAttachmentPanel.c39493', `上传失败（${res.status}）`))
     }
     notice.value = `已上传 ${file.name}`
     await load()
   } catch (e) {
-    error.value = (e as Error).message || '上传失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.a6f805', '上传失败')
   } finally {
     busy.value = false
     input.value = ''
@@ -249,7 +249,7 @@ async function openPreview(a: Att): Promise<void> {
     watermark.value = wm.text
     previewOpen.value = true
   } catch (e) {
-    error.value = (e as Error).message || '预览失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.d28588', '预览失败')
   } finally {
     busy.value = false
   }
@@ -279,7 +279,7 @@ async function openVersions(a: Att): Promise<void> {
       cmpTo.value = verList.value[0].id
     }
   } catch (e) {
-    error.value = (e as Error).message || '版本加载失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.521885', '版本加载失败')
   }
 }
 
@@ -293,7 +293,7 @@ async function compare(): Promise<void> {
       `/attachments/${verAtt.value.id}/versions/compare?from=${cmpFrom.value}&to=${cmpTo.value}`,
     )
   } catch (e) {
-    error.value = (e as Error).message || '版本对比失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.c9f348', '版本对比失败')
   }
 }
 
@@ -304,7 +304,7 @@ async function makeCurrent(v: Ver): Promise<void> {
     notice.value = `已切换到 v${v.versionNo}`
     await openVersions(verAtt.value)
   } catch (e) {
-    error.value = (e as Error).message || '切换失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.9e2fdc', '切换失败')
   }
 }
 
@@ -329,14 +329,14 @@ async function uploadVersion(ev: Event): Promise<void> {
     })
     if (!res.ok) {
       const j = await res.json().catch(() => ({}))
-      throw new Error(j.message || `上传失败（${res.status}）`)
+      throw new Error(j.message || tr('componentsAttachmentPanel.c39493', `上传失败（${res.status}）`))
     }
     notice.value = `已上传新版本 ${file.name}`
     verNote.value = ''
     await openVersions(verAtt.value)
     await load()
   } catch (e) {
-    error.value = (e as Error).message || '上传新版本失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.b497dc', '上传新版本失败')
   } finally {
     busy.value = false
     input.value = ''
@@ -375,7 +375,7 @@ async function batchDownload(): Promise<void> {
     URL.revokeObjectURL(url)
     notice.value = `已打包 ${picked.value.size} 个附件（${fmtSize(res.size)}）`
   } catch (e) {
-    error.value = (e as Error).message || '打包下载失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.cc2b99', '打包下载失败')
   } finally {
     busy.value = false
   }
@@ -390,7 +390,7 @@ async function openTag(): Promise<void> {
     const res = await api<{ items: { id: number; name: string }[] }>('/tags')
     tags.value = res.items ?? []
   } catch (e) {
-    error.value = (e as Error).message || '标签加载失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.42b9ca', '标签加载失败')
   }
 }
 
@@ -412,10 +412,10 @@ async function applyTags(mode: 'add' | 'remove'): Promise<void> {
       method: 'POST',
       body: { ids: Array.from(picked.value), tagIds: Array.from(pickedTags.value), mode },
     })
-    notice.value = mode === 'add' ? '标签已添加' : '标签已移除'
+    notice.value = mode === 'add' ? '标签已添加' : tr('componentsAttachmentPanel.7fcc85', '标签已移除')
     tagOpen.value = false
   } catch (e) {
-    error.value = (e as Error).message || '打标签失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.c9c0ae', '打标签失败')
   } finally {
     busy.value = false
   }
@@ -423,7 +423,7 @@ async function applyTags(mode: 'add' | 'remove'): Promise<void> {
 
 async function batchDelete(): Promise<void> {
   if (picked.value.size === 0) return
-  if (!window.confirm(`确认删除所选 ${picked.value.size} 个附件？（软删除，可在后台恢复）`)) return
+  if (!window.confirm(tr('componentsAttachmentPanel.4f2479', `确认删除所选 ${picked.value.size} 个附件？（软删除，可在后台恢复）`))) return
   busy.value = true
   try {
     await api('/attachments/batch/delete', {
@@ -433,7 +433,7 @@ async function batchDelete(): Promise<void> {
     notice.value = '已删除'
     await load()
   } catch (e) {
-    error.value = (e as Error).message || '删除失败'
+    error.value = (e as Error).message || tr('componentsAttachmentPanel.72250c', '删除失败')
   } finally {
     busy.value = false
   }

@@ -45,13 +45,13 @@ const totalPages = () => Math.max(1, Math.ceil(total.value / size.value))
 
 /** 类别标签（后端当前默认 category=0，预留扩展） */
 const CATEGORY_LABELS: Record<number, string> = {
-  0: '通知',
-  1: '提醒',
-  2: '安全预警',
-  3: '系统',
+  0: t('viewsNotificationView.7a66c0', '通知'),
+  1: t('viewsNotificationView.81944e', '提醒'),
+  2: t('viewsNotificationView.5a1020', '安全预警'),
+  3: t('viewsNotificationView.1a1f6d', '系统'),
 }
 function categoryLabel(v: string | number): string {
-  return CATEGORY_LABELS[Number(v)] ?? '通知'
+  return CATEGORY_LABELS[Number(v)] ?? t('viewsNotificationView.7a66c0', '通知')
 }
 
 function isUnread(n: Notification): boolean {
@@ -111,7 +111,7 @@ async function markRead(n: Notification): Promise<void> {
     items.value = items.value.map((x) =>
       x.id === n.id ? { ...x, is_read: 't' } : x,
     )
-    toast.success('已标记为已读')
+    toast.success(t('viewsNotificationView.382b15', '已标记为已读'))
   } catch (e) {
     toast.error((e as Error).message)
   } finally {
@@ -124,7 +124,7 @@ async function markAllRead(): Promise<void> {
   try {
     await api('/notifications/read-all', { method: 'POST', body: {} })
     items.value = items.value.map((x) => ({ ...x, is_read: 't' }))
-    toast.success('已将全部通知标为已读')
+    toast.success(t('viewsNotificationView.cf2d00', '已将全部通知标为已读'))
   } catch (e) {
     toast.error((e as Error).message)
   } finally {

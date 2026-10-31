@@ -86,14 +86,14 @@ const isEditing = computed(() => editingId.value !== '')
 
 const categoryOptions = CATEGORY_DEFS
 const statusOptions = [
-  { value: 0, label: '草稿' },
-  { value: 1, label: '正常' },
-  { value: 2, label: '已归档' },
+  { value: 0, label: tr('viewsTemplateView.0f4368', '草稿') },
+  { value: 1, label: tr('viewsTemplateView.f78d03', '正常') },
+  { value: 2, label: tr('viewsTemplateView.5cfbea', '已归档') },
 ]
 const sensitivityOptions = [
-  { value: 1, label: '普通' },
-  { value: 2, label: '敏感' },
-  { value: 3, label: '高敏' },
+  { value: 1, label: tr('viewsTemplateView.7cda07', '普通') },
+  { value: 2, label: tr('viewsTemplateView.e4d1f0', '敏感') },
+  { value: 3, label: tr('viewsTemplateView.4bdda7', '高敏') },
 ]
 
 async function load(): Promise<void> {
@@ -157,11 +157,11 @@ function onCategoryChange(): void {
 
 async function save(): Promise<void> {
   if (!form.value.name.trim()) {
-    toastError('模板名称不能为空')
+    toastError(tr('viewsTemplateView.150115', '模板名称不能为空'))
     return
   }
   if (!form.value.title.trim()) {
-    toastError('标题模板不能为空')
+    toastError(tr('viewsTemplateView.b38378', '标题模板不能为空'))
     return
   }
   // 前端先校验一次 JSON 对象，避免把非法文本发给数据库的 ::jsonb
@@ -169,11 +169,11 @@ async function save(): Promise<void> {
   try {
     const parsed: unknown = JSON.parse(extra)
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-      toastError('扩展字段默认值必须是 JSON 对象，如 {"发证机关": "市公安局"}')
+      toastError(tr('viewsTemplateView.62af7b', '扩展字段默认值必须是 JSON 对象，如 {"发证机关": "市公安局"}'))
       return
     }
   } catch {
-    toastError('扩展字段默认值不是合法 JSON')
+    toastError(tr('viewsTemplateView.5e8fbe', '扩展字段默认值不是合法 JSON'))
     return
   }
 
@@ -192,10 +192,10 @@ async function save(): Promise<void> {
     }
     if (isEditing.value) {
       await api(`/item-templates/${editingId.value}`, { method: 'PUT', body })
-      success('模板已更新')
+      success(tr('viewsTemplateView.7c16ee', '模板已更新'))
     } else {
       await api('/item-templates', { method: 'POST', body })
-      success('模板已创建')
+      success(tr('viewsTemplateView.101d6d', '模板已创建'))
     }
     showEdit.value = false
     load()
@@ -218,7 +218,7 @@ function openApply(t: Template): void {
 async function apply(): Promise<void> {
   if (!applyTarget.value) return
   if (!applyForm.value.subjectId) {
-    toastError('请选择目标主体')
+    toastError(tr('viewsTemplateView.40daf9', '请选择目标主体'))
     return
   }
   applying.value = true
@@ -234,7 +234,7 @@ async function apply(): Promise<void> {
       },
     )
     showApply.value = false
-    success(`已按模板创建 ${r.created} 条档案`)
+    success(tr('viewsTemplateView.408fdc', `已按模板创建 ${r.created} 条档案`))
   } catch (e) {
     toastError((e as Error).message)
   } finally {
@@ -253,7 +253,7 @@ async function confirmDelete(): Promise<void> {
   try {
     await api(`/item-templates/${deleteTarget.value.id}`, { method: 'DELETE' })
     showDelete.value = false
-    success('模板已删除')
+    success(tr('viewsTemplateView.8911a9', '模板已删除'))
     load()
   } catch (e) {
     toastError((e as Error).message)

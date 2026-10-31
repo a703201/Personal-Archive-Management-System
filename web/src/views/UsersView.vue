@@ -168,7 +168,7 @@ async function loadRoles(): Promise<void> {
 
 async function createUser(): Promise<void> {
   if (!newUser.value.username || !newUser.value.password) {
-    toastError('用户名与口令不能为空')
+    toastError(t('viewsUsersView.0adea5', '用户名与口令不能为空'))
     return
   }
   creating.value = true
@@ -185,7 +185,7 @@ async function createUser(): Promise<void> {
     })
     showCreate.value = false
     newUser.value = { username: '', nickname: '', email: '', phone: '', password: '' }
-    success('用户已创建')
+    success(t('viewsUsersView.da1f8f', '用户已创建'))
     loadUsers()
   } catch (e) {
     toastError((e as Error).message)
@@ -202,7 +202,7 @@ function openReset(u: UserRow): void {
 }
 async function resetPassword(): Promise<void> {
   if (!passwordOk.value || !pwdTarget.value) {
-    toastError('口令不满足安全策略或两次不一致')
+    toastError(t('viewsUsersView.9599e1', '口令不满足安全策略或两次不一致'))
     return
   }
   resetting.value = true
@@ -212,7 +212,7 @@ async function resetPassword(): Promise<void> {
       body: { password: newPwd.value },
     })
     showPwd.value = false
-    success('口令已重置')
+    success(t('viewsUsersView.19d326', '口令已重置'))
     loadUsers()
   } catch (e) {
     toastError((e as Error).message)
@@ -226,7 +226,7 @@ async function toggleStatus(u: UserRow): Promise<void> {
   const next = isActive(u) ? 1 : 0
   try {
     await api(`/users/${u.id}/status`, { method: 'POST', body: { status: next } })
-    success(next === 0 ? '已启用' : '已停用')
+    success(next === 0 ? '已启用' : t('viewsUsersView.6c7dcb', '已停用'))
     loadUsers()
   } catch (e) {
     toastError((e as Error).message)
@@ -236,7 +236,7 @@ async function toggleStatus(u: UserRow): Promise<void> {
 async function unlock(u: UserRow): Promise<void> {
   try {
     await api(`/users/${u.id}/unlock`, { method: 'POST' })
-    success('已解锁')
+    success(t('viewsUsersView.59c3ed', '已解锁'))
     loadUsers()
   } catch (e) {
     toastError((e as Error).message)
@@ -253,7 +253,7 @@ async function confirmDelete(): Promise<void> {
   try {
     await api(`/users/${deleteTarget.value.id}`, { method: 'DELETE' })
     showDelete.value = false
-    success('用户已删除')
+    success(t('viewsUsersView.7f894e', '用户已删除'))
     loadUsers()
   } catch (e) {
     toastError((e as Error).message)
@@ -283,7 +283,7 @@ async function assignRole(): Promise<void> {
       body: { roleCode: pickRole.value },
     })
     pickRole.value = ''
-    success('已分配角色')
+    success(t('viewsUsersView.83fc16', '已分配角色'))
     const data = await api<{ items: UserRole[] }>(`/users/${roleTarget.value.id}/roles`)
     currentRoles.value = data.items ?? []
   } catch (e) {
@@ -296,7 +296,7 @@ async function revokeRole(roleCode: string): Promise<void> {
   if (!roleTarget.value) return
   try {
     await api(`/users/${roleTarget.value.id}/roles/${roleCode}`, { method: 'DELETE' })
-    success('已移除角色')
+    success(t('viewsUsersView.25d902', '已移除角色'))
     currentRoles.value = currentRoles.value.filter((r) => r.code !== roleCode)
   } catch (e) {
     toastError((e as Error).message)

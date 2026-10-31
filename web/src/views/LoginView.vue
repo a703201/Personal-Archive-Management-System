@@ -41,9 +41,9 @@ const branding = ref<Branding>({
 const titleText = computed(() =>
   branding.value.brandName && branding.value.brandName !== 'AMS'
     ? branding.value.brandName
-    : t('login.title', '个人档案管理系统'),
+    : t('login.title', t('viewsLoginView.cc6127', '个人档案管理系统')),
 )
-const subtitleText = computed(() => t('login.subtitle', '请登录以继续'))
+const subtitleText = computed(() => t('login.subtitle', t('viewsLoginView.693b7f', '请登录以继续')))
 
 onMounted(async () => {
   try {
@@ -86,10 +86,10 @@ async function onSubmit(): Promise<void> {
     const redirect = (route.query.redirect as string) || '/overview'
     router.replace(redirect)
   } catch (e) {
-    const msg = (e as Error).message || '登录失败，请重试'
+    const msg = (e as Error).message || t('viewsLoginView.6d207e', '登录失败，请重试')
     error.value = msg
     // 「请输入 6 位动态码」「动态码不正确」「动态码已使用」都说明该账号启用了双因子
-    if (msg.includes('双因子') || msg.includes('动态码')) {
+    if (msg.includes(t('viewsLoginView.dae7c8', '双因子')) || msg.includes(t('viewsLoginView.08f63a', '动态码'))) {
       needTotp.value = true
     }
   } finally {

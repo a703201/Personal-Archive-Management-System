@@ -36,18 +36,18 @@ const toast = useToast()
 
 /** 条目状态：0=草稿 1=正常 2=已归档 */
 const STATUS_OPTS = [
-  { value: -1, label: '全部状态' },
-  { value: 0, label: '草稿' },
-  { value: 1, label: '正常' },
-  { value: 2, label: '已归档' },
+  { value: -1, label: tr('viewsArchiveView.1a4c26', '全部状态') },
+  { value: 0, label: tr('viewsArchiveView.0f4368', '草稿') },
+  { value: 1, label: tr('viewsArchiveView.f78d03', '正常') },
+  { value: 2, label: tr('viewsArchiveView.5cfbea', '已归档') },
 ]
 
 const RELATION_OPTS = [
-  { value: 0, label: '本人' },
-  { value: 1, label: '配偶' },
-  { value: 2, label: '子女' },
-  { value: 3, label: '父母' },
-  { value: 4, label: '其他' },
+  { value: 0, label: tr('viewsArchiveView.24f3c1', '本人') },
+  { value: 1, label: tr('viewsArchiveView.38ef0f', '配偶') },
+  { value: 2, label: tr('viewsArchiveView.13bc78', '子女') },
+  { value: 3, label: tr('viewsArchiveView.4590bf', '父母') },
+  { value: 4, label: tr('viewsArchiveView.1a26ed', '其他') },
 ]
 
 /** 本页历史别名，指向共享字典（保留调用点不变，减少改动面） */
@@ -60,7 +60,7 @@ function statusLabel(v: number | string): string {
 
 function sensLabel(v: number | string): string {
   const n = Number(v)
-  return n >= 3 ? '高敏' : n === 2 ? '敏感' : '普通'
+  return n >= 3 ? '高敏' : n === 2 ? '敏感' : tr('viewsArchiveView.7cda07', '普通')
 }
 
 /**
@@ -68,15 +68,15 @@ function sensLabel(v: number | string): string {
  * 0=手动 1=CSV导入 2=克隆 3=OCR 4=附件导入 5=导出包回导（FR-EXP-008）
  */
 const SOURCE_LABELS: Record<number, string> = {
-  0: '手动',
-  1: 'CSV 导入',
-  2: '克隆',
+  0: tr('viewsArchiveView.2a4a4d', '手动'),
+  1: tr('viewsArchiveView.b7d837', 'CSV 导入'),
+  2: tr('viewsArchiveView.6e6045', '克隆'),
   3: 'OCR',
-  4: '附件导入',
-  5: '导出包回导',
+  4: tr('viewsArchiveView.1e77ab', '附件导入'),
+  5: tr('viewsArchiveView.3685ba', '导出包回导'),
 }
 function sourceLabel(v: number | string): string {
-  return SOURCE_LABELS[Number(v)] ?? '手动'
+  return SOURCE_LABELS[Number(v)] ?? tr('viewsArchiveView.2a4a4d', '手动')
 }
 
 function fmtTime(ms: number | string | undefined): string {
@@ -259,7 +259,7 @@ const tagOptions = ref<{ id: string; name: string }[]>([])
 async function batchEdit(): Promise<void> {
   if (selected.value.size === 0) return
   if (editCategory.value === null && !editExpiresAt.value && !editTagId.value) {
-    toast.error('请至少选择一项要修改的内容（分类 / 有效期 / 标签）')
+    toast.error(tr('viewsArchiveView.a9ec37', '请至少选择一项要修改的内容（分类 / 有效期 / 标签）'))
     return
   }
   batchEditing.value = true
@@ -274,7 +274,7 @@ async function batchEdit(): Promise<void> {
     )
     const skipped = res.requested - res.updated
     toast.success(
-      `已更新 ${res.updated} 条${res.tagged ? `，打标 ${res.tagged} 次` : ''}` +
+      tr('viewsArchiveView.9fead2', `已更新 ${res.updated} 条${res.tagged ? `，打标 ${res.tagged} 次` : ''}`) +
         (skipped > 0 ? `；${skipped} 条未变更（可能无权限或已删除）` : ''),
     )
     selected.value = new Set()
@@ -307,7 +307,7 @@ async function batchDelete(): Promise<void> {
         // 单条失败不阻断其余已选项
       }
     }
-    toast.success(`已删除 ${ok} 条（移入回收站）`)
+    toast.success(tr('viewsArchiveView.f36211', `已删除 ${ok} 条（移入回收站）`))
     selected.value = new Set()
     await loadItems()
   } catch (e) {
@@ -370,7 +370,7 @@ function openSubjectEdit(): void {
 async function saveSubject(): Promise<void> {
   const f = subjectForm.value
   if (!f.name.trim()) {
-    toast.warning('请填写主体姓名')
+    toast.warning(tr('viewsArchiveView.c5d55c', '请填写主体姓名'))
     return
   }
   subjectSaving.value = true
@@ -387,7 +387,7 @@ async function saveSubject(): Promise<void> {
       })
       await loadSubjects()
       activeSubjectId.value = String(res.id)
-      toast.success('主体已创建')
+      toast.success(tr('viewsArchiveView.5370b6', '主体已创建'))
     } else {
       await api(`/subjects/${activeSubjectId.value}`, {
         method: 'PUT',
@@ -400,7 +400,7 @@ async function saveSubject(): Promise<void> {
         },
       })
       await loadSubjects()
-      toast.success('主体已更新')
+      toast.success(tr('viewsArchiveView.68508a', '主体已更新'))
     }
     showSubject.value = false
     await loadItems()
@@ -416,7 +416,7 @@ async function deleteSubject(): Promise<void> {
   subjectSaving.value = true
   try {
     await api(`/subjects/${activeSubjectId.value}`, { method: 'DELETE' })
-    toast.success('主体已删除')
+    toast.success(tr('viewsArchiveView.ddddd8', '主体已删除'))
     showSubject.value = false
     activeSubjectId.value = ''
     await loadSubjects()
@@ -545,11 +545,11 @@ function changedFields(): Record<string, string> {
 
 async function save(): Promise<void> {
   if (!form.value.title.trim()) {
-    toast.warning('请填写标题')
+    toast.warning(tr('viewsArchiveView.0eeb5d', '请填写标题'))
     return
   }
   if (formMode.value === 'create' && !activeSubjectId.value) {
-    toast.warning('请先选择或创建一个主体')
+    toast.warning(tr('viewsArchiveView.4a0d72', '请先选择或创建一个主体'))
     return
   }
   saving.value = true
@@ -591,7 +591,7 @@ async function save(): Promise<void> {
     if (Object.keys(fields).length > 0) {
       await api(`/items/${itemId}/fields`, { method: 'PUT', body: fields })
     }
-    toast.success(formMode.value === 'create' ? '档案已创建' : '档案已更新')
+    toast.success(formMode.value === 'create' ? '档案已创建' : tr('viewsArchiveView.06ad0b', '档案已更新'))
     showForm.value = false
     await loadItems()
   } catch (e) {
@@ -661,7 +661,7 @@ async function restoreItem(it: Item): Promise<void> {
   restoring.value = String(it.id)
   try {
     await api(`/items/${it.id}/restore`, { method: 'POST' })
-    toast.success('已恢复')
+    toast.success(tr('viewsArchiveView.6aa9ad', '已恢复'))
     recycleItems.value = recycleItems.value.filter((x) => x.id !== it.id)
     await loadItems()
   } catch (e) {
@@ -690,7 +690,7 @@ async function confirmDelete(): Promise<void> {
   try {
     // 软删除走乐观锁：后端要求带 version（缺省会被判为非法请求体）
     await api(`/items/${t.id}`, { method: 'DELETE', body: { version: Number(t.version ?? 1) } })
-    toast.success('已移入回收站')
+    toast.success(tr('viewsArchiveView.54e2ac', '已移入回收站'))
     showDelete.value = false
     await loadItems()
   } catch (e) {
@@ -707,7 +707,7 @@ async function cloneItem(it: Item): Promise<void> {
   cloningId.value = String(it.id)
   try {
     const res = await api<{ id: string }>(`/items/${it.id}/clone`, { method: 'POST', body: {} })
-    toast.success('已复制为新草稿')
+    toast.success(tr('viewsArchiveView.7484d8', '已复制为新草稿'))
     await loadItems()
     void res
   } catch (e) {

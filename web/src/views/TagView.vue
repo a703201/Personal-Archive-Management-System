@@ -150,13 +150,13 @@ onMounted(load)
 async function createTag(): Promise<void> {
   const name = newName.value.trim()
   if (!name) {
-    toastError('请填写标签名')
+    toastError(tr('viewsTagView.b0f792', '请填写标签名'))
     return
   }
   busy.value = true
   try {
     await api('/tags', { method: 'POST', body: { name, parentId: newParent.value || undefined } })
-    success('已创建标签')
+    success(tr('viewsTagView.bb2841', '已创建标签'))
     newName.value = ''
     newParent.value = ''
     await load()
@@ -178,7 +178,7 @@ async function saveEdit(): Promise<void> {
   busy.value = true
   try {
     await api(`/tags/${editingId.value}`, { method: 'PUT', body: { name } })
-    success('已更新')
+    success(tr('viewsTagView.112f98', '已更新'))
     editingId.value = ''
     await load()
   } catch (e) {
@@ -193,7 +193,7 @@ async function moveTag(t: TagNode, parentId: string): Promise<void> {
   busy.value = true
   try {
     await api(`/tags/${t.id}/parent`, { method: 'PUT', body: { parentId: parentId || 0 } })
-    success(parentId ? '已移动到该父标签下' : '已提升为顶层标签')
+    success(parentId ? '已移动到该父标签下' : tr('viewsTagView.0a5fb5', '已提升为顶层标签'))
     await load()
   } catch (e) {
     toastError((e as Error).message)
@@ -204,13 +204,13 @@ async function moveTag(t: TagNode, parentId: string): Promise<void> {
 
 async function removeTag(t: TagNode): Promise<void> {
   if (t.childCount > 0) {
-    info('该标签下还有子标签，请先移走或删除子标签')
+    info(tr('viewsTagView.3a8cbb', '该标签下还有子标签，请先移走或删除子标签'))
     return
   }
   busy.value = true
   try {
     await api(`/tags/${t.id}`, { method: 'DELETE' })
-    success('已删除标签')
+    success(tr('viewsTagView.eb22b0', '已删除标签'))
     await load()
   } catch (e) {
     toastError((e as Error).message)
@@ -233,13 +233,13 @@ function cancelMerge(): void {
 async function confirmMerge(t: TagNode): Promise<void> {
   const targetId = mergeTarget.value
   if (!targetId || targetId === t.id) {
-    toastError('请选择一个不同的目标标签')
+    toastError(tr('viewsTagView.a28546', '请选择一个不同的目标标签'))
     return
   }
   busy.value = true
   try {
     const r = await api<{ moved: number }>(`/tags/${t.id}/merge`, { method: 'POST', body: { targetId } })
-    success(`已合并，迁移 ${r.moved} 条关联`)
+    success(tr('viewsTagView.b6fae7', `已合并，迁移 ${r.moved} 条关联`))
     mergeId.value = ''
     await load()
   } catch (e) {

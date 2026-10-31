@@ -4,7 +4,7 @@
  *
  * 数据来自 /api/me：账号、昵称、掩码后的联系方式、权限点。
  * 注意后端**不会**返回任何凭据字段（口令哈希 / KDF 参数），
- * 前端也没有任何途径拿到 —— 这是设计上的保证，不是"懒得展示"。
+ * 前端也没有任何途径拿到 —— 这是设计上的保证，不是t('viewsProfileView.701280', "懒得展示")。
  *
  * 【自助维护】
  *   PUT  /api/me            改昵称 / 邮箱 / 手机号
@@ -96,7 +96,7 @@ async function setup2fa(): Promise<void> {
     totpUrl.value = res.otpauthUrl
     twofaMsg.value = '密钥已生成，请用验证器录入后输入动态码完成绑定'
   } catch (e) {
-    twofaErr.value = (e as Error).message || '生成密钥失败'
+    twofaErr.value = (e as Error).message || t('viewsProfileView.fba06d', '生成密钥失败')
   } finally {
     twofaBusy.value = false
   }
@@ -128,7 +128,7 @@ async function enable2fa(): Promise<void> {
   try {
     const r = await postCode('/me/2fa/enable', totpCode.value.trim())
     if (!r.ok) {
-      twofaErr.value = r.msg || '启用失败'
+      twofaErr.value = r.msg || t('viewsProfileView.b8a2f0', '启用失败')
       return
     }
     twofaMsg.value = '双因子已启用，下次登录需输入动态码'
@@ -144,13 +144,13 @@ async function enable2fa(): Promise<void> {
 async function disable2fa(): Promise<void> {
   twofaErr.value = ''
   twofaMsg.value = ''
-  const code = window.prompt('请输入当前 6 位动态码以停用双因子')
+  const code = window.prompt(t('viewsProfileView.00baba', '请输入当前 6 位动态码以停用双因子'))
   if (!code) return
   twofaBusy.value = true
   try {
     const r = await postCode('/me/2fa/disable', code.trim())
     if (!r.ok) {
-      twofaErr.value = r.msg || '停用失败'
+      twofaErr.value = r.msg || t('viewsProfileView.fe3a1a', '停用失败')
       return
     }
     twofaMsg.value = '双因子已停用'
@@ -196,7 +196,7 @@ async function kick(s: SessionRow): Promise<void> {
   sessionBusy.value = s.sid
   try {
     await api(`/me/sessions/${encodeURIComponent(s.sid)}`, { method: 'DELETE' })
-    toast.success('该设备已登出')
+    toast.success(t('viewsProfileView.88295a', '该设备已登出'))
     await loadSessions()
   } catch (e) {
     toast.error((e as Error).message)
@@ -209,7 +209,7 @@ async function kickOthers(): Promise<void> {
   sessionBusy.value = '__others'
   try {
     const res = await api<{ revoked: number }>('/me/sessions', { method: 'DELETE' })
-    toast.success(`已登出其他 ${res.revoked} 台设备`)
+    toast.success(t('viewsProfileView.8ea73b', `已登出其他 ${res.revoked} 台设备`))
     await loadSessions()
   } catch (e) {
     toast.error((e as Error).message)
@@ -259,7 +259,7 @@ async function saveNotifyPrefs(): Promise<void> {
   notifyBusy.value = true
   try {
     await api('/notify/prefs', { method: 'PUT', body: { ...notifyPrefs.value } })
-    toast.success('通知偏好已保存')
+    toast.success(t('viewsProfileView.00e47a', '通知偏好已保存'))
   } catch (e) {
     toast.error((e as Error).message)
   } finally {
@@ -294,13 +294,13 @@ async function saveProfile(): Promise<void> {
   if (email) body.email = email
   if (phone) body.phone = phone
   if (Object.keys(body).length === 0) {
-    toast.warning('没有需要保存的修改')
+    toast.warning(t('viewsProfileView.945d48', '没有需要保存的修改'))
     return
   }
   savingProfile.value = true
   try {
     await api('/me', { method: 'PUT', body })
-    toast.success('资料已更新')
+    toast.success(t('viewsProfileView.df6259', '资料已更新'))
     showEdit.value = false
     await load()
   } catch (e) {
@@ -351,7 +351,7 @@ function openPwd(): void {
 
 async function changePassword(): Promise<void> {
   if (!pwdOk.value) {
-    toast.warning('新口令未满足要求，请按提示调整')
+    toast.warning(t('viewsProfileView.ef8c41', '新口令未满足要求，请按提示调整'))
     return
   }
   savingPwd.value = true
@@ -361,7 +361,7 @@ async function changePassword(): Promise<void> {
       body: { oldPassword: pwdForm.value.old, newPassword: pwdForm.value.next },
     })
     showPwd.value = false
-    toast.success('口令已修改，请用新口令重新登录')
+    toast.success(t('viewsProfileView.d324f0', '口令已修改，请用新口令重新登录'))
     // 后端已吊销全部会话，本地令牌立即失效
     clearToken()
     setTimeout(() => {

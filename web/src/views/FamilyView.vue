@@ -141,21 +141,21 @@ interface CreatedInvite {
 // ---------------------------------------------------------------
 
 const ROLE_LABEL: Record<string, string> = {
-  owner: '所有者',
-  manager: '管理员',
-  member: '成员',
+  owner: t('viewsFamilyView.ff3beb', '所有者'),
+  manager: t('viewsFamilyView.ef84e7', '管理员'),
+  member: t('viewsFamilyView.c1ee9f', '成员'),
 }
 
 const INVITE_STATE_LABEL: Record<string, string> = {
-  usable: '可用',
-  revoked: '已撤销',
-  expired: '已过期',
-  exhausted: '已用尽',
-  too_many_fails: '错误过多',
+  usable: t('viewsFamilyView.e91365', '可用'),
+  revoked: t('viewsFamilyView.61063b', '已撤销'),
+  expired: t('viewsFamilyView.135437', '已过期'),
+  exhausted: t('viewsFamilyView.c70b0a', '已用尽'),
+  too_many_fails: t('viewsFamilyView.f49cd8', '错误过多'),
 }
 
 function roleLabel(code: string): string {
-  return ROLE_LABEL[code] ?? '成员'
+  return ROLE_LABEL[code] ?? t('viewsFamilyView.c1ee9f', '成员')
 }
 
 function inviteStateLabel(code: string): string {
@@ -164,9 +164,9 @@ function inviteStateLabel(code: string): string {
 
 /** 授权范围的一句话描述（与后端 resourceTypeOf 的判定同序） */
 function grantScopeText(g: Grant): string {
-  if (g.resourceType === 'item') return `单条条目 #${g.itemId}`
-  if (g.resourceType === 'category') return `分类：${categoryName(g.category)}`
-  return '整个主体'
+  if (g.resourceType === 'item') return t('viewsFamilyView.da0bb5', `单条条目 #${g.itemId}`)
+  if (g.resourceType === 'category') return t('viewsFamilyView.be189d', `分类：${categoryName(g.category)}`)
+  return t('viewsFamilyView.ef996c', '整个主体')
 }
 
 // ---------------------------------------------------------------
@@ -195,7 +195,7 @@ async function load(): Promise<void> {
     perms.value = me.perms ?? []
     groups.value = g.items ?? []
   } catch (e) {
-    loadError.value = (e as ApiError).message || '加载失败'
+    loadError.value = (e as ApiError).message || t('viewsFamilyView.f6b7a4', '加载失败')
   } finally {
     loading.value = false
   }
@@ -234,12 +234,12 @@ async function submitCreate(): Promise<void> {
       method: 'POST',
       body: { name },
     })
-    success('家庭组已创建')
+    success(t('viewsFamilyView.564c76', '家庭组已创建'))
     showCreate.value = false
     await load()
     await openDetail(r.groupId)
   } catch (e) {
-    createError.value = (e as ApiError).message || '创建失败'
+    createError.value = (e as ApiError).message || t('viewsFamilyView.deb399', '创建失败')
   } finally {
     creating.value = false
   }
@@ -265,7 +265,7 @@ const invites = ref<Invite[]>([])
 const memberName = computed<Record<string, string>>(() => {
   const map: Record<string, string> = {}
   for (const m of members.value) {
-    map[m.userId] = m.nickname || m.username || `用户 ${m.userId}`
+    map[m.userId] = m.nickname || m.username || t('viewsFamilyView.8aa5b4', `用户 ${m.userId}`)
   }
   return map
 })
@@ -296,7 +296,7 @@ async function refreshDetail(groupId?: string): Promise<void> {
     // 组内 owner 若不是自己，就是把「我自己」从被授权人候选里排掉的依据
     await Promise.all([loadGrants(id), loadInvites(id)])
   } catch (e) {
-    detailError.value = (e as ApiError).message || '加载失败'
+    detailError.value = (e as ApiError).message || t('viewsFamilyView.f6b7a4', '加载失败')
   } finally {
     detailLoading.value = false
   }
@@ -348,15 +348,15 @@ function closeDetail(): void {
 async function dissolve(): Promise<void> {
   const g = detail.value
   if (!g) return
-  if (!window.confirm(`解散「${g.name}」？组内成员将立即失去所有由此组授出的访问权。`)) return
+  if (!window.confirm(t('viewsFamilyView.93c22b', `解散「${g.name}」？组内成员将立即失去所有由此组授出的访问权。`))) return
   try {
     const r = await api<{ revokedGrants: number }>(`/family/groups/${g.groupId}`, {
       method: 'DELETE',
     })
-    success(`已解散，撤销 ${r.revokedGrants} 条授权`)
+    success(t('viewsFamilyView.1aa133', `已解散，撤销 ${r.revokedGrants} 条授权`))
     closeDetail()
   } catch (e) {
-    toastError((e as ApiError).message || '解散失败')
+    toastError((e as ApiError).message || t('viewsFamilyView.5f28be', '解散失败'))
   }
 }
 
@@ -365,18 +365,18 @@ async function dissolve(): Promise<void> {
 async function removeMember(m: Member): Promise<void> {
   const g = detail.value
   if (!g) return
-  const name = m.nickname || m.username || `用户 ${m.userId}`
-  if (!window.confirm(`把「${name}」移出家庭组？该成员由此组获得的授权会一并撤销。`)) return
+  const name = m.nickname || m.username || t('viewsFamilyView.8aa5b4', `用户 ${m.userId}`)
+  if (!window.confirm(t('viewsFamilyView.ee8187', `把「${name}」移出家庭组？该成员由此组获得的授权会一并撤销。`))) return
   try {
     const r = await api<{ revokedGrants: number }>(
       `/family/groups/${g.groupId}/members/${m.userId}`,
       { method: 'DELETE' },
     )
-    success(`已移除，撤销 ${r.revokedGrants} 条授权`)
+    success(t('viewsFamilyView.49e17d', `已移除，撤销 ${r.revokedGrants} 条授权`))
     await refreshDetail()
     await load()
   } catch (e) {
-    toastError((e as ApiError).message || '移除失败')
+    toastError((e as ApiError).message || t('viewsFamilyView.f1e2ee', '移除失败'))
   }
 }
 
@@ -426,21 +426,21 @@ async function submitInvite(): Promise<void> {
     createdInvite.value = r
     await loadInvites(g.groupId)
   } catch (e) {
-    inviteError.value = (e as ApiError).message || '生成失败'
+    inviteError.value = (e as ApiError).message || t('viewsFamilyView.64ba75', '生成失败')
   } finally {
     creatingInvite.value = false
   }
 }
 
 async function revokeInvite(inv: Invite): Promise<void> {
-  if (!window.confirm('撤销这条邀请？已用该邀请入组的成员不会被移除。')) return
+  if (!window.confirm(t('viewsFamilyView.a2ce87', '撤销这条邀请？已用该邀请入组的成员不会被移除。'))) return
   try {
     await api(`/family/invites/${inv.inviteId}`, { method: 'DELETE' })
-    success('邀请已撤销')
+    success(t('viewsFamilyView.0b6d84', '邀请已撤销'))
     const id = detail.value?.groupId
     if (id) await loadInvites(id)
   } catch (e) {
-    toastError((e as ApiError).message || '撤销失败')
+    toastError((e as ApiError).message || t('viewsFamilyView.6f9e0b', '撤销失败'))
   }
 }
 
@@ -489,7 +489,7 @@ async function openGrantForm(): Promise<void> {
       const r = await api<{ subjects: Subject[] }>('/subjects')
       subjects.value = r.subjects ?? []
     } catch (e) {
-      grantError.value = (e as ApiError).message || '加载档案主体失败'
+      grantError.value = (e as ApiError).message || t('viewsFamilyView.d2358e', '加载档案主体失败')
     }
   }
 }
@@ -506,7 +506,7 @@ async function loadGrantItems(): Promise<void> {
     )
     grantItems.value = r.items ?? []
   } catch (e) {
-    grantError.value = (e as ApiError).message || '加载条目失败'
+    grantError.value = (e as ApiError).message || t('viewsFamilyView.c0e10e', '加载条目失败')
   } finally {
     grantItemsLoading.value = false
   }
@@ -544,26 +544,26 @@ async function submitGrant(): Promise<void> {
         expiresInHours: Number(grantHours.value) || 0,
       },
     })
-    success(`已授权（${r.resourceType === 'item' ? '单条条目' : r.resourceType === 'category' ? '某分类' : '整个主体'}）`)
+    success(t('viewsFamilyView.5da210', `已授权（${r.resourceType === 'item' ? '单条条目' : r.resourceType === 'category' ? '某分类' : '整个主体'}）`))
     showGrantForm.value = false
     await loadGrants(g.groupId)
   } catch (e) {
-    grantError.value = (e as ApiError).message || '授权失败'
+    grantError.value = (e as ApiError).message || t('viewsFamilyView.1ac786', '授权失败')
   } finally {
     creatingGrant.value = false
   }
 }
 
 async function revokeGrant(g: Grant): Promise<void> {
-  const who = memberName.value[g.granteeId] ?? `用户 ${g.granteeId}`
-  if (!window.confirm(`撤销「${who}」的这条授权？对方将立即无法再访问。`)) return
+  const who = memberName.value[g.granteeId] ?? t('viewsFamilyView.c5187a', `用户 ${g.granteeId}`)
+  if (!window.confirm(t('viewsFamilyView.a5d9b2', `撤销「${who}」的这条授权？对方将立即无法再访问。`))) return
   try {
     await api(`/family/grants/${g.grantId}`, { method: 'DELETE' })
-    success('授权已撤销')
+    success(t('viewsFamilyView.5b3056', '授权已撤销'))
     const id = detail.value?.groupId
     if (id) await loadGrants(id)
   } catch (e) {
-    toastError((e as ApiError).message || '撤销失败')
+    toastError((e as ApiError).message || t('viewsFamilyView.6f9e0b', '撤销失败'))
   }
 }
 
@@ -584,7 +584,7 @@ async function loadShared(): Promise<void> {
     shared.value = r.items ?? []
     sharedTotal.value = r.total ?? 0
   } catch (e) {
-    sharedError.value = (e as ApiError).message || '加载失败'
+    sharedError.value = (e as ApiError).message || t('viewsFamilyView.f6b7a4', '加载失败')
   } finally {
     sharedLoading.value = false
   }
@@ -601,7 +601,7 @@ async function openSharedItem(it: SharedItem): Promise<void> {
   try {
     sharedDetail.value = await api<SharedItem>(`/family/shared-items/${it.id}`)
   } catch (e) {
-    sharedDetailError.value = (e as ApiError).message || '加载失败'
+    sharedDetailError.value = (e as ApiError).message || t('viewsFamilyView.f6b7a4', '加载失败')
   }
 }
 
@@ -619,7 +619,7 @@ async function copy(text: string, what: string): Promise<void> {
       if (copied.value === what) copied.value = ''
     }, 1800)
   } catch {
-    toastError('复制失败，请手动选中复制')
+    toastError(t('viewsFamilyView.f13ae1', '复制失败，请手动选中复制'))
   }
 }
 

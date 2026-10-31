@@ -22,17 +22,17 @@ const { success, error: toastError, info } = useToast()
 
 // ---- 字典（与 docs/06 §12.3 分类模板一致）----
 const CATEGORIES = [
-  { code: 1, name: '个人基本信息' },
-  { code: 2, name: '证件信息' },
-  { code: 3, name: '教育经历' },
-  { code: 4, name: '职业经历' },
-  { code: 5, name: '资质证书' },
-  { code: 6, name: '联系方式' },
-  { code: 7, name: '家庭关系' },
-  { code: 8, name: '健康信息' },
-  { code: 9, name: '资产信息' },
-  { code: 10, name: '影像附件' },
-  { code: 11, name: '自定义分类' },
+  { code: 1, name: tr('viewsImportView.5a23ad', '个人基本信息') },
+  { code: 2, name: tr('viewsImportView.c88167', '证件信息') },
+  { code: 3, name: tr('viewsImportView.3deab7', '教育经历') },
+  { code: 4, name: tr('viewsImportView.805b45', '职业经历') },
+  { code: 5, name: tr('viewsImportView.3629d9', '资质证书') },
+  { code: 6, name: tr('viewsImportView.60beed', '联系方式') },
+  { code: 7, name: tr('viewsImportView.af5a25', '家庭关系') },
+  { code: 8, name: tr('viewsImportView.fa9036', '健康信息') },
+  { code: 9, name: tr('viewsImportView.6aac96', '资产信息') },
+  { code: 10, name: tr('viewsImportView.c0d270', '影像附件') },
+  { code: 11, name: tr('viewsImportView.54b70e', '自定义分类') },
 ]
 
 interface SubjectRow {
@@ -147,12 +147,12 @@ const tasksLoading = ref(false)
 let timer: number | undefined
 
 const STATUS_TEXT: Record<number, string> = {
-  0: '排队中',
-  1: '执行中',
-  2: '已完成',
-  3: '失败',
-  4: '已取消',
-  5: '已过期',
+  0: tr('viewsImportView.4dcbbc', '排队中'),
+  1: tr('viewsImportView.1f425b', '执行中'),
+  2: tr('viewsImportView.e99b48', '已完成'),
+  3: tr('viewsImportView.3e3c80', '失败'),
+  4: tr('viewsImportView.a5ffdc', '已取消'),
+  5: tr('viewsImportView.135437', '已过期'),
 }
 
 const activeCount = computed(
@@ -173,10 +173,10 @@ function fmtTime(ms: number): string {
 }
 
 const ACTION_TEXT: Record<string, string> = {
-  match: '挂到已有条目',
-  create: '新建条目',
-  conflict: '待指定',
-  skip: '跳过',
+  match: tr('viewsImportView.0ac8cf', '挂到已有条目'),
+  create: tr('viewsImportView.69dff1', '新建条目'),
+  conflict: tr('viewsImportView.42661c', '待指定'),
+  skip: tr('viewsImportView.31a985', '跳过'),
 }
 
 // ---------------------------------------------------------------
@@ -242,8 +242,8 @@ async function downloadTemplate(): Promise<void> {
 }
 
 async function csvPrecheck(): Promise<void> {
-  if (!subjectId.value) { toastError('请先选择主体'); return }
-  if (!csvText.value.trim()) { toastError('请先选择 CSV 文件或粘贴内容'); return }
+  if (!subjectId.value) { toastError(tr('viewsImportView.780478', '请先选择主体')); return }
+  if (!csvText.value.trim()) { toastError(tr('viewsImportView.0905c7', '请先选择 CSV 文件或粘贴内容')); return }
   busy.value = true
   try {
     const qs = withTemplate(new URLSearchParams({ subjectId: subjectId.value }))
@@ -254,8 +254,8 @@ async function csvPrecheck(): Promise<void> {
     )
     csvPlan.value = plan
     const dupTip = plan.duplicate > 0 ? `，${plan.duplicate} 行重复将跳过` : ''
-    if (plan.invalid === 0) success(`预检通过：${plan.valid} 行可导入${dupTip}`)
-    else toastError(`预检发现 ${plan.invalid} 行有问题${dupTip}，详见下方清单`)
+    if (plan.invalid === 0) success(tr('viewsImportView.cb6f6a', `预检通过：${plan.valid} 行可导入${dupTip}`))
+    else toastError(tr('viewsImportView.b3d888', `预检发现 ${plan.invalid} 行有问题${dupTip}，详见下方清单`))
   } catch (e) {
     toastError((e as Error).message)
   } finally {
@@ -273,7 +273,7 @@ async function csvSubmit(): Promise<void> {
       new Blob([csvText.value], { type: 'text/csv' }),
       'text/csv; charset=utf-8',
     )
-    success(`已提交导入任务 ${r.taskNo}`)
+    success(tr('viewsImportView.0ebe65', `已提交导入任务 ${r.taskNo}`))
     csvPlan.value = null
     csvText.value = ''
     csvName.value = ''
@@ -302,8 +302,8 @@ async function pickBundle(ev: Event): Promise<void> {
 }
 
 async function bundlePrecheck(): Promise<void> {
-  if (!subjectId.value) { toastError('请先选择主体'); return }
-  if (!bundleText.value.trim()) { toastError('请先选择导出包文件'); return }
+  if (!subjectId.value) { toastError(tr('viewsImportView.780478', '请先选择主体')); return }
+  if (!bundleText.value.trim()) { toastError(tr('viewsImportView.60a96d', '请先选择导出包文件')); return }
   busy.value = true
   try {
     const plan = await apiBinary<CsvPlan>(
@@ -313,8 +313,8 @@ async function bundlePrecheck(): Promise<void> {
     )
     bundlePlan.value = plan
     const dupTip = plan.duplicate > 0 ? `，${plan.duplicate} 行重复将跳过` : ''
-    if (plan.invalid === 0) success(`验签通过：${plan.valid} 行可回导${dupTip}`)
-    else toastError(`验签通过，但有 ${plan.invalid} 行有问题${dupTip}`)
+    if (plan.invalid === 0) success(tr('viewsImportView.e1baab', `验签通过：${plan.valid} 行可回导${dupTip}`))
+    else toastError(tr('viewsImportView.3881bc', `验签通过，但有 ${plan.invalid} 行有问题${dupTip}`))
   } catch (e) {
     toastError((e as Error).message)
   } finally {
@@ -331,7 +331,7 @@ async function bundleSubmit(): Promise<void> {
       new Blob([bundleText.value], { type: 'application/json' }),
       'application/json',
     )
-    success(`已提交回导任务 ${r.taskNo}`)
+    success(tr('viewsImportView.09f9d7', `已提交回导任务 ${r.taskNo}`))
     bundlePlan.value = null
     bundleText.value = ''
     bundleName.value = ''
@@ -364,7 +364,7 @@ async function pickZip(ev: Event): Promise<void> {
   const f = input.files?.[0]
   if (!f) return
   if (f.size > MAX_ZIP_BYTES) {
-    toastError(`压缩包 ${fmtSize(f.size)}，超过单包 ${fmtSize(MAX_ZIP_BYTES)} 上限，请拆分后分批导入`)
+    toastError(tr('viewsImportView.0dea00', `压缩包 ${fmtSize(f.size)}，超过单包 ${fmtSize(MAX_ZIP_BYTES)} 上限，请拆分后分批导入`))
     input.value = ''
     zipFile.value = null
     zipName.value = ''
@@ -381,9 +381,9 @@ async function pickZip(ev: Event): Promise<void> {
 }
 
 async function zipPrecheck(): Promise<void> {
-  if (!subjectId.value) { toastError('请先选择主体'); return }
+  if (!subjectId.value) { toastError(tr('viewsImportView.780478', '请先选择主体')); return }
   const f = zipFile.value
-  if (!f) { toastError('请先选择 ZIP 文件'); return }
+  if (!f) { toastError(tr('viewsImportView.682d29', '请先选择 ZIP 文件')); return }
   busy.value = true
   try {
     const qs = new URLSearchParams({
@@ -398,9 +398,9 @@ async function zipPrecheck(): Promise<void> {
     attachPlan.value = plan
     resolutions.value = {}
     if (plan.conflicts.length > 0) {
-      info(`有 ${plan.conflicts.length} 个目录重名，需手动指定目标条目`)
+      info(tr('viewsImportView.943768', `有 ${plan.conflicts.length} 个目录重名，需手动指定目标条目`))
     } else {
-      success(`预检完成：${plan.match + plan.create} 个文件待导入`)
+      success(tr('viewsImportView.497cfe', `预检完成：${plan.match + plan.create} 个文件待导入`))
     }
   } catch (e) {
     toastError((e as Error).message)
@@ -424,7 +424,7 @@ async function zipSubmit(): Promise<void> {
   const plan = attachPlan.value
   if (!f || !plan) return
   if (unresolvedCount.value > 0) {
-    { toastError(`还有 ${unresolvedCount.value} 个重名目录未指定目标条目`); return }
+    { toastError(tr('viewsImportView.dff0d9', `还有 ${unresolvedCount.value} 个重名目录未指定目标条目`)); return }
   }
   busy.value = true
   try {
@@ -440,7 +440,7 @@ async function zipSubmit(): Promise<void> {
       frameBody(payload, await f.arrayBuffer()),
       'application/octet-stream',
     )
-    success(`已提交附件导入任务 ${r.taskNo}`)
+    success(tr('viewsImportView.ce4780', `已提交附件导入任务 ${r.taskNo}`))
     attachPlan.value = null
     zipFile.value = null
     zipName.value = ''
@@ -461,7 +461,7 @@ async function zipSubmit(): Promise<void> {
 async function downloadReport(t: TaskRow): Promise<void> {
   try {
     const blob = await apiBlob(`/import/tasks/${encodeURIComponent(t.taskNo)}/report`)
-    triggerDownload(blob, `导入报告-${t.taskNo}.csv`)
+    triggerDownload(blob, tr('viewsImportView.c38ff1', `导入报告-${t.taskNo}.csv`))
   } catch (e) {
     toastError((e as Error).message)
   }
@@ -478,7 +478,7 @@ async function retryTask(t: TaskRow): Promise<void> {
       `/import/attachments/tasks/${encodeURIComponent(t.taskNo)}/retry`,
       { method: 'POST' },
     )
-    success(`已提交重试任务 ${r.taskNo}（${r.total} 个文件）`)
+    success(tr('viewsImportView.ac4290', `已提交重试任务 ${r.taskNo}（${r.total} 个文件）`))
     await loadTasks()
   } catch (e) {
     toastError((e as Error).message)
@@ -490,7 +490,7 @@ async function retryTask(t: TaskRow): Promise<void> {
 async function cancelTask(t: TaskRow): Promise<void> {
   try {
     await api(`/import/tasks/${encodeURIComponent(t.taskNo)}/cancel`, { method: 'POST' })
-    info('已请求取消')
+    info(tr('viewsImportView.28e180', '已请求取消'))
     await loadTasks()
   } catch (e) {
     toastError((e as Error).message)
@@ -534,15 +534,15 @@ interface FieldDefLite {
 
 /** 系统字段（固定列序那 9 列），自定义字段键从字段定义域接口按分类拉取。 */
 const SYSTEM_FIELDS: { key: string; name: string }[] = [
-  { key: 'subject_id', name: '主体ID' },
-  { key: 'category', name: '分类' },
-  { key: 'title', name: '标题' },
-  { key: 'status', name: '状态' },
-  { key: 'sensitivity', name: '敏感度' },
-  { key: 'issued_date', name: '签发日期' },
-  { key: 'expires_at', name: '失效日期' },
-  { key: 'issuer', name: '签发机构' },
-  { key: 'remark', name: '备注' },
+  { key: 'subject_id', name: tr('viewsImportView.0231ed', '主体ID') },
+  { key: 'category', name: tr('viewsImportView.435c52', '分类') },
+  { key: 'title', name: tr('viewsImportView.748d7d', '标题') },
+  { key: 'status', name: tr('viewsImportView.62e951', '状态') },
+  { key: 'sensitivity', name: tr('viewsImportView.c8165b', '敏感度') },
+  { key: 'issued_date', name: tr('viewsImportView.0b8bcd', '签发日期') },
+  { key: 'expires_at', name: tr('viewsImportView.6423a4', '失效日期') },
+  { key: 'issuer', name: tr('viewsImportView.8eb731', '签发机构') },
+  { key: 'remark', name: tr('viewsImportView.e03614', '备注') },
 ]
 
 const SKIP = '__skip__'
@@ -596,16 +596,16 @@ async function applyTemplate(id: string): Promise<void> {
   tplDefaultCategory.value = t.defaults.category ?? ''
   tplDefaultStatus.value = t.defaults.status ?? ''
   tplDefaultSensitivity.value = t.defaults.sensitivity ?? ''
-  success(`已套用模板「${t.name}」`)
+  success(tr('viewsImportView.820dcf', `已套用模板「${t.name}」`))
 }
 
 async function deleteTemplate(id: string): Promise<void> {
-  if (!window.confirm('确认删除该导入模板？删除后不可恢复。')) return
+  if (!window.confirm(tr('viewsImportView.4a4e45', '确认删除该导入模板？删除后不可恢复。'))) return
   try {
     await api(`/import-templates/${id}`, { method: 'DELETE' })
     templates.value = templates.value.filter((x) => String(x.id) !== id)
     if (activeTemplateId.value === id) activeTemplateId.value = ''
-    success('已删除模板')
+    success(tr('viewsImportView.256f00', '已删除模板'))
   } catch (e) {
     toastError((e as Error).message)
   }
@@ -639,7 +639,7 @@ async function refreshRefFieldDefs(): Promise<void> {
 function openMapper(): void {
   parseCsvHeaders()
   if (csvHeaders.value.length === 0) {
-    toastError('请先选择 CSV 文件以读取表头')
+    toastError(tr('viewsImportView.5165f9', '请先选择 CSV 文件以读取表头'))
     return
   }
   const m: Record<string, string> = {}
@@ -670,12 +670,12 @@ function buildDefaults(): Record<string, string> {
 
 async function saveTemplate(): Promise<void> {
   if (!tplName.value.trim()) {
-    toastError('请填写模板名称')
+    toastError(tr('viewsImportView.d7de2d', '请填写模板名称'))
     return
   }
   const mapping = buildMapping()
   if (Object.keys(mapping).length === 0) {
-    toastError('请至少为一个表头选择目标字段')
+    toastError(tr('viewsImportView.f0ada5', '请至少为一个表头选择目标字段'))
     return
   }
   tplBusy.value = true
@@ -685,14 +685,14 @@ async function saveTemplate(): Promise<void> {
         method: 'PUT',
         body: { name: tplName.value.trim(), mapping, defaults: buildDefaults() },
       })
-      success('模板已更新')
+      success(tr('viewsImportView.7c16ee', '模板已更新'))
     } else {
       const r = await api<{ id: string }>('/import-templates', {
         method: 'POST',
         body: { name: tplName.value.trim(), mapping, defaults: buildDefaults() },
       })
       activeTemplateId.value = String(r.id)
-      success('模板已保存')
+      success(tr('viewsImportView.f08f40', '模板已保存'))
     }
     await loadTemplates()
     showMapper.value = false
@@ -728,7 +728,7 @@ async function renameTemplate(newName: string): Promise<void> {
   if (!t) return
   const n = newName.trim()
   if (!n) {
-    toastError('名称不能为空')
+    toastError(tr('viewsImportView.ca8984', '名称不能为空'))
     return
   }
   tplBusy.value = true
@@ -739,7 +739,7 @@ async function renameTemplate(newName: string): Promise<void> {
     })
     renaming.value = false
     await loadTemplates()
-    success('已改名')
+    success(tr('viewsImportView.f5c7c8', '已改名'))
   } catch (e) {
     toastError((e as Error).message)
   } finally {
@@ -755,11 +755,11 @@ async function cloneTemplate(): Promise<void> {
   try {
     const r = await api<{ id: string }>('/import-templates', {
       method: 'POST',
-      body: { cloneFrom: Number(t.id), name: `${t.name} 副本` },
+      body: { cloneFrom: Number(t.id), name: tr('viewsImportView.ad40e5', `${t.name} 副本`) },
     })
     await loadTemplates()
     activeTemplateId.value = String(r.id)
-    success('已复制为副本')
+    success(tr('viewsImportView.16faa1', '已复制为副本'))
   } catch (e) {
     toastError((e as Error).message)
   } finally {

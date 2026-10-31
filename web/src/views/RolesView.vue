@@ -129,7 +129,7 @@ async function load(): Promise<void> {
 
 async function createRole(): Promise<void> {
   if (!newRole.value.code || !newRole.value.name) {
-    toastError('角色编码与名称不能为空')
+    toastError(t('viewsRolesView.782ee1', '角色编码与名称不能为空'))
     return
   }
   creating.value = true
@@ -145,7 +145,7 @@ async function createRole(): Promise<void> {
     })
     showCreate.value = false
     newRole.value = { code: '', name: '', description: '', maxDataLevel: 1 }
-    success('角色已创建')
+    success(t('viewsRolesView.df6520', '角色已创建'))
     load()
   } catch (e) {
     toastError((e as Error).message)
@@ -167,7 +167,7 @@ async function savePerms(): Promise<void> {
       method: 'POST',
       body: { perms: [...selected.value] },
     })
-    success(`已为「${permTarget.value.name}」设置 ${selected.value.size} 项权限`)
+    success(t('viewsRolesView.f1e96f', `已为「${permTarget.value.name}」设置 ${selected.value.size} 项权限`))
     showPerms.value = false
   } catch (e) {
     toastError((e as Error).message)
@@ -191,7 +191,7 @@ function askDelete(r: Role): void {
   try {
     await api(`/roles/${deleteTarget.value.code}`, { method: 'DELETE' })
     showDelete.value = false
-    success('角色已删除')
+    success(t('viewsRolesView.980b39', '角色已删除'))
     load()
   } catch (e) {
     toastError((e as Error).message)
@@ -230,9 +230,9 @@ async function loadPreview(): Promise<void> {
 
 /** 主体范围的可读说明 */
 function scopeText(d: PreviewData): string {
-  if (d.scope === 'any') return '全机构主体'
-  if (d.scope.startsWith('user:')) return `指定用户（ID ${d.scope.slice(5)}）的可访问主体`
-  return '仅本人范围（该角色不含 archive:*:any，故不猜测他人主体）'
+  if (d.scope === 'any') return t('viewsRolesView.184631', '全机构主体')
+  if (d.scope.startsWith('user:')) return t('viewsRolesView.c879b2', `指定用户（ID ${d.scope.slice(5)}）的可访问主体`)
+  return t('viewsRolesView.de48b2', '仅本人范围（该角色不含 archive:*:any，故不猜测他人主体）')
 }
 
 /** 分类分布按数量倒序，只取前 6 个展示 */

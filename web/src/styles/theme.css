@@ -199,11 +199,16 @@ a {
 .app-shell {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  height: 100dvh;
+  overflow: hidden;
 }
 
+/* 滚动容器下沉到 .app-main：顶栏脱离滚动层，backdrop-filter 不再随内容滚动逐帧重算模糊（修复列表/表单滚动卡顿） */
 .app-main {
   flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: var(--sp-4);
   width: 100%;
 }
@@ -495,6 +500,8 @@ button:active:not(:disabled) {
   border: 1px solid var(--border-subtle);
   border-radius: var(--g3-md);
   box-shadow: var(--shadow-pop);
+  /* 提升为独立合成层，减少 sticky + backdrop-filter 在列表滚动时逐帧重算模糊的开销 */
+  will-change: transform;
 }
 .batchbar__count {
   font-weight: 600;
