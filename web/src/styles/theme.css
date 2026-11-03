@@ -1,10 +1,13 @@
 /* ============================================================
-   AMS · 设计令牌与主题
+   AMS · 设计令牌与主题（Apple 级调校）
    ------------------------------------------------------------
+   设计取向：参考 apple.com / Apple 设计语言 —— 克制的单一强调色、
+   中性灰阶、充足留白、精确字距、分层柔影、可打断的弹簧动效。
+   刻意避免「AI 味」：无彩色光斑 / mesh 渐变 / 霓虹描边；材质只用在
+   真正承载层级的玻璃层（顶栏、侧栏、表单）上，绝不滥用。
+
    FR-UX-002 深浅色主题：以 [data-theme] 切换 CSS 变量，
      组件一律只读变量、不写死颜色 —— 新增主题只需新增一组变量。
-     「跟随系统」用 prefers-color-scheme 兜底初始态，
-     用户显式选择后写入 localStorage 并持久化到后端 cfg_settings（见 useTheme）。
    FR-UX-003 响应式布局：四档断点
      mobile  < 640      单列，底部导航
      tablet  640–1023   两列，侧栏可折叠
@@ -20,6 +23,8 @@
   --sp-4: 16px;
   --sp-5: 24px;
   --sp-6: 32px;
+  --sp-7: 48px;
+  --sp-8: 64px;
   /* ---- 圆角：统一走 G3 scale（单一事实来源）----
      【几何现实澄清 · 重要】
        border-radius 画的是**圆弧**：曲率在「直边 ↔ 圆角」衔接处是突变的，
@@ -32,12 +37,10 @@
        若将来确需真正的超椭圆/G3 曲面，可选叠加 SVG mask（有额外绘制成本，
        属「美观 vs 性能」的显式权衡），届时按面板粒度开启而非全局。
 
-     --radius-* 保留作向后兼容别名：历史组件（App.vue / ImportView /
-     LoginView / ProfileView / ToastHost …）仍在引用，统一指向 g3 值，
-     实现「改一处即全局生效」，也避免两套体系造成视觉杂乱。
+     --radius-* 保留作向后兼容别名：历史组件仍在引用，统一指向 g3 值。
      注意：不要再新增 --radius-* 的使用，新增一律用 --g3-*。 */
-  --g3-xs: 8px;
-  --g3-sm: 12px;
+  --g3-xs: 10px;
+  --g3-sm: 14px;
   --g3-md: 18px;
   --g3-lg: 24px;
   --g3-xl: 30px;
@@ -48,25 +51,27 @@
   --radius-lg: var(--g3-md);
 
   /* ---- 缓动（动效从当前值出发，可打断；见 docs §8.5 + apple-design）----
-     --ease-apple 为苹果常用中幅位移曲线（曲率连续，G2+），
-     与 G3 连续曲线的「平滑、无折点」理念一致。 */
+     --ease-apple 为 iOS 标准中幅位移曲线（曲率连续，G2+）。 */
   --ease-apple: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-out-soft: cubic-bezier(0.2, 0.7, 0.3, 1);
   --ease-in-out-soft: cubic-bezier(0.4, 0, 0.2, 1);
 
   /* ---- 弹簧参数（设计意图：阻尼比 1.0 / 响应 0.3s，临界阻尼无过冲）----
      仅作文档式标注，CSS 过渡用它映射出的等效时长。 */
-  --spring-soft: 250ms;
-  --spring-mid: 200ms;
-  --spring-fast: 150ms;
+  --spring-soft: 280ms;
+  --spring-mid: 220ms;
+  --spring-fast: 160ms;
 
-  /* ---- 字体 ---- */
-  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei',
-    'Helvetica Neue', Arial, sans-serif;
+  /* ---- 字体（Apple：系统字体优先，自带光学字距与易读性微调）---- */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text',
+    'PingFang SC', 'Helvetica Neue', Helvetica, Arial, 'Microsoft YaHei', sans-serif;
   --font-size-sm: 13px;
   --font-size-md: 15px;
   --font-size-lg: 18px;
   --font-size-xl: 24px;
+  /* 展示级字号阶梯（大屏收紧字距、正文近 0，见 apple-design §15） */
+  --font-size-display: clamp(30px, 5vw, 52px);
+  --font-size-h1: clamp(24px, 3.4vw, 34px);
 
   /* ---- 断点（供 JS 侧读取，保持与媒体查询一致）---- */
   --bp-tablet: 640px;
@@ -74,96 +79,110 @@
   --bp-wide: 1440px;
 }
 
-/* ---- 浅色（默认）---- */
+/* ---- 浅色（默认，参考 apple.com 中性灰阶）---- */
 :root,
 [data-theme='light'] {
-  --bg-app: #f5f6f8;
+  --bg-app: #f5f5f7;
   --bg-surface: #ffffff;
   --bg-elevated: #ffffff;
-  --bg-hover: #f0f1f4;
-  --bg-selected: #e8f0fe;
+  --bg-hover: #f0f0f2;
+  --bg-selected: #e8f1fd;
 
   --text-primary: #1d1d1f;
-  --text-secondary: #5a5a5f;
-  --text-muted: #8a8a8f;
+  --text-secondary: #6e6e73;
+  --text-muted: #86868b;
   --text-inverse: #ffffff;
 
-  --border-subtle: #e3e4e8;
-  --border-strong: #c9cad0;
+  --border-subtle: #d2d2d7;
+  --border-strong: #c6c6cb;
 
-  --accent: #2b6cf6;
-  --accent-hover: #1f57d0;
-  --accent-soft: #e8f0fe;
+  /* Apple 系统蓝 */
+  --accent: #0071e3;
+  --accent-hover: #0077ed;
+  --accent-press: #0064c8;
+  --accent-soft: #e8f1fd;
 
-  --success: #1a9c5b;
-  --warning: #c88100;
-  --danger: #d8322c;
+  /* Apple 系统级语义色 */
+  --success: #34c759;
+  --warning: #ff9f0a;
+  --danger: #ff3b30;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.18);
+  /* 分层柔影：极小投影 + 中等投影，避免生硬黑边 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.07), 0 1px 3px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 16px 50px rgba(0, 0, 0, 0.12), 0 2px 10px rgba(0, 0, 0, 0.08);
 
-  /* 材质（Apple 玻璃层：半透明 + 模糊，承载层级） */
-  --material-toolbar: rgba(255, 255, 255, 0.72);
-  --material-sidebar: rgba(255, 255, 255, 0.82);
-  --material-sheet: rgba(255, 255, 255, 0.86);
-  --material-scrim: rgba(20, 22, 28, 0.32);
-  --material-blur: 24px;
+  /* 材质（Apple 玻璃层：半透明 + 模糊，承载层级，不做彩色） */
+  --material-toolbar: rgba(255, 255, 255, 0.8);
+  --material-sidebar: rgba(255, 255, 255, 0.85);
+  --material-sheet: rgba(255, 255, 255, 0.9);
+  --material-scrim: rgba(20, 22, 28, 0.28);
+  --material-blur: 20px;
+
+  /* 认证页 hero 基底：中性、极低饱和的纵向渐变（非彩色 mesh） */
+  --hero-bg: linear-gradient(180deg, #fbfbfd 0%, #f5f5f7 100%);
 
   /* 敏感度配色（遵循国内习惯：高=红、低=绿） */
-  --sens-normal: #1a9c5b;
-  --sens-sensitive: #c88100;
-  --sens-high: #d8322c;
+  --sens-normal: #34c759;
+  --sens-sensitive: #ff9f0a;
+  --sens-high: #ff3b30;
+
+  /* 聚焦环（字段/按钮通用） */
+  --field-ring: 0 0 0 4px rgba(0, 113, 227, 0.18);
 }
 
-/* ---- 深色 ---- */
+/* ---- 深色（参考 Apple 暗色调色板：纯黑底 + #1c1c1e 面）---- */
 [data-theme='dark'] {
-  --bg-app: #16171a;
-  --bg-surface: #1e1f23;
-  --bg-elevated: #26282d;
-  --bg-hover: #2c2e34;
-  --bg-selected: #23325a;
+  --bg-app: #000000;
+  --bg-surface: #1c1c1e;
+  --bg-elevated: #2c2c2e;
+  --bg-hover: #2c2c2e;
+  --bg-selected: #0a2849;
 
-  --text-primary: #f2f2f4;
-  --text-secondary: #b0b0b8;
-  --text-muted: #82828c;
-  --text-inverse: #16171a;
+  --text-primary: #f5f5f7;
+  --text-secondary: #aeaeb2;
+  --text-muted: #8e8e93;
+  --text-inverse: #000000;
 
-  --border-subtle: #32343a;
-  --border-strong: #45474e;
+  --border-subtle: #38383a;
+  --border-strong: #48484a;
 
-  --accent: #5b8dfa;
-  --accent-hover: #7aa2fb;
-  --accent-soft: #23325a;
+  --accent: #0a84ff;
+  --accent-hover: #409cff;
+  --accent-press: #007aff;
+  --accent-soft: #0a2849;
 
-  --success: #35c07c;
-  --warning: #e0a234;
-  --danger: #f0686a;
+  --success: #30d158;
+  --warning: #ff9f0a;
+  --danger: #ff453a;
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-  --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.6);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5), 0 1px 1px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 16px 50px rgba(0, 0, 0, 0.65), 0 2px 10px rgba(0, 0, 0, 0.55);
 
-  /* 材质（深色：玻璃层更暗，模糊更强以分离层级） */
-  --material-toolbar: rgba(28, 30, 35, 0.72);
-  --material-sidebar: rgba(28, 30, 35, 0.82);
-  --material-sheet: rgba(34, 36, 41, 0.9);
+  --material-toolbar: rgba(28, 28, 30, 0.8);
+  --material-sidebar: rgba(28, 28, 30, 0.85);
+  --material-sheet: rgba(30, 30, 32, 0.92);
   --material-scrim: rgba(0, 0, 0, 0.5);
-  --material-blur: 28px;
+  --material-blur: 24px;
 
-  --sens-normal: #35c07c;
-  --sens-sensitive: #e0a234;
-  --sens-high: #f0686a;
+  --hero-bg: linear-gradient(180deg, #1c1c1e 0%, #000000 100%);
+
+  --sens-normal: #30d158;
+  --sens-sensitive: #ff9f0a;
+  --sens-high: #ff453a;
+
+  --field-ring: 0 0 0 4px rgba(10, 132, 255, 0.3);
 }
 
 /* ---- 跟随系统（未显式选择时）---- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']):not([data-theme='dark']) {
-    --bg-app: #16171a;
-    --bg-surface: #1e1f23;
-    --text-primary: #f2f2f4;
-    --text-secondary: #b0b0b8;
-    --border-subtle: #32343a;
+    --bg-app: #000000;
+    --bg-surface: #1c1c1e;
+    --text-primary: #f5f5f7;
+    --text-secondary: #aeaeb2;
+    --border-subtle: #38383a;
   }
 }
 
@@ -186,13 +205,17 @@ body {
   color: var(--text-primary);
   background: var(--bg-app);
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
   /* 主题切换过渡（仅在颜色上，避免布局抖动） */
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color 0.24s ease, color 0.24s ease;
 }
 
 a {
   color: var(--accent);
   text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
 }
 
 /* ---- 布局骨架：移动端默认单列 ---- */
@@ -203,7 +226,7 @@ a {
   overflow: hidden;
 }
 
-/* 滚动容器下沉到 .app-main：顶栏脱离滚动层，backdrop-filter 不再随内容滚动逐帧重算模糊（修复列表/表单滚动卡顿） */
+/* 滚动容器下沉到 .app-main：顶栏脱离滚动层，backdrop-filter 不再随内容滚动逐帧重算模糊 */
 .app-main {
   flex: 1;
   min-height: 0;
@@ -211,6 +234,12 @@ a {
   overscroll-behavior: contain;
   padding: var(--sp-4);
   width: 100%;
+}
+
+/* 进入内容区的轻柔上浮（apple-design §11：只动合成友好属性；
+   尊重 reduced-motion，见底部降级） */
+.app-main > * {
+  animation: ams-enter-rise 0.5s var(--ease-apple) both;
 }
 
 /* tablet：640px 起，内容限宽、内边距加大 */
@@ -237,11 +266,11 @@ a {
 @media (min-width: 1440px) {
   .app-main {
     max-width: 1200px;
-    padding: var(--sp-6) var(--sp-6);
+    padding: var(--sp-6) var(--sp-7);
   }
 }
 
-/* ---- 通用卡片 ---- */
+/* ---- 通用卡片（hairline 描边 + 分层柔影，避免生硬黑边）---- */
 .card {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
@@ -250,12 +279,7 @@ a {
   padding: var(--sp-4);
 }
 
-/* ---- 键值描述列表（dt/dd 两列）----
- * 全局而非页面局部：详情面板、权限预览等多处都用它。
- * 缺陷记录：此前只在 ArchiveView 的 scoped 样式里定义，其它页面用 `class="kv"`
- * 时拿不到样式，`dd` 退化成浏览器默认的 40px 左缩进并换行 ——
- * 表现为「标签一行、值另起一行且右移」，看起来像排版坏了。
- */
+/* ---- 键值描述列表（dt/dd 两列）---- */
 .kv {
   display: grid;
   grid-template-columns: 96px 1fr;
@@ -274,7 +298,7 @@ a {
   word-break: break-word;
 }
 
-/* 窄屏：标签与值改为上下两行，避免 96px 列把值挤成一行一个字 */
+/* 窄屏：标签与值改为上下两行 */
 @media (max-width: 639px) {
   .kv {
     grid-template-columns: 1fr;
@@ -317,20 +341,9 @@ a {
 .badge--high { background: var(--sens-high); }
 
 /* ============================================================
-   补充：G3 连续曲线 + Apple 质感细节
-   依据 docs/07 §3/§8/§11/§12 与 apple-design 技能
+   按钮 / 输入 基础质感（Apple：按下即时反馈、轻微回弹）
+   全局而非页面局部：各视图直接复用 .btn-* / .field-control
    ============================================================ */
-
-/* 承载层与可交互元素统一启用 continuous 圆角（几何连续，曲率导数连续）。
-   不支持 corner-style 的浏览器自动退化为普通 border-radius，不破版。 */
-.card,
-.badge,
-button,
-input,
-select,
-textarea,
-.g3 {
-}
 
 /* 聚焦可见性（§11.1）：2px 强调色 + 2px 偏移，禁止 outline:none */
 :focus-visible {
@@ -339,11 +352,10 @@ textarea,
 }
 
 /* 字距分级（apple-design §15：大字号收紧、正文近 0，绝不全局固定 letter-spacing） */
-h1, .h1 { letter-spacing: -0.02em; line-height: 1.1; }
-h2, .h2 { letter-spacing: -0.012em; }
+h1, .h1 { font-size: var(--font-size-h1); letter-spacing: -0.022em; line-height: 1.08; }
+h2, .h2 { letter-spacing: -0.014em; }
 h3, .h3 { letter-spacing: -0.006em; }
 
-/* 通用按钮质感（Apple：按下即时反馈、轻微回弹；反馈在 100ms 内可见） */
 button {
   font-family: inherit;
   cursor: pointer;
@@ -352,7 +364,7 @@ button:active:not(:disabled) {
   transform: scale(0.97);
 }
 
-/* 主操作：强调色实底 */
+/* 主操作：强调色实底 + 极轻投影，hover 微提亮并上浮 */
 .btn-primary {
   border: none;
   background: var(--accent);
@@ -361,24 +373,26 @@ button:active:not(:disabled) {
   padding: var(--sp-3) var(--sp-4);
   font-size: var(--font-size-md);
   font-weight: 600;
-  transition: background-color var(--spring-fast) ease-out, filter var(--spring-fast) ease-out,
-    transform 100ms ease-out;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  transition: background-color var(--spring-fast) ease-out,
+    filter var(--spring-fast) ease-out, transform 100ms ease-out, box-shadow var(--spring-fast) ease-out;
 }
-.btn-primary:hover { filter: brightness(1.05); }
-.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-primary:hover { filter: brightness(1.04); box-shadow: var(--shadow-sm); }
+.btn-primary:active:not(:disabled) { background: var(--accent-press); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 
 /* 次操作：描边 */
 .btn-ghost {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-strong);
   background: var(--bg-surface);
   color: var(--text-primary);
   border-radius: var(--g3-sm);
   padding: var(--sp-3) var(--sp-4);
   font-size: var(--font-size-md);
   font-weight: 500;
-  transition: background-color var(--spring-fast) ease-out;
+  transition: background-color var(--spring-fast) ease-out, border-color var(--spring-fast) ease-out;
 }
-.btn-ghost:hover { background: var(--bg-hover); }
+.btn-ghost:hover { background: var(--bg-hover); border-color: var(--text-muted); }
 
 /* 危险操作：红色实底 */
 .btn-danger {
@@ -405,11 +419,12 @@ button:active:not(:disabled) {
   transition: background-color var(--spring-fast) ease-out;
 }
 .btn-text:hover { background: var(--bg-hover); }
+.btn-text:disabled { color: var(--text-muted); cursor: not-allowed; }
 
-/* 行内输入：G3 连续圆角 + 聚焦环 */
+/* 行内输入：统一圆角 + 聚焦环（按下/聚焦即时反馈） */
 .field-control {
   width: 100%;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-strong);
   border-radius: var(--g3-sm);
   padding: var(--sp-3);
   font-size: var(--font-size-md);
@@ -417,10 +432,191 @@ button:active:not(:disabled) {
   background: var(--bg-surface);
   transition: border-color var(--spring-fast) ease-out, box-shadow var(--spring-fast) ease-out;
 }
+.field-control::placeholder { color: var(--text-muted); }
 .field-control:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: var(--field-ring);
+}
+.field-control--sm {
+  padding: 4px 8px;
+  font-size: 12px;
+  min-height: 0;
+}
+
+/* ============================================================
+   认证页外壳（Apple 分屏 hero）
+   ------------------------------------------------------------
+   左：品牌 hero（纯排版、单一强调色、中性渐变，无光斑）
+   右：认证卡（玻璃感 surface）
+   窄屏自动堆叠为「顶部 hero 带 + 卡」
+   ============================================================ */
+.auth {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+}
+/* 左 hero */
+.auth__hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--sp-5);
+  padding: var(--sp-8) var(--sp-7);
+  background: var(--hero-bg);
+  overflow: hidden;
+}
+.auth__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+}
+.auth__brand img { max-height: 40px; max-width: 180px; object-fit: contain; }
+.auth__headline {
+  margin: 0;
+  font-size: var(--font-size-display);
+  line-height: 1.05;
+  letter-spacing: -0.028em;
+  font-weight: 700;
+  color: var(--text-primary);
+  max-width: 14ch;
+}
+.auth__tagline {
+  margin: 0;
+  max-width: 34ch;
+  font-size: var(--font-size-lg);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.auth__points {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-3);
+}
+.auth__points li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--font-size-md);
+  color: var(--text-secondary);
+}
+.auth__points li::before {
+  content: '';
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  /* 对勾以边框绘制，避免引入图标字体 */
+  background-image: linear-gradient(45deg, transparent 42%, var(--accent) 42%, var(--accent) 58%, transparent 58%),
+    linear-gradient(-45deg, transparent 46%, var(--accent) 46%, var(--accent) 54%, transparent 54%);
+  background-size: 10px 10px, 12px 12px;
+  background-position: 4px 6px, 3px 7px;
+  background-repeat: no-repeat;
+}
+.auth__legal {
+  margin-top: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+/* 右面板：承载认证卡，可纵向滚动（长表单不挤压） */
+.auth__panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-6);
+  overflow-y: auto;
+}
+.auth__card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--g3-lg);
+  padding: var(--sp-6);
+  box-shadow: var(--shadow-md);
+}
+.auth__title {
+  margin: 0;
+  font-size: var(--font-size-h1);
+  letter-spacing: -0.022em;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.auth__subtitle {
+  margin: var(--sp-2) 0 var(--sp-5);
+  color: var(--text-muted);
+  font-size: var(--font-size-md);
+}
+.auth__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.auth__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.auth__label {
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+.auth__label em {
+  color: var(--danger);
+  font-style: normal;
+}
+
+/* 窄屏：堆叠为单列，hero 缩为顶部带 */
+@media (max-width: 900px) {
+  .auth {
+    grid-template-columns: 1fr;
+  }
+  .auth__hero {
+    padding: var(--sp-6) var(--sp-5) var(--sp-5);
+    gap: var(--sp-3);
+  }
+  .auth__headline { font-size: clamp(26px, 7vw, 34px); max-width: none; }
+  .auth__tagline { display: none; }
+  .auth__points { display: none; }
+  .auth__legal { display: none; }
+  .auth__panel { padding: var(--sp-5); align-items: flex-start; }
+}
+
+/* ============================================================
+   补充：Apple 质感细节 / 无障碍 / 全局动效（见 docs §3/§8/§11/§12 + apple-design）
+   ============================================================ */
+
+/* 聚焦可见性（键盘焦点环：只在键盘焦点时出现，不干扰鼠标点击） */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: 2px;
+}
+
+/* 面板/内容进入：只跑 opacity + transform（合成友好） */
+@keyframes ams-enter-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes ams-enter-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ---- 无障碍：跳转链接 + 屏幕阅读器专用隐藏（FR-UX-004）---- */
@@ -500,7 +696,6 @@ button:active:not(:disabled) {
   border: 1px solid var(--border-subtle);
   border-radius: var(--g3-md);
   box-shadow: var(--shadow-pop);
-  /* 提升为独立合成层，减少 sticky + backdrop-filter 在列表滚动时逐帧重算模糊的开销 */
   will-change: transform;
 }
 .batchbar__count {
@@ -510,7 +705,6 @@ button:active:not(:disabled) {
 .batchbar__spacer {
   flex: 1;
 }
-/* 批量编辑（FR-ARCH-013）：浮出栏内的行内小控件，窄屏下换行显示 */
 .batchbar__field {
   display: flex;
   align-items: center;
@@ -518,11 +712,6 @@ button:active:not(:disabled) {
   font-size: var(--font-size-sm);
   color: var(--text-secondary);
   white-space: nowrap;
-}
-.field-control--sm {
-  padding: 4px 8px;
-  font-size: 12px;
-  min-height: 0;
 }
 @media (max-width: 860px) {
   .batchbar {
@@ -602,7 +791,6 @@ button:active:not(:disabled) {
         而是换成不引起眩动、但保留可理解性的等价物（颜色/透明度）。
    ============================================================ */
 
-/* 按压反馈：按下即刻响应（scale 属 transform，走合成层，不触发重排） */
 button:not(:disabled),
 [role='button'],
 .btn,
@@ -619,38 +807,8 @@ button:not(:disabled):active,
   transform: scale(0.97);
 }
 
-/* 键盘可达性焦点环：只在键盘焦点时出现，不干扰鼠标点击 */
-:where(a, button, input, select, textarea, [tabindex]):focus-visible {
-  outline: 2px solid var(--accent, #2563eb);
-  outline-offset: 2px;
-}
-
-/* 面板/内容进入：只跑 opacity + transform（合成友好） */
-@keyframes ams-enter-rise {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 8px, 0);
-  }
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes ams-enter-fade {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
 /* ---- 尊重「减少动态效果」偏好 ----
-   Apple §14：reduced-motion 不是「抹掉一切反馈」，而是改用不引起眩动的
-   等价物。这里取消位移/缩放/循环动画，但**保留**颜色与透明度过渡
-   —— 它们有助于理解状态变化，且不会造成眩晕。
-   （此前写成 `transition:none !important` 属于过度降级。） */
+   取消位移/缩放/循环动画，但**保留**颜色与透明度过渡。 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -659,7 +817,9 @@ button:not(:disabled):active,
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
   }
-
+  .app-main > * {
+    animation: none !important;
+  }
   button:not(:disabled):active,
   [role='button']:active,
   .btn:active,

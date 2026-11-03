@@ -167,165 +167,161 @@ function goLogin(): void {
 </script>
 
 <template>
-  <div class="wrap">
-    <div class="card">
-      <div class="brand">AMS</div>
-      <h1 class="title">{{ t('ForgotPasswordView.37cccf', '找回口令') }}</h1>
+  <div class="auth">
+    <aside class="auth__hero">
+      <div class="auth__brand">AMS</div>
+      <h1 class="auth__headline">忘记口令？<br />一步找回。</h1>
+      <p class="auth__tagline">验证身份后重设，全程无需联系人工。</p>
+      <ul class="auth__points">
+        <li>邮箱验证码，10 分钟内有效</li>
+        <li>重置后自动下线全部会话</li>
+        <li>不改数据，档案原样保留</li>
+      </ul>
+    </aside>
 
-      <ol v-if="step < 4" class="stepper">
-        <li
-          v-for="s in steps"
-          :key="s.n"
-          class="stepper__item"
-          :class="{
-            'stepper__item--done': step > s.n,
-            'stepper__item--active': step === s.n,
-          }"
-        >
-          <span class="stepper__dot">{{ step > s.n ? '✓' : s.n }}</span>
-          <span class="stepper__label">{{ s.label }}</span>
-        </li>
-      </ol>
+    <main class="auth__panel">
+      <div class="auth__card">
+        <h2 class="auth__title">{{ t('ForgotPasswordView.37cccf', '找回口令') }}</h2>
 
-      <!-- ① 验证账号 -->
-      <form v-if="step === 1" class="form" @submit.prevent="sendCode">
-        <label class="field">
-          <span class="field__label">{{ t('ForgotPasswordView.0c9acc', '用户名 / 邮箱 / 手机号') }}</span>
-          <input
-            v-model="account"
-            class="field__input"
-            type="text"
-            autocomplete="username"
-            :placeholder="t('ForgotPasswordView.51d3b6', '请输入注册时使用的账号')"
-          />
-        </label>
-        <p class="hint-block">
-          我们会向账号绑定的邮箱发送 6 位验证码。未绑定邮箱的账号需联系管理员重置。
-        </p>
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <button class="submit" type="submit" :disabled="busy">
-          {{ busy ? '发送中…' : '发送验证码' }}
-        </button>
-      </form>
-
-      <!-- ② 输入验证码 -->
-      <form v-else-if="step === 2" class="form" @submit.prevent="verifyCode">
-        <p v-if="notice" class="notice">{{ notice }}</p>
-        <label class="field">
-          <span class="field__label">{{ t('ForgotPasswordView.83a302', '6 位验证码') }}</span>
-          <input
-            v-model="code"
-            class="field__input field__input--code"
-            type="text"
-            inputmode="numeric"
-            maxlength="6"
-            autocomplete="one-time-code"
-            placeholder="000000"
-          />
-        </label>
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <button class="submit" type="submit" :disabled="busy">
-          {{ busy ? '校验中…' : '下一步' }}
-        </button>
-        <div class="row">
-          <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
-          <button
-            class="btn-text"
-            type="button"
-            :disabled="busy || cooldown > 0"
-            @click="sendCode"
+        <ol v-if="step < 4" class="stepper">
+          <li
+            v-for="s in steps"
+            :key="s.n"
+            class="stepper__item"
+            :class="{
+              'stepper__item--done': step > s.n,
+              'stepper__item--active': step === s.n,
+            }"
           >
-            {{ cooldown > 0 ? `重新发送（${cooldown}s）` : '重新发送' }}
+            <span class="stepper__dot">{{ step > s.n ? '✓' : s.n }}</span>
+            <span class="stepper__label">{{ s.label }}</span>
+          </li>
+        </ol>
+
+        <!-- ① 验证账号 -->
+        <form v-if="step === 1" class="auth__form" @submit.prevent="sendCode">
+          <label class="auth__field">
+            <span class="auth__label">{{ t('ForgotPasswordView.0c9acc', '用户名 / 邮箱 / 手机号') }}</span>
+            <input
+              v-model="account"
+              class="field-control"
+              type="text"
+              autocomplete="username"
+              :placeholder="t('ForgotPasswordView.51d3b6', '请输入注册时使用的账号')"
+            />
+          </label>
+          <p class="hint-block">
+            我们会向账号绑定的邮箱发送 6 位验证码。未绑定邮箱的账号需联系管理员重置。
+          </p>
+          <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
+          <button class="btn-primary auth__submit" type="submit" :disabled="busy">
+            {{ busy ? '发送中…' : '发送验证码' }}
           </button>
-        </div>
-      </form>
+        </form>
 
-      <!-- ③ 设置新口令 -->
-      <form v-else-if="step === 3" class="form" @submit.prevent="submitReset">
-        <p v-if="notice" class="notice">{{ notice }}</p>
-        <label class="field">
-          <span class="field__label">{{ t('ForgotPasswordView.2a1f04', '新口令') }}</span>
-          <input
-            v-model="password"
-            class="field__input"
-            type="password"
-            autocomplete="new-password"
-            :placeholder="t('ForgotPasswordView.005732', '至少 10 位，含大小写与数字')"
-          />
-          <span v-if="pwdHint" class="field__hint">{{ pwdHint }}</span>
-        </label>
-        <label class="field">
-          <span class="field__label">{{ t('ForgotPasswordView.2109a9', '确认新口令') }}</span>
-          <input
-            v-model="password2"
-            class="field__input"
-            type="password"
-            autocomplete="new-password"
-            :placeholder="t('ForgotPasswordView.9ac6d3', '再次输入新口令')"
-          />
-        </label>
-        <p class="hint-block">{{ t('ForgotPasswordView.2d7650', '重置成功后，该账号在所有设备上的登录状态将立即失效，需重新登录。') }}</p>
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <button class="submit" type="submit" :disabled="busy">
-          {{ busy ? '提交中…' : '重置口令' }}
-        </button>
-        <div class="row">
-          <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
-        </div>
-      </form>
+        <!-- ② 输入验证码 -->
+        <form v-else-if="step === 2" class="auth__form" @submit.prevent="verifyCode">
+          <p v-if="notice" class="fgt-notice">{{ notice }}</p>
+          <label class="auth__field">
+            <span class="auth__label">{{ t('ForgotPasswordView.83a302', '6 位验证码') }}</span>
+            <input
+              v-model="code"
+              class="field-control field-control--code"
+              type="text"
+              inputmode="numeric"
+              maxlength="6"
+              autocomplete="one-time-code"
+              placeholder="000000"
+            />
+          </label>
+          <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
+          <button class="btn-primary auth__submit" type="submit" :disabled="busy">
+            {{ busy ? '校验中…' : '下一步' }}
+          </button>
+          <div class="fgt-row">
+            <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
+            <button
+              class="btn-text"
+              type="button"
+              :disabled="busy || cooldown > 0"
+              @click="sendCode"
+            >
+              {{ cooldown > 0 ? `重新发送（${cooldown}s）` : '重新发送' }}
+            </button>
+          </div>
+        </form>
 
-      <!-- ④ 完成 -->
-      <div v-else class="form">
-        <div class="done" role="status">✓</div>
-        <p class="done-text">{{ t('ForgotPasswordView.19d326', '口令已重置') }}</p>
-        <p class="hint-block">
-          为了安全，原会话已全部下线。请使用新口令重新登录；若账号已启用双因子，登录时还需输入动态码。
+        <!-- ③ 设置新口令 -->
+        <form v-else-if="step === 3" class="auth__form" @submit.prevent="submitReset">
+          <p v-if="notice" class="fgt-notice">{{ notice }}</p>
+          <label class="auth__field">
+            <span class="auth__label">{{ t('ForgotPasswordView.2a1f04', '新口令') }}</span>
+            <input
+              v-model="password"
+              class="field-control"
+              type="password"
+              autocomplete="new-password"
+              :placeholder="t('ForgotPasswordView.005732', '至少 10 位，含大小写与数字')"
+            />
+            <span v-if="pwdHint" class="fgt-hint">{{ pwdHint }}</span>
+          </label>
+          <label class="auth__field">
+            <span class="auth__label">{{ t('ForgotPasswordView.2109a9', '确认新口令') }}</span>
+            <input
+              v-model="password2"
+              class="field-control"
+              type="password"
+              autocomplete="new-password"
+              :placeholder="t('ForgotPasswordView.9ac6d3', '再次输入新口令')"
+            />
+          </label>
+          <p class="hint-block">{{ t('ForgotPasswordView.2d7650', '重置成功后，该账号在所有设备上的登录状态将立即失效，需重新登录。') }}</p>
+          <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
+          <button class="btn-primary auth__submit" type="submit" :disabled="busy">
+            {{ busy ? '提交中…' : '重置口令' }}
+          </button>
+          <div class="fgt-row">
+            <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
+          </div>
+        </form>
+
+        <!-- ④ 完成 -->
+        <div v-else class="auth__form">
+          <div class="done" role="status">✓</div>
+          <p class="done-text">{{ t('ForgotPasswordView.19d326', '口令已重置') }}</p>
+          <p class="hint-block">
+            为了安全，原会话已全部下线。请使用新口令重新登录；若账号已启用双因子，登录时还需输入动态码。
+          </p>
+          <button class="btn-primary auth__submit" type="button" @click="goLogin">{{ t('ForgotPasswordView.6c01b0', '去登录') }}</button>
+        </div>
+
+        <p v-if="step < 4" class="auth__switch">
+          想起来了？<RouterLink to="/login">{{ t('ForgotPasswordView.f2fe4e', '返回登录') }}</RouterLink>
         </p>
-        <button class="submit" type="button" @click="goLogin">{{ t('ForgotPasswordView.6c01b0', '去登录') }}</button>
       </div>
-
-      <p v-if="step < 4" class="switch">
-        想起来了？<RouterLink to="/login">{{ t('ForgotPasswordView.f2fe4e', '返回登录') }}</RouterLink>
-      </p>
-    </div>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.wrap {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-app, #eef1f6);
-  padding: var(--sp-4, 16px);
+.auth__card {
+  animation: ams-enter-rise 0.5s var(--ease-apple) both;
 }
-.card {
+.auth__submit {
+  margin-top: var(--sp-2);
   width: 100%;
-  max-width: 400px;
-  background: var(--bg-surface, #fff);
-  border: 1px solid var(--border-subtle, #e5e7eb);
-  border-radius: var(--g3-lg, 24px);
-  padding: 32px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
 }
-.brand {
-  font-weight: 700;
-  font-size: 24px;
-  color: var(--accent, #2563eb);
+.field-control--code {
+  letter-spacing: 8px;
   text-align: center;
-}
-.title {
-  font-size: 18px;
-  margin: 8px 0 20px;
-  text-align: center;
-  color: var(--text-primary, #1f2937);
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
 }
 .stepper {
   display: flex;
   gap: 8px;
   list-style: none;
-  margin: 0 0 24px;
+  margin: 0 0 var(--sp-5);
   padding: 0;
 }
 .stepper__item {
@@ -335,7 +331,7 @@ function goLogin(): void {
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
 }
 .stepper__dot {
   width: 24px;
@@ -345,110 +341,48 @@ function goLogin(): void {
   text-align: center;
   font-size: 12px;
   font-weight: 600;
-  background: var(--bg-app, #eef1f6);
-  color: var(--text-muted, #9ca3af);
+  background: var(--bg-hover);
+  color: var(--text-muted);
 }
 .stepper__item--active .stepper__dot {
-  background: var(--accent, #2563eb);
+  background: var(--accent);
   color: #fff;
 }
 .stepper__item--active .stepper__label {
-  color: var(--text-primary, #1f2937);
+  color: var(--text-primary);
   font-weight: 600;
 }
 .stepper__item--done .stepper__dot {
-  background: var(--success, #16a34a);
+  background: var(--success);
   color: #fff;
 }
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.field__label {
-  font-size: 14px;
-  color: var(--text-secondary, #4b5563);
-}
-.field__input {
-  border: 1px solid var(--border-subtle, #e5e7eb);
-  border-radius: var(--radius-sm, 8px);
-  padding: 12px;
-  font-size: 15px;
-  color: var(--text-primary, #1f2937);
-  background: var(--bg-surface, #fff);
-}
-.field__input:focus {
-  outline: none;
-  border-color: var(--accent, #2563eb);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-}
-.field__input--code {
-  letter-spacing: 8px;
-  text-align: center;
-  font-size: 20px;
-  font-variant-numeric: tabular-nums;
-}
-.field__hint {
+.fgt-hint {
   font-size: 12px;
-  color: var(--warning, #d97706);
+  color: var(--warning);
 }
 .hint-block {
   margin: 0;
   font-size: 13px;
   line-height: 1.6;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
 }
-.notice {
+.fgt-notice {
   margin: 0;
   padding: 10px 12px;
-  border-radius: var(--radius-sm, 8px);
-  background: rgba(37, 99, 235, 0.08);
-  color: var(--accent, #2563eb);
+  border-radius: var(--g3-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 13px;
   line-height: 1.5;
 }
-.error {
+.fgt-error {
   margin: 0;
-  color: var(--danger, #dc2626);
+  color: var(--danger);
   font-size: 13px;
 }
-.submit {
-  border: none;
-  border-radius: var(--radius-sm, 8px);
-  padding: 12px;
-  font-size: 15px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent, #2563eb);
-  cursor: pointer;
-}
-.submit:hover {
-  filter: brightness(1.05);
-}
-.submit:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.row {
+.fgt-row {
   display: flex;
   justify-content: space-between;
-}
-.btn-text {
-  border: none;
-  background: none;
-  padding: 0;
-  font-size: 13px;
-  color: var(--accent, #2563eb);
-  cursor: pointer;
-}
-.btn-text:disabled {
-  color: var(--text-muted, #9ca3af);
-  cursor: not-allowed;
 }
 .done {
   width: 48px;
@@ -459,19 +393,19 @@ function goLogin(): void {
   text-align: center;
   font-size: 24px;
   color: #fff;
-  background: var(--success, #16a34a);
+  background: var(--success);
 }
 .done-text {
-  margin: 0;
+  margin: var(--sp-3) 0 0;
   text-align: center;
   font-size: 16px;
   font-weight: 600;
-  color: var(--text-primary, #1f2937);
+  color: var(--text-primary);
 }
-.switch {
-  margin: 16px 0 0;
+.auth__switch {
+  margin: var(--sp-4) 0 0;
   text-align: center;
   font-size: 13px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
 }
 </style>

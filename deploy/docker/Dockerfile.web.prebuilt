@@ -1,0 +1,30 @@
+# ============================================================
+# AMS · 前端镜像（单阶段 · 预构建产物）
+# ------------------------------------------------------------
+# 与 deploy/docker/Dockerfile.web 的区别：
+#   本文件不依赖 node 镜像，直接把**已在宿主机构建好的**
+#   web/dist 拷贝进 nginx。适合：构建机已跑过 `npm run build`、
+#   或 CI 把 dist 作为产物传入的场景；构建快、离线可用。
+#
+# 前置：先在仓库根执行 `cd web && npm run build`（生成 web/dist）
+#
+# 构建（上下文为仓库根）：
+#   docker build -f deploy/docker/Dockerfile.web.prebuilt -t ams-web:local .
+#
+# 运行：
+#   docker run --rm -p 8080:80 ams-web:local
+#   打开 http://localhost:8080
+#
+# 说明：仅托管前端 UI；/api 需后端 ams-server（见 deploy/compose）。
+# ============================================================
+FROM nginx:1.27-alpine
+
+COPY deploy/docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY web/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]
