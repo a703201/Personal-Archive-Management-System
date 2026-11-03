@@ -60,6 +60,8 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 > 门禁：`bash scripts/build.sh` → 0 error、`npm run build` → 0 error、`bash scripts/test.sh` → 0 fail。
 > 三者未同时通过不算完成。
 
+> **前端界面（2026-11-03 重做）**：已按 Apple 设计语言整体改版 —— 中性灰阶 + 系统蓝配色、登录/注册/找回三页改为分屏 hero、顶栏玻璃材质承载层级，目标是「简洁、高端、去 AI 味」。容器化部署与前端独立镜像见 `deploy/README.md`、变更明细见 `CHANGELOG.md` 的 `[1.1.0]`。
+
 ---
 
 ## 功能一览

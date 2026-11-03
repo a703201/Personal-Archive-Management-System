@@ -99,194 +99,121 @@ async function onSubmit(): Promise<void> {
 </script>
 
 <template>
-  <div class="login-wrap">
-    <div class="login-card">
-      <div class="brand">
-        <img v-if="branding.logoUrl" :src="branding.logoUrl" :alt="branding.brandName" class="brand__logo" />
+  <div class="auth">
+    <aside class="auth__hero">
+      <div class="auth__brand">
+        <img v-if="branding.logoUrl" :src="branding.logoUrl" :alt="branding.brandName" />
         <span v-else>{{ branding.brandName }}</span>
       </div>
-      <h1 class="title">{{ titleText }}</h1>
-      <p class="subtitle">{{ subtitleText }}</p>
-
-      <!-- 公告（FR-CFG-008）：有配置才显示 -->
-      <p v-if="branding.notice" class="notice">{{ branding.notice }}</p>
-
-      <form class="form" @submit.prevent="onSubmit">
-        <label class="field">
-          <span class="field__label">{{ t('LoginView.a1aaf3', '用户名') }}</span>
-          <input
-            v-model="username"
-            class="field__input"
-            type="text"
-            autocomplete="username"
-            :placeholder="t('LoginView.ad5f05', '请输入用户名')"
-          />
-        </label>
-
-        <label class="field">
-          <span class="field__label">{{ t('LoginView.c839a8', '密码') }}</span>
-          <input
-            v-model="password"
-            class="field__input"
-            type="password"
-            autocomplete="current-password"
-            :placeholder="t('LoginView.713b73', '请输入密码')"
-          />
-        </label>
-
-        <label v-if="needTotp" class="field">
-          <span class="field__label">{{ t('LoginView.08f63a', '动态码') }}</span>
-          <input
-            v-model="totpCode"
-            class="field__input field__input--code"
-            type="text"
-            inputmode="numeric"
-            maxlength="6"
-            autocomplete="one-time-code"
-            :placeholder="t('LoginView.39adbf', '6 位动态码')"
-          />
-        </label>
-
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-
-        <button class="submit" type="submit" :disabled="submitting">
-          {{ submitting ? '登录中…' : '登录' }}
-        </button>
-      </form>
-
-      <p class="switch">
-        <RouterLink to="/forgot">{{ t('LoginView.926eea', '忘记口令？') }}</RouterLink>
-      </p>
-      <p class="switch">{{ t('LoginView.1e58e9', '还没有账号？') }}<RouterLink to="/register">{{ t('LoginView.8573cd', '立即注册') }}</RouterLink></p>
-
-      <!-- 页脚与备案号（FR-CFG-008） -->
-      <footer v-if="branding.footerText || branding.icpNo" class="login-foot">
+      <h1 class="auth__headline">你的私人档案，<br />安全归位。</h1>
+      <p class="auth__tagline">证件、学历、资产、健康 —— 一处归集，端到端加密。</p>
+      <ul class="auth__points">
+        <li>11 类分类模板，一键归档</li>
+        <li>字段级国密加密，密钥不经服务端</li>
+        <li>条目级共享，精准到一条</li>
+      </ul>
+      <div v-if="branding.footerText || branding.icpNo" class="auth__legal">
         <span v-if="branding.footerText">{{ branding.footerText }}</span>
         <span v-if="branding.icpNo">{{ branding.icpNo }}</span>
-      </footer>
-    </div>
+      </div>
+    </aside>
+
+    <main class="auth__panel">
+      <div class="auth__card">
+        <h2 class="auth__title">{{ titleText }}</h2>
+        <p class="auth__subtitle">{{ subtitleText }}</p>
+
+        <p v-if="branding.notice" class="notice">{{ branding.notice }}</p>
+
+        <form class="auth__form" @submit.prevent="onSubmit">
+          <label class="auth__field">
+            <span class="auth__label">{{ t('LoginView.a1aaf3', '用户名') }}</span>
+            <input
+              v-model="username"
+              class="field-control"
+              type="text"
+              autocomplete="username"
+              :placeholder="t('LoginView.ad5f05', '请输入用户名')"
+            />
+          </label>
+
+          <label class="auth__field">
+            <span class="auth__label">{{ t('LoginView.c839a8', '密码') }}</span>
+            <input
+              v-model="password"
+              class="field-control"
+              type="password"
+              autocomplete="current-password"
+              :placeholder="t('LoginView.713b73', '请输入密码')"
+            />
+          </label>
+
+          <label v-if="needTotp" class="auth__field">
+            <span class="auth__label">{{ t('LoginView.08f63a', '动态码') }}</span>
+            <input
+              v-model="totpCode"
+              class="field-control field-control--code"
+              type="text"
+              inputmode="numeric"
+              maxlength="6"
+              autocomplete="one-time-code"
+              :placeholder="t('LoginView.39adbf', '6 位动态码')"
+            />
+          </label>
+
+          <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+          <button class="btn-primary auth__submit" type="submit" :disabled="submitting">
+            {{ submitting ? '登录中…' : '登录' }}
+          </button>
+        </form>
+
+        <p class="auth__switch">
+          <RouterLink to="/forgot">{{ t('LoginView.926eea', '忘记口令？') }}</RouterLink>
+        </p>
+        <p class="auth__switch">
+          {{ t('LoginView.1e58e9', '还没有账号？') }}
+          <RouterLink to="/register">{{ t('LoginView.8573cd', '立即注册') }}</RouterLink>
+        </p>
+      </div>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.login-wrap {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-app, #eef1f6);
-  padding: var(--sp-4, 16px);
-}
-.login-card {
-  width: 100%;
-  max-width: 380px;
-  background: var(--bg-surface, #fff);
-  border: 1px solid var(--border-subtle, #e5e7eb);
-  border-radius: var(--g3-lg, 24px);
-  padding: 32px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
-}
-.switch {
-  margin: 16px 0 0;
-  text-align: center;
-  font-size: 13px;
-  color: var(--text-muted, #9ca3af);
-}
-.brand {
-  font-weight: 700;
-  font-size: 24px;
-  color: var(--accent, #2563eb);
-  text-align: center;
-}
-.brand__logo {
-  max-height: 44px;
-  max-width: 180px;
-  object-fit: contain;
+.auth__card {
+  animation: ams-enter-rise 0.5s var(--ease-apple) both;
 }
 .notice {
-  margin: 0 0 16px;
-  padding: 8px 12px;
-  border-radius: var(--g3-sm, 10px);
-  background: var(--bg-hover, #f3f4f6);
-  color: var(--text-secondary, #4b5563);
+  margin: 0 0 var(--sp-4);
+  padding: 10px 12px;
+  border-radius: var(--g3-sm);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
   font-size: 12px;
   line-height: 1.6;
 }
-.login-foot {
-  margin-top: 20px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border-subtle, #e5e7eb);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-muted, #9ca3af);
-}
-.title {
-  font-size: 18px;
-  margin: 8px 0 0;
-  text-align: center;
-  color: var(--text-primary, #1f2937);
-}
-.subtitle {
-  margin: 4px 0 24px;
-  text-align: center;
-  color: var(--text-muted, #9ca3af);
-  font-size: 14px;
-}
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.field__label {
-  font-size: 14px;
-  color: var(--text-secondary, #4b5563);
-}
-.field__input {
-  border: 1px solid var(--border-subtle, #e5e7eb);
-  border-radius: var(--radius-sm, 8px);
-  padding: 12px;
-  font-size: 15px;
-  color: var(--text-primary, #1f2937);
-  background: var(--bg-surface, #fff);
-}
-.field__input:focus {
-  outline: none;
-  border-color: var(--accent, #2563eb);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
-}
-.field__input--code {
-  letter-spacing: 6px;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
+.auth__submit {
+  margin-top: var(--sp-2);
+  width: 100%;
 }
 .error {
   margin: 0;
-  color: var(--danger, #dc2626);
+  color: var(--danger);
   font-size: 13px;
 }
-.submit {
-  border: none;
-  border-radius: var(--radius-sm, 8px);
-  padding: 12px;
-  font-size: 15px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent, #2563eb);
-  cursor: pointer;
+.auth__switch {
+  margin: var(--sp-3) 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-muted);
 }
-.submit:hover {
-  filter: brightness(1.05);
+.auth__switch a {
+  margin-left: 4px;
 }
-.submit:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.field-control--code {
+  letter-spacing: 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 </style>

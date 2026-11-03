@@ -169,6 +169,64 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
 
 ---
 
+## [1.1.0] — 2026-11-03（前端改版 + 前端容器化）
+
+> 本批次为**前端视觉重构**与**前端容器化部署**增强，不改动后端业务功能
+> （FR 完成度仍为 P1 34 条 / P2 23 条，后端单测 272/0 不变）。
+
+### 新增（前端 Apple 风格视觉重构）
+
+参考 Apple 设计语言对前端做了整体改版，目标是「简洁、高端、去 AI 味」：
+
+- **`web/src/styles/theme.css`（设计令牌重构）**：配色改为 Apple 中性灰阶
+ （`#f5f5f7` / `#1d1d1f`）+ Apple 系统蓝（`#0071e3`，暗色 `#0a84ff`）+ 系统级
+  语义色（`#34c759`/`#ff9f0a`/`#ff3b30`）；阴影改双层 diffuse 柔影；新增
+  `display`/`h1` 字号阶梯（clamp + 光学字距）、`--field-ring` 聚焦环、页面进入动效。
+  保留全部既有变量名，组件零破坏。
+- **三张认证页重做**（`LoginView` / `RegisterView` / `ForgotPasswordView`）：
+  统一为全局 `.auth` 分屏 hero —— 左品牌大字标题 + 标语 + 要点（纯排版、单一
+  强调色、无光斑），右认证卡；窄屏自动堆叠。逻辑/接口保持不变。
+- **`App.vue` 外壳打磨**：品牌字标改为圆角方块「A」应用图标 + 字标，导航项
+  间距/字重微调，顶栏 Apple 玻璃材质（`backdrop-filter`）承载层级。
+
+### 新增（前端容器化部署）
+
+- `deploy/docker/Dockerfile.web`：多阶段前端独立镜像（node:20 构建 →
+  nginx:1.27-alpine 托管），含 SPA history 回退；仅托管 UI，`/api` 需后端。
+- `deploy/docker/Dockerfile.web.prebuilt`：把宿主已产出的 `web/dist` 直接烤入
+  `nginx:1.27-alpine`，**不拉取 Node、不联网**，构建秒级（离线 / CI 友好）。
+- `deploy/docker/nginx.conf`：前端独立镜像的反代配置 —— `location /api` 反代到
+  后端 `ams-server:8080`（同 `ams-net` 容器名直连），`location /` 做 SPA 回退，
+  哈希资源 `max-age=31536000, immutable`，`/index.html` 不缓存，附 gzip 与安全响应头。
+- `deploy/docker/Dockerfile.merge`：在既有 `ams:1.0.0`（已含后端二进制）之上叠加
+  最新 `web/dist`，实现「前端并入后端镜像」—— 单镜像 / 单容器同时托管新 UI 与
+  `/api/*`，刷新前端无需重新编译后端（旧 web 孤儿哈希文件无害）。
+- 全栈编排 `deploy/compose/docker-compose.yml` 的 `ams` 服务默认 `8080:8080`，
+  单一合并镜像同时提供 UI 与 `/api`（前端经 `Dockerfile.prebuilt` 或
+  `Dockerfile.merge` 烤入 `/app/web`）。
+
+### 修复
+
+- **全局搜索遮罩只盖顶栏（视觉错位）**：`GlobalSearch` 的 `.mask`
+  （`position: fixed; inset: 0`）被渲染在 `App.vue` 的 `.topbar` 内，而 `.topbar`
+  设了 `backdrop-filter: blur()`，会为后代 `fixed` 建立**包含块**，导致遮罩只覆盖
+  高约 50px 的顶栏、搜索面板错位。修复：在 `GlobalSearch.vue` 用 `<Teleport to="body">`
+  把遮罩传送到 `body`，脱离含 `backdrop-filter` 的祖先，`fixed` 重新相对视口全屏。
+
+### 文档
+
+- 本文件新增 `[1.1.0]` 条目。
+- `deploy/README.md`：目录树补充 `Dockerfile.web` / `Dockerfile.web.prebuilt` /
+  `Dockerfile.merge` / `nginx.conf`，新增「§2.1 前端独立镜像」「§4.4 前端并入后端
+  镜像」与 nginx 反代说明。
+- `docs/09-部署与发布指南.md`：新增「§6.1 可选 · 独立 nginx 前端容器」说明反向代理
+  `/api` 到后端的多容器形态。
+- `README.md`：当前状态补充「前端已重做为 Apple 风格」说明。
+- ⚠️ **待同步**：`docs/07-视觉与交互设计规范.md` 为改版前的设计基线，本次视觉重构
+  未回写该文档；如需对外一致，应安排一次 `docs/07` 与实现的对齐刷新。
+
+---
+
 ## [未发布] — 工程化与交付增强（Linux / 容器 / 对外 API / 信创）
 
 > 本批次属**工程化与交付能力**补强，不改动业务功能（FR 完成度仍为 P1 34 条 / P2 23 条）。
@@ -329,4 +387,5 @@ P0 需求全量落地（54 已实现 / 0 部分 / 0 未实现），并以单元�
 
 [0.2.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v0.1.0...v0.2.0
 [1.0.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v0.2.0...v1.0.0
+[1.1.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v1.0.0...v1.1.0
 [0.1.0]: https://github.com/a703201/Personal-Archive-Management-System/releases/tag/v0.1.0

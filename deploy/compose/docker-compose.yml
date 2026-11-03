@@ -10,6 +10,7 @@
 # 启动（单条命令，产生单个分组）：
 #   docker compose -p ams -f deploy/compose/docker-compose.yml up -d
 #   # 访问 http://localhost:8080  健康检查 http://localhost:8080/api/health
+#   # 注：单一 ams 容器同时托管新前端(ams:1.0.0 内 /app/web)与 /api；前端已并入镜像。
 #
 # 数据保护：
 #   - 数据库数据在命名卷 ams_ogdata（external，不随容器删除而消失），

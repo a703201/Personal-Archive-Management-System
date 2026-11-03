@@ -119,42 +119,50 @@ watch(open, (v) => {
     <kbd>⌘K</kbd>
   </button>
 
-  <div v-if="open" class="mask" @click.self="hide">
-    <div class="dialog" role="dialog" aria-modal="true" :aria-label="t('GlobalSearch.a38e3c', '全局搜索')">
-      <div class="dialog__head">
-        <input
-          id="global-search-input"
-          v-model="keyword"
-          class="dialog__input"
-          type="search"
-          :placeholder="t('GlobalSearch.e80e90', '输入关键词搜索标题、机构、字段内容…')"
-          @input="onInput"
-        />
-        <button class="dialog__close" type="button" :aria-label="t('GlobalSearch.6c14bd', '关闭')" @click="hide">✕</button>
-      </div>
+  <!--
+    ⚠️ 必须把遮罩传送到 body：
+    App.vue 的 .topbar 设了 backdrop-filter，会为后代的 position:fixed 建立包含块，
+    导致 .mask 的 inset:0 只覆盖顶栏（高~50px），搜索面板随之错位。
+    用 Teleport 脱离该祖先后，fixed 重新相对视口定位，遮罩即可全屏。
+  -->
+  <Teleport to="body">
+    <div v-if="open" class="mask" @click.self="hide">
+      <div class="dialog" role="dialog" aria-modal="true" :aria-label="t('GlobalSearch.a38e3c', '全局搜索')">
+        <div class="dialog__head">
+          <input
+            id="global-search-input"
+            v-model="keyword"
+            class="dialog__input"
+            type="search"
+            :placeholder="t('GlobalSearch.e80e90', '输入关键词搜索标题、机构、字段内容…')"
+            @input="onInput"
+          />
+          <button class="dialog__close" type="button" :aria-label="t('GlobalSearch.6c14bd', '关闭')" @click="hide">✕</button>
+        </div>
 
-      <div class="dialog__body">
-        <p v-if="loading" class="hint">{{ t('GlobalSearch.8a88cd', '搜索中…') }}</p>
-        <p v-else-if="error" class="hint hint--error">{{ error }}</p>
-        <p v-else-if="items.length === 0 && keyword" class="hint">{{ t('GlobalSearch.acc634', '没有匹配的档案') }}</p>
-        <p v-else-if="items.length === 0" class="hint">{{ t('GlobalSearch.ea13f4', '输入关键词开始搜索') }}</p>
+        <div class="dialog__body">
+          <p v-if="loading" class="hint">{{ t('GlobalSearch.8a88cd', '搜索中…') }}</p>
+          <p v-else-if="error" class="hint hint--error">{{ error }}</p>
+          <p v-else-if="items.length === 0 && keyword" class="hint">{{ t('GlobalSearch.acc634', '没有匹配的档案') }}</p>
+          <p v-else-if="items.length === 0" class="hint">{{ t('GlobalSearch.ea13f4', '输入关键词开始搜索') }}</p>
 
-        <ul v-else class="results">
-          <li v-for="it in items" :key="it.id" class="result">
-            <div class="result__title">{{ it.title }}</div>
-            <div class="result__meta">
-              <span :class="SENS_CLASS[it.sensitivity]">{{ SENS_LABEL[it.sensitivity] }}</span>
-              <span v-if="it.issuer">· {{ it.issuer }}</span>
-              <span v-if="it.expiresDate">{{ t('GlobalSearch.fe3baf', '· 到期') }} {{ it.expiresDate }}</span>
-              <span>{{ t('GlobalSearch.af31a0', '· 附件') }} {{ it.attachmentCount }}</span>
-            </div>
-          </li>
-        </ul>
+          <ul v-else class="results">
+            <li v-for="it in items" :key="it.id" class="result">
+              <div class="result__title">{{ it.title }}</div>
+              <div class="result__meta">
+                <span :class="SENS_CLASS[it.sensitivity]">{{ SENS_LABEL[it.sensitivity] }}</span>
+                <span v-if="it.issuer">· {{ it.issuer }}</span>
+                <span v-if="it.expiresDate">{{ t('GlobalSearch.fe3baf', '· 到期') }} {{ it.expiresDate }}</span>
+                <span>{{ t('GlobalSearch.af31a0', '· 附件') }} {{ it.attachmentCount }}</span>
+              </div>
+            </li>
+          </ul>
 
-        <p v-if="hasMore" class="hint">{{ t('GlobalSearch.2ca07b', '还有更多结果，请细化关键词') }}</p>
+          <p v-if="hasMore" class="hint">{{ t('GlobalSearch.2ca07b', '还有更多结果，请细化关键词') }}</p>
+        </div>
       </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>

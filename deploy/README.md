@@ -7,7 +7,11 @@ deploy/
 ├── docker/
 │   ├── Dockerfile            # 多阶段镜像：builder(后端) + web(前端) + runtime
 │   ├── Dockerfile.cjbase     # 仓颉基础镜像（ubuntu22.04 + SDK1.2.0-beta.03 + stdx）
-│   └── Dockerfile.prebuilt   # 基于预编译产物构建运行镜像（用 Dockerfile.cjbase 产出的二进制）
+│   └── Dockerfile.prebuilt   # 基于预编译产物构建运行镜像（含 web/dist，ams:1.0.0）
+│   ├── Dockerfile.web        # 前端独立镜像（多阶段：node:20 构建 → nginx:1.27-alpine）
+│   ├── Dockerfile.web.prebuilt # 前端独立镜像（秒级离线：把宿主 web/dist 烤入 nginx）
+│   ├── Dockerfile.merge      # 把最新 web/dist 叠加进既有 ams:1.0.0（前端并入后端镜像）
+│   └── nginx.conf            # 前端独立镜像的反代配置（/api → ams-server:8080 + SPA 回退）
 ├── compose/
 │   └── docker-compose.yml    # 单机编排：ams 应用 + openGauss 数据库（静态 IP 连库）
 ├── config/
@@ -65,6 +69,35 @@ docker build -t ams:1.0.0 \
 
 > ⚠️ 官方 Linux SDK 直链可能需要自举（同 Windows 侧
 > `scripts/ci/publish-toolchain.sh` 思路，做成 Release 资产）。
+
+### 2.1 前端独立镜像（可选 · nginx 托管）
+
+若希望**前端与后端解耦**（分别扩缩、或后端在别处），可用纯前端镜像：
+
+```bash
+# 方式 A：容器内构建（需能拉取 node:20-bookworm-slim，约 1GB 基础层）
+docker build -f deploy/docker/Dockerfile.web -t ams-web:local .
+
+# 方式 B：秒级离线（直接烤入宿主已产出的 web/dist，不拉 Node、不联网）★
+cd web && npm run build          # 先产出 web/dist
+docker build -f deploy/docker/Dockerfile.web.prebuilt -t ams-web:local .
+
+# 运行（默认 80，映射到宿主 8080）
+docker run --rm -p 8080:80 ams-web:local
+# 打开 http://localhost:8080
+```
+
+`deploy/docker/nginx.conf` 已配好：
+
+- `location /api { proxy_pass http://ams-server:8080; }` —— 把接口反代到后端
+  （前端容器与后端容器需同处 `ams-net` 用户网络，用容器名 `ams-server` 直连）；
+- `location /` 做 SPA history 回退（`/archive`、`/overview` 等深链正常）；
+- `/assets/` 给 `max-age=31536000, immutable`，`/index.html` 给 `no-cache`；
+- 附 gzip 与 `nosniff` / `Referrer-Policy` / `X-Frame-Options` 安全响应头。
+
+> ⚠️ 该镜像**仅托管 UI**，登录 / 注册 / 读写数据依赖后端 `ams-server`。
+> 单容器形态（见 §4）不需要它；它与「合并镜像」是**两种互斥**的前端部署方式，
+> 不要同时把 `ams-web`（8080）与 `ams-server`（8080）都跑在宿主 8080。
 
 ---
 
@@ -166,6 +199,25 @@ MOT（内存优化表引擎）启动时调用 `mbind` 做 NUMA 绑核，需要
 解法：给 `db` 服务加 `privileged: true`（compose 已加并注释）。仅在本地
 开发 / 演示库这样用；生产应改关 MOT，或用 `--cap-add` 收紧到
 `SYS_NICE,IPC_LOCK,SYS_RESOURCE` 而非整容器提权。
+
+### 4.4 前端并入后端镜像（刷新 UI 不重编后端）
+
+若你已有一个 `ams:1.0.0` 镜像（含后端二进制），只是想把它里面的前端换成
+最新重做后的 UI，**无需重新编译仓颉后端**，用 `Dockerfile.merge` 叠加即可：
+
+```bash
+cd web && npm run build                       # 先产出 web/dist
+docker build -f deploy/docker/Dockerfile.merge -t ams:1.0.0 .
+# 重建并重启（compose 的 ams 服务默认 8080:8080，单容器同时提供 UI + /api）
+docker compose -p ams -f deploy/compose/docker-compose.yml up -d --no-build ams
+```
+
+`Dockerfile.merge` 以既有 `ams:1.0.0` 为基底，仅 `COPY web/dist/ /app/web/`，
+因此**不会引入后端回归**；旧 web 的孤儿哈希文件无害（浏览器只会请求新产物）。
+
+> 这与「§2.1 前端独立镜像」是两种互斥方案：要么单容器合并镜像（推荐，
+> 一个进程一个端口），要么 nginx 前端容器 + 后端容器（多容器、需反代）。
+> 全栈 `docker compose up` 默认走前者。
 
 ---
 

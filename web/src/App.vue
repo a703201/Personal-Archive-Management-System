@@ -69,8 +69,11 @@ onMounted(async () => {
   <div v-if="!route.meta.public" class="app-shell">
     <a class="skip-link" href="#main-content">{{ t('App.01f027', '跳到主内容') }}</a>
     <!-- 侧栏：desktop 及以上显示 -->
-    <aside class="sidebar">
-      <div class="brand">AMS</div>
+      <aside class="sidebar">
+      <div class="brand">
+        <span class="brand__mark">A</span>
+        <span class="brand__name">AMS</span>
+      </div>
         <nav class="nav">
           <p class="nav__group">{{ t('App.2d7c0c', '个人') }}</p>
           <RouterLink class="nav__item" to="/archive">{{ t('App.3ca928', '档案') }}</RouterLink>
@@ -200,16 +203,36 @@ onMounted(async () => {
 }
 
 .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: var(--sp-4) var(--sp-4) var(--sp-5);
+}
+.brand__mark {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.brand__name {
   font-weight: 700;
   font-size: var(--font-size-lg);
-  padding: var(--sp-4);
-  color: var(--accent);
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
 }
 
 .nav {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: 2px;
   padding: 0 var(--sp-2);
 }
 .nav--inline {
@@ -233,9 +256,11 @@ onMounted(async () => {
 
 .nav__item {
   padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--radius-sm);
+  border-radius: var(--g3-xs);
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
+  font-weight: 500;
+  transition: background-color var(--spring-fast) ease, color var(--spring-fast) ease;
 }
 .nav__item:hover {
   background: var(--bg-hover);

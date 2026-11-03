@@ -100,132 +100,106 @@ async function onSubmit(): Promise<void> {
 </script>
 
 <template>
-  <div class="reg-wrap">
-    <div class="reg-card">
-      <div class="brand">AMS</div>
-      <h1 class="title">{{ t('RegisterView.4742b5', '创建账号') }}</h1>
-      <p class="subtitle">{{ t('RegisterView.cc6127', '个人档案管理系统') }}</p>
+  <div class="auth">
+    <aside class="auth__hero">
+      <div class="auth__brand">AMS</div>
+      <h1 class="auth__headline">几步创建，<br />长久安心。</h1>
+      <p class="auth__tagline">本地优先、最小暴露 —— 你的档案只属于你。</p>
+      <ul class="auth__points">
+        <li>12 位以上强口令策略</li>
+        <li>双因子可选，会话可控</li>
+        <li>数据归你，随时导出</li>
+      </ul>
+    </aside>
 
-      <form class="form" @submit.prevent="onSubmit">
-        <label class="field">
-          <span class="field__label">{{ t('RegisterView.a1aaf3', '用户名') }} <em>*</em></span>
-          <input v-model="username" class="field-control" type="text" autocomplete="username" :placeholder="t('RegisterView.e9fe4d', '登录用户名')" />
-        </label>
+    <main class="auth__panel">
+      <div class="auth__card">
+        <h2 class="auth__title">{{ t('RegisterView.4742b5', '创建账号') }}</h2>
+        <p class="auth__subtitle">{{ t('RegisterView.cc6127', '个人档案管理系统') }}</p>
 
-        <label class="field">
-          <span class="field__label">{{ t('RegisterView.25124e', '昵称') }}</span>
-          <input v-model="nickname" class="field-control" type="text" :placeholder="t('RegisterView.439569', '选填，默认同用户名')" />
-        </label>
+        <form class="auth__form" @submit.prevent="onSubmit">
+          <label class="auth__field">
+            <span class="auth__label">{{ t('RegisterView.a1aaf3', '用户名') }} <em>*</em></span>
+            <input v-model="username" class="field-control" type="text" autocomplete="username" :placeholder="t('RegisterView.e9fe4d', '登录用户名')" />
+          </label>
 
-        <label class="field">
-          <span class="field__label">{{ t('RegisterView.9ed627', '邮箱') }}</span>
-          <input v-model="email" class="field-control" type="email" autocomplete="email" :placeholder="t('RegisterView.924b8c', '选填')" />
-        </label>
+          <label class="auth__field">
+            <span class="auth__label">{{ t('RegisterView.25124e', '昵称') }}</span>
+            <input v-model="nickname" class="field-control" type="text" :placeholder="t('RegisterView.439569', '选填，默认同用户名')" />
+          </label>
 
-        <label class="field">
-          <span class="field__label">{{ t('RegisterView.5a9cc5', '手机号') }}</span>
-          <input v-model="phone" class="field-control" type="tel" autocomplete="tel" :placeholder="t('RegisterView.924b8c', '选填')" />
-        </label>
+          <label class="auth__field">
+            <span class="auth__label">{{ t('RegisterView.9ed627', '邮箱') }}</span>
+            <input v-model="email" class="field-control" type="email" autocomplete="email" :placeholder="t('RegisterView.924b8c', '选填')" />
+          </label>
 
-        <label class="field">
-          <span class="field__label">{{ t('RegisterView.c839a8', '密码') }} <em>*</em></span>
-          <input v-model="password" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.1ef3fd', '设置登录密码')" />
-        </label>
+          <label class="auth__field">
+            <span class="auth__label">{{ t('RegisterView.5a9cc5', '手机号') }}</span>
+            <input v-model="phone" class="field-control" type="tel" autocomplete="tel" :placeholder="t('RegisterView.924b8c', '选填')" />
+          </label>
 
-        <ul class="policy" :class="{ 'policy--ok': passwordOk }">
-          <li :class="{ done: policy.length }">{{ t('RegisterView.f8249b', '至少 12 位') }}</li>
-          <li :class="{ done: policy.classes }">{{ t('RegisterView.8e568b', '含至少 3 类字符（大小写/数字/符号）') }}</li>
-          <li :class="{ done: policy.noRepeat }">{{ t('RegisterView.bb306f', '无连续重复字符（如 aaa）') }}</li>
-          <li :class="{ done: policy.noUsername }">{{ t('RegisterView.00fcd5', '不包含用户名') }}</li>
-        </ul>
+          <label class="auth__field">
+            <span class="auth__label">{{ t('RegisterView.c839a8', '密码') }} <em>*</em></span>
+            <input v-model="password" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.1ef3fd', '设置登录密码')" />
+          </label>
 
-        <label class="field">
-          <span class="field__label">{{ t('RegisterView.1d0167', '确认密码') }} <em>*</em></span>
-          <input v-model="confirm" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.f27a15', '再次输入密码')" />
-          <span v-if="policy.match === false" class="field__err">{{ t('RegisterView.3e2b22', '两次输入的密码不一致') }}</span>
-        </label>
+          <ul class="policy" :class="{ 'policy--ok': passwordOk }">
+            <li :class="{ done: policy.length }">{{ t('RegisterView.f8249b', '至少 12 位') }}</li>
+            <li :class="{ done: policy.classes }">{{ t('RegisterView.8e568b', '含至少 3 类字符（大小写/数字/符号）') }}</li>
+            <li :class="{ done: policy.noRepeat }">{{ t('RegisterView.bb306f', '无连续重复字符（如 aaa）') }}</li>
+            <li :class="{ done: policy.noUsername }">{{ t('RegisterView.00fcd5', '不包含用户名') }}</li>
+          </ul>
 
-        <p v-if="serverError" class="error">{{ serverError }}</p>
+          <label class="auth__field">
+            <span class="auth__label">{{ t('RegisterView.1d0167', '确认密码') }} <em>*</em></span>
+            <input v-model="confirm" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.f27a15', '再次输入密码')" />
+            <span v-if="policy.match === false" class="reg-err">{{ t('RegisterView.3e2b22', '两次输入的密码不一致') }}</span>
+          </label>
 
-        <button class="btn-primary submit" type="submit" :disabled="submitting">
-          {{ submitting ? '提交中…' : '注册' }}
-        </button>
-      </form>
+          <p v-if="serverError" class="reg-error">{{ serverError }}</p>
 
-      <p class="switch">
-        已有账号？<RouterLink to="/login">{{ t('RegisterView.6c01b0', '去登录') }}</RouterLink>
-      </p>
-    </div>
+          <button class="btn-primary auth__submit" type="submit" :disabled="submitting">
+            {{ submitting ? '提交中…' : '注册' }}
+          </button>
+        </form>
+
+        <p class="auth__switch">
+          已有账号？<RouterLink to="/login">{{ t('RegisterView.6c01b0', '去登录') }}</RouterLink>
+        </p>
+      </div>
+    </main>
   </div>
 </template>
 
 <style scoped>
-.reg-wrap {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-app, #eef1f6);
-  padding: var(--sp-4, 16px);
+.auth__card {
+  animation: ams-enter-rise 0.5s var(--ease-apple) both;
 }
-.reg-card {
+.auth__submit {
+  margin-top: var(--sp-2);
   width: 100%;
-  max-width: 400px;
-  background: var(--bg-surface, #fff);
-  border: 1px solid var(--border-subtle, #e5e7eb);
-  border-radius: var(--g3-lg, 24px);
-  padding: 32px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.06);
 }
-.brand {
-  font-weight: 700;
-  font-size: 24px;
-  color: var(--accent, #2563eb);
-  text-align: center;
-}
-.title {
-  font-size: 20px;
-  margin: 8px 0 0;
-  text-align: center;
-  color: var(--text-primary, #1f2937);
-  letter-spacing: -0.02em;
-}
-.subtitle {
-  margin: 4px 0 24px;
-  text-align: center;
-  color: var(--text-muted, #9ca3af);
-  font-size: 14px;
-}
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3, 12px);
-}
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.field__label {
-  font-size: 13px;
-  color: var(--text-secondary, #4b5563);
-}
-.field__label em {
-  color: var(--danger, #dc2626);
+.auth__label em {
+  color: var(--danger);
   font-style: normal;
 }
-.field__err {
+.reg-err {
   font-size: 12px;
-  color: var(--danger, #dc2626);
+  color: var(--danger);
+}
+.reg-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
 }
 .policy {
   list-style: none;
-  margin: -4px 0 0;
+  margin: calc(var(--sp-2) * -1) 0 0;
   padding: 8px 12px;
-  background: var(--bg-hover, #f3f4f6);
-  border-radius: var(--g3-sm, 12px);
+  background: var(--bg-hover);
+  border-radius: var(--g3-sm);
   font-size: 12px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
   display: grid;
   gap: 2px;
 }
@@ -233,41 +207,18 @@ async function onSubmit(): Promise<void> {
   content: '○ ';
 }
 .policy li.done {
-  color: var(--success, #16a34a);
+  color: var(--success);
 }
 .policy li.done::before {
   content: '● ';
 }
 .policy--ok {
-  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 40%, transparent);
 }
-.error {
-  margin: 0;
-  color: var(--danger, #dc2626);
-  font-size: 13px;
-}
-.submit {
-  margin-top: 4px;
-  border: none;
-  border-radius: var(--g3-sm, 12px);
-  padding: 12px;
-  font-size: 15px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--accent, #2563eb);
-  cursor: pointer;
-}
-.submit:hover {
-  filter: brightness(1.05);
-}
-.submit:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.switch {
-  margin: 16px 0 0;
+.auth__switch {
+  margin: var(--sp-4) 0 0;
   text-align: center;
   font-size: 13px;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-muted);
 }
 </style>

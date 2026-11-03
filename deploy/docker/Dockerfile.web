@@ -1,0 +1,33 @@
+# ============================================================
+# AMS · 前端独立镜像（多阶段）
+# ------------------------------------------------------------
+# 阶段 1（build）：在容器内用 Node 构建 web/dist
+# 阶段 2（runtime）：nginx:alpine 托管静态产物，含 SPA 回退
+#
+# 构建（上下文为仓库根，以便同时取到 web/ 与 deploy/）：
+#   docker build -f deploy/docker/Dockerfile.web -t ams-web:local .
+#
+# 运行：
+#   docker run --rm -p 8080:80 ams-web:local
+#   打开 http://localhost:8080
+#
+# 说明：本镜像仅托管前端 UI。/api 需要后端 ams-server
+#       （见 deploy/compose 全栈编排）才能登录与读写数据。
+# ============================================================
+FROM node:20-bookworm-slim AS build
+WORKDIR /web
+COPY web/package*.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+FROM nginx:1.27-alpine AS runtime
+COPY deploy/docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /web/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]
