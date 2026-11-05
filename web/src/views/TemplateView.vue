@@ -282,7 +282,7 @@ onMounted(load)
           把常用档案的骨架存成模板，套用时一次生成多条，省去重复填写。
         </p>
       </div>
-      <button class="btn-primary" type="button" @click="openCreate">{{ tr('TemplateView.1eaf5c', '+ 新建模板') }}</button>
+      <button class="btn-primary" type="button" @click="openCreate">{{ tr('TemplateView.1eaf5c', '新建模板') }}</button>
     </div>
 
     <p v-if="loading" class="hint">{{ tr('TemplateView.300ee3', '加载中…') }}</p>
@@ -322,7 +322,7 @@ onMounted(load)
     <!-- 新建 / 编辑 -->
     <AppSheet
       v-model="showEdit"
-      ::title="isEditing ? tr('TemplateView.bbc586.edit', '编辑模板') : tr('TemplateView.bbc586.new', '新建模板')"
+      :title="isEditing ? tr('TemplateView.bbc586.edit', '编辑模板') : tr('TemplateView.bbc586.new', '新建模板')"
       size="md"
       :dismissible="!saving"
     >
@@ -421,7 +421,7 @@ onMounted(load)
     <!-- 套用 -->
     <AppSheet
       v-model="showApply"
-      ::title="tr('TemplateView.f8231a', '`套用模板 · ${applyTarget?.name ?? \'\'}`')"
+      :title="tr('TemplateView.f8231a', '`套用模板 · ${applyTarget?.name ?? \'\'}`')"
       size="sm"
       :dismissible="!applying"
     >
@@ -445,7 +445,7 @@ onMounted(load)
             max="50"
           />
           <span class="field__hint">
-            超过 1 条时，标题会按序号展开（`{n}` 占位或自动追加 ` (i)`）
+            超过 1 条时，标题会按序号展开（使用 {n} 占位，或自动追加序号）
           </span>
         </label>
       </div>
@@ -569,7 +569,7 @@ onMounted(load)
 }
 
 .chip {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 8px;
   border-radius: var(--g3-pill);
   background: var(--bg-hover);

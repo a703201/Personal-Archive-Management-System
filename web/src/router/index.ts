@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
-import { getToken } from '../api/client'
+import { api, getToken } from '../api/client'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -25,6 +25,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/roles', name: 'roles', component: () => import('../views/RolesView.vue'), meta: { title: '角色与权限', admin: true } },
   { path: '/audit', name: 'audit', component: () => import('../views/AuditView.vue'), meta: { title: '审计日志', admin: true } },
   { path: '/system', name: 'system', component: () => import('../views/SystemView.vue'), meta: { title: '系统运维', admin: true } },
+  { path: '/about', name: 'about', component: () => import('../views/AboutView.vue'), meta: { title: '关于' } },
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { title: '登录', public: true } },
   { path: '/register', name: 'register', component: () => import('../views/RegisterView.vue'), meta: { title: '注册', public: true } },
   {
@@ -38,6 +39,8 @@ const routes: RouteRecordRaw[] = [
   { path: '/share/:token', name: 'share', component: () => import('../views/ShareView.vue'), meta: { title: '共享档案', public: true } },
   // 家庭邀请落地页：未登录也要能打开（先核对组名与邀请人，再要求登录）
   { path: '/invite/:token', name: 'invite', component: () => import('../views/InviteView.vue'), meta: { title: '家庭邀请', public: true } },
+  // 首次部署初始化向导：公开，但后端完成初始化后接口会拒绝，守卫也会挡回登录页
+  { path: '/setup', name: 'setup', component: () => import('../views/SetupView.vue'), meta: { title: '首次部署', public: true } },
   { path: '/:pathMatch(.*)*', redirect: '/overview' },
 ]
 
@@ -46,12 +49,42 @@ export const router = createRouter({
   routes,
 })
 
-// 未登录且访问非公开页面 → 跳登录，并带上原目标用于登录后回跳
-router.beforeEach((to) => {
-  const token = getToken()
-  if (!to.meta.public && !token) {
+/**
+ * 首次部署状态：模块级缓存，避免每次导航都打 /setup/status。
+ * 后端为旧版本（无该接口）时按「已初始化」处理 —— 行为与改造前完全一致。
+ * 向导完成后用整页跳转清缓存，无需额外导出重置函数。
+ */
+let setupChecked = false
+let setupRequired = false
+let setupPending: Promise<boolean> | null = null
+
+function checkSetup(): Promise<boolean> {
+  if (setupChecked) return Promise.resolve(setupRequired)
+  if (setupPending) return setupPending
+  setupPending = api<{ initialized: boolean }>('/setup/status', { auth: false })
+    .then((s) => { setupRequired = !s.initialized; return setupRequired })
+    .catch(() => { setupRequired = false; return false })
+    .finally(() => { setupChecked = true; setupPending = null })
+  return setupPending
+}
+
+// 未登录且访问非公开页面 → 跳登录，并带上原目标用于登录后回跳；
+// 尚未初始化时优先引导到向导，避免在无账号状态下空转。
+router.beforeEach(async (to) => {
+  const needSetup = await checkSetup()
+  if (to.path === '/setup') {
+    return needSetup ? true : { name: 'login' }
+  }
+  if (to.meta.public) {
+    if (needSetup && (to.path === '/login' || to.path === '/register' || to.path === '/forgot')) {
+      return { path: '/setup' }
+    }
+    return true
+  }
+  if (!getToken()) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
+  if (needSetup) return { path: '/setup' }
   return true
 })
 

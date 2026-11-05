@@ -211,7 +211,7 @@ onMounted(load)
   letter-spacing: 0.02em;
 }
 .share-page__tag {
-  font-size: 11px;
+  font-size: 12px;
   padding: 2px 8px;
   border-radius: var(--g3-pill);
   background: var(--bg-hover);

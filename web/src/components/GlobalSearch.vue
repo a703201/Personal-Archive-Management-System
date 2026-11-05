@@ -114,16 +114,21 @@ watch(open, (v) => {
 
 <template>
   <!-- 触发按钮：同时提示快捷键 -->
-  <button class="search-trigger" type="button" @click="show">
+  <button class="search-trigger" type="button" @click="show" :aria-label="t('GlobalSearch.0d8465', '搜索档案…')">
+    <svg class="search-trigger__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.6-3.6" />
+    </svg>
     <span>{{ t('GlobalSearch.0d8465', '搜索档案…') }}</span>
     <kbd>⌘K</kbd>
   </button>
 
   <!--
-    ⚠️ 必须把遮罩传送到 body：
-    App.vue 的 .topbar 设了 backdrop-filter，会为后代的 position:fixed 建立包含块，
-    导致 .mask 的 inset:0 只覆盖顶栏（高~50px），搜索面板随之错位。
-    用 Teleport 脱离该祖先后，fixed 重新相对视口定位，遮罩即可全屏。
+    ⚠️ 遮罩必须传送到 body：
+    历史 bug —— .topbar 曾设 backdrop-filter，会为后代 position:fixed 建立包含块，
+    导致 .mask 的 inset:0 只覆盖顶栏、搜索面板错位。顶栏现已改为不透明实底，
+    但 Teleport 仍保留：任何祖先将来带 transform/filter/backdrop-filter/contain
+    都会重演该问题，传送到 body 是唯一稳定的保证。
   -->
   <Teleport to="body">
     <div v-if="open" class="mask" @click.self="hide">
@@ -170,9 +175,10 @@ watch(open, (v) => {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
+  min-height: 38px;
+  padding: 0 var(--sp-4);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: var(--g3-pill);
   background: var(--bg-surface);
   color: var(--text-secondary);
   cursor: pointer;
@@ -182,19 +188,27 @@ watch(open, (v) => {
 .search-trigger:hover {
   background: var(--bg-hover);
 }
-kbd {
+.search-trigger__icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  display: block;
+}
+.search-trigger kbd {
   font-family: var(--font-sans);
   font-size: 12px;
-  padding: 1px 5px;
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: auto;
+  border: 1px solid var(--hairline);
+  border-radius: var(--g3-xs);
   color: var(--text-muted);
+  background: var(--bg-app);
 }
 
 .mask {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--material-scrim);
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -204,19 +218,19 @@ kbd {
 
 .dialog {
   width: min(640px, calc(100vw - 32px));
-  background: var(--bg-elevated);
+  background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
+  border-radius: var(--g3-lg);
+  box-shadow: var(--shadow-pop);
   overflow: hidden;
 }
 
 .dialog__head {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-3);
-  border-bottom: 1px solid var(--border-subtle);
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .dialog__input {
@@ -226,15 +240,21 @@ kbd {
   background: transparent;
   color: var(--text-primary);
   font-size: var(--font-size-md);
+  letter-spacing: var(--tracking-body);
   font-family: var(--font-sans);
 }
 
 .dialog__close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
   border: none;
-  background: transparent;
-  color: var(--text-muted);
+  background: var(--bg-hover);
+  border-radius: var(--g3-pill);
+  color: var(--text-secondary);
   cursor: pointer;
-  font-size: 16px;
+  font-size: 13px;
 }
 
 .dialog__body {

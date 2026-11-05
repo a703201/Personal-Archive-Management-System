@@ -7,7 +7,7 @@
 [![Backend](https://img.shields.io/badge/backend-Cangjie-1f6feb)](./packages)
 [![Frontend](https://img.shields.io/badge/frontend-Vue%203%20%2B%20TS-42b883)](./web)
 [![Database](https://img.shields.io/badge/database-openGauss-orange)](./db/migrations)
-[![Tests](https://img.shields.io/badge/tests-272%20passed-brightgreen)](./scripts/test.sh)
+[![Tests](https://img.shields.io/badge/tests-338%20passed-brightgreen)](./scripts/test.sh)
 
 ---
 
@@ -60,7 +60,7 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 > 门禁：`bash scripts/build.sh` → 0 error、`npm run build` → 0 error、`bash scripts/test.sh` → 0 fail。
 > 三者未同时通过不算完成。
 
-> **前端界面（2026-11-03 重做）**：已按 Apple 设计语言整体改版 —— 中性灰阶 + 系统蓝配色、登录/注册/找回三页改为分屏 hero、顶栏玻璃材质承载层级，目标是「简洁、高端、去 AI 味」。容器化部署与前端独立镜像见 `deploy/README.md`、变更明细见 `CHANGELOG.md` 的 `[1.1.0]`。
+> **前端界面（Apple 设计语言 · 2026-11-05 完整重做）**：以 `apple.com` 当前站点实测参数为准 —— 卡片零投影（靠白卡浮在雾灰画布上的明度差分层）、交互元素胶囊几何、17px 正文与超大 display 字阶、单一强调蓝、字重只用 400/600/700、单色线性图标；并配套 `styles/motion.css` 交互动效层（可打断的按下反馈、对称路由转场、交错入场、滚动显现、材质化弹层）与三类无障碍偏好降级。容器化部署见 `deploy/README.md`，变更明细见 `CHANGELOG.md` 的 `[1.2.0]`。
 
 ---
 
@@ -286,18 +286,27 @@ Vite dev server 把 `/api` 代理到 `8080`（见 `web/vite.config.ts`），
 > 新注册账号默认**没有角色**，需要管理员在「用户管理」中分配（`owner` 角色包含 29 项个人权限）。
 > 这是刻意的：默认拒绝。
 
-### 7. 演示数据（可选）
+### 7. 首次部署初始化
 
-本地库里保留了一份可直接演示的数据集，无需重新造数据：
+全新部署首次打开时会自动进入 **`/setup` 初始化向导**（检测到库中没有任何管理员时）：
 
-| 项 | 内容 |
-| --- | --- |
-| 演示账号 | `tpl_probe_01`（已授 `owner` + `org_admin`，可覆盖普通用户与管理员两侧界面） |
-| 档案条目 | 4 条：`身份证-1/2/3`（分类 2 证件信息，模板批量套用产出）、`体检报告`（分类 8 健康信息，敏感度 **3 高敏**） |
-| 共享链接 | 若干条，其中 1 条已被失败次数上限**单向撤销**、1 条挂在敏感度为 3 的条目上 —— 正好用来演示「超限失效」与「高敏条目的公开页不放签发机关」 |
+1. **数据库连接** —— 默认与项目部署在同一服务器，直接沿用 compose 环境变量；
+   需要把数据库放到其他服务器时，在此填写连接 IP、端口、库名、用户名、密码，
+   并可先「测试连接」。保存后重启服务生效。
+2. **创建管理员** —— 填写账号名称、昵称、密码、邮箱/手机号；
+   首个账号自动获得 `owner` + `org_admin` 角色，无需手动授权。
+3. **邮件服务** —— 可选。配置 SMTP 服务器、端口、加密方式、账号与发件邮箱，
+   用于找回密码时发送验证码；可跳过，之后随时在「系统运维 → 部署配置」中补充。
+4. 完成后向导永久关闭，使用刚创建的账号登录。
 
-> 共享链接有效期按设计是短的（默认 7 天、上限 365 天），放过期后公开页统一返回 404（不区分过期/撤销/不存在）。
-> 演示前若链接已过期，在条目详情面板的「共享」区重新创建一条即可，不需要清库。
+> 配置存放在容器持久卷 `/app/config/deployment.env`（`ams-config` 卷），
+> **文件里没有的键继续读环境变量**，因此既有部署升级后行为不变。
+> 登录后的「系统运维 → 部署配置」页可随时修改数据库与邮件配置，
+> 并提供测试连接、发送测试邮件、恢复环境变量默认等操作。
+> 模板见 `deploy/config/deployment.env.example`。
+
+> 历史演示/测试账号已清理（清理脚本：`scripts/cleanup-demo-data.sql`、
+> `scripts/cleanup-test-accounts.sql`，均为幂等）。
 
 ---
 

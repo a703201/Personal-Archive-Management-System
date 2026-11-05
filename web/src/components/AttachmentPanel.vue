@@ -455,7 +455,7 @@ onMounted(load)
     </div>
 
     <p v-if="loading" class="hint">{{ tr('AttachmentPanel.300ee3', '加载中…') }}</p>
-    <p v-else-if="list.length === 0" class="hint">{{ tr('AttachmentPanel.c0bf82', '还没有附件。') }}</p>
+    <p v-else-if="list.length === 0" class="hint">{{ tr('AttachmentPanel.c0bf82', '暂无附件') }}</p>
     <template v-else>
       <div class="pickbar">
         <label class="pickbar__all">
@@ -483,7 +483,7 @@ onMounted(load)
           <input
             type="checkbox"
             :checked="picked.has(a.id)"
-            ::aria-label="tr('AttachmentPanel.855d64', '`选择 ${a.title}`')"
+            :aria-label="tr('AttachmentPanel.855d64', '`选择 ${a.title}`')"
             @change="toggle(a.id)"
           />
           <div v-if="thumbs[a.id]" class="att-thumb">
@@ -746,7 +746,7 @@ onMounted(load)
   border-radius: 8px;
   background: rgba(37, 99, 235, 0.1);
   color: var(--accent, #2563eb);
-  font-size: 11px;
+  font-size: 12px;
 }
 .att-item__sub {
   font-size: 12px;
@@ -869,7 +869,7 @@ onMounted(load)
   border-radius: 8px;
   background: rgba(22, 163, 74, 0.12);
   color: var(--success, #16a34a);
-  font-size: 11px;
+  font-size: 12px;
 }
 .ver-item__sub {
   font-size: 12px;

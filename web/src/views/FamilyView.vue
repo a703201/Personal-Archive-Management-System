@@ -151,7 +151,7 @@ const INVITE_STATE_LABEL: Record<string, string> = {
   revoked: t('viewsFamilyView.61063b', '已撤销'),
   expired: t('viewsFamilyView.135437', '已过期'),
   exhausted: t('viewsFamilyView.c70b0a', '已用尽'),
-  too_many_fails: t('viewsFamilyView.f49cd8', '错误过多'),
+  too_many_fails: t('viewsFamilyView.f49cd8', '邀请码输错次数过多'),
 }
 
 function roleLabel(code: string): string {
@@ -734,7 +734,7 @@ onMounted(async () => {
     <!-- ---------- 组详情 ---------- -->
     <AppSheet
       v-model="showDetail"
-      ::title="t('FamilyView.f95cbd', 'detail?.name ?? \'家庭组\'')"
+      :title="t('FamilyView.f95cbd', 'detail?.name ?? \'家庭组\'')"
       size="lg"
       @close="closeDetail"
     >
@@ -1117,7 +1117,7 @@ onMounted(async () => {
     </AppSheet>
 
     <!-- ---------- 共享条目详情（只读） ---------- -->
-    <AppSheet v-model="showSharedItem" ::title="sharedDetail?.title ?? t('FamilyView.f104e4', '档案')" @close="sharedDetail = null">
+    <AppSheet v-model="showSharedItem" :title="sharedDetail?.title ?? t('FamilyView.f104e4', '档案')" @close="sharedDetail = null">
       <p v-if="!sharedDetail && !sharedDetailError" class="hint">{{ t('FamilyView.300ee3', '加载中…') }}</p>
       <p v-else-if="sharedDetailError" class="hint hint--error">{{ sharedDetailError }}</p>
       <div v-else-if="sharedDetail" class="shared-detail">
@@ -1219,7 +1219,7 @@ onMounted(async () => {
 }
 .seg__count {
   margin-left: 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -1352,7 +1352,7 @@ onMounted(async () => {
 
 /* ---- chip ---- */
 .chip {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 8px;
   border-radius: var(--g3-pill);
   background: var(--bg-surface);

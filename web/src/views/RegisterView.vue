@@ -58,7 +58,7 @@ const phoneValid = computed(() => {
 async function onSubmit(): Promise<void> {
   serverError.value = ''
   if (!username.value || !password.value) {
-    serverError.value = '请输入用户名和密码'
+    serverError.value = '请输入用户名和口令'
     return
   }
   if (!passwordOk.value) {
@@ -91,7 +91,7 @@ async function onSubmit(): Promise<void> {
     const redirect = (route.query.redirect as string) || '/login'
     router.replace(redirect)
   } catch (e) {
-    serverError.value = (e as Error).message || t('viewsRegisterView.ff3a15', '注册失败，请重试')
+    serverError.value = (e as Error).message || t('viewsRegisterView.ff3a15', '注册失败，请稍后重试')
     toastError(serverError.value)
   } finally {
     submitting.value = false
@@ -101,8 +101,9 @@ async function onSubmit(): Promise<void> {
 
 <template>
   <div class="auth">
-    <aside class="auth__hero">
+    <aside class="auth__hero stagger">
       <div class="auth__brand">AMS</div>
+      <p class="auth__eyebrow">GET STARTED</p>
       <h1 class="auth__headline">几步创建，<br />长久安心。</h1>
       <p class="auth__tagline">本地优先、最小暴露 —— 你的档案只属于你。</p>
       <ul class="auth__points">
@@ -139,8 +140,8 @@ async function onSubmit(): Promise<void> {
           </label>
 
           <label class="auth__field">
-            <span class="auth__label">{{ t('RegisterView.c839a8', '密码') }} <em>*</em></span>
-            <input v-model="password" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.1ef3fd', '设置登录密码')" />
+            <span class="auth__label">{{ t('RegisterView.c839a8', '口令') }} <em>*</em></span>
+            <input v-model="password" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.1ef3fd', '设置登录口令')" />
           </label>
 
           <ul class="policy" :class="{ 'policy--ok': passwordOk }">
@@ -151,20 +152,20 @@ async function onSubmit(): Promise<void> {
           </ul>
 
           <label class="auth__field">
-            <span class="auth__label">{{ t('RegisterView.1d0167', '确认密码') }} <em>*</em></span>
-            <input v-model="confirm" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.f27a15', '再次输入密码')" />
-            <span v-if="policy.match === false" class="reg-err">{{ t('RegisterView.3e2b22', '两次输入的密码不一致') }}</span>
+            <span class="auth__label">{{ t('RegisterView.1d0167', '确认口令') }} <em>*</em></span>
+            <input v-model="confirm" class="field-control" type="password" autocomplete="new-password" :placeholder="t('RegisterView.f27a15', '再次输入口令')" />
+            <span v-if="policy.match === false" class="reg-err">{{ t('RegisterView.3e2b22', '两次输入的口令不一致') }}</span>
           </label>
 
           <p v-if="serverError" class="reg-error">{{ serverError }}</p>
 
           <button class="btn-primary auth__submit" type="submit" :disabled="submitting">
-            {{ submitting ? '提交中…' : '注册' }}
+            {{ submitting ? '注册中…' : '注册' }}
           </button>
         </form>
 
         <p class="auth__switch">
-          已有账号？<RouterLink to="/login">{{ t('RegisterView.6c01b0', '去登录') }}</RouterLink>
+          已有账号？<RouterLink to="/login">{{ t('RegisterView.6c01b0', '返回登录') }}</RouterLink>
         </p>
       </div>
     </main>
@@ -172,9 +173,6 @@ async function onSubmit(): Promise<void> {
 </template>
 
 <style scoped>
-.auth__card {
-  animation: ams-enter-rise 0.5s var(--ease-apple) both;
-}
 .auth__submit {
   margin-top: var(--sp-2);
   width: 100%;

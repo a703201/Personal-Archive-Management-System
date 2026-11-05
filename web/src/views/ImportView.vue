@@ -534,7 +534,7 @@ interface FieldDefLite {
 
 /** 系统字段（固定列序那 9 列），自定义字段键从字段定义域接口按分类拉取。 */
 const SYSTEM_FIELDS: { key: string; name: string }[] = [
-  { key: 'subject_id', name: tr('viewsImportView.0231ed', '主体ID') },
+  { key: 'subject_id', name: tr('viewsImportView.0231ed', '主体 ID') },
   { key: 'category', name: tr('viewsImportView.435c52', '分类') },
   { key: 'title', name: tr('viewsImportView.748d7d', '标题') },
   { key: 'status', name: tr('viewsImportView.62e951', '状态') },
@@ -947,7 +947,7 @@ async function cloneTemplate(): Promise<void> {
               :disabled="busy || unresolvedCount > 0"
               @click="zipSubmit"
             >
-              {{ busy ? '提交中…' : '确认导入' }}
+              {{ busy ? '导入中…' : '确认导入' }}
             </button>
             <span v-if="unresolvedCount > 0" class="hint hint--error">
               还有 {{ unresolvedCount }} 个重名目录未指定
@@ -1195,7 +1195,7 @@ async function cloneTemplate(): Promise<void> {
 
         <div class="actions">
           <button class="btn-primary" :disabled="busy || csvPlan.valid === 0" @click="csvSubmit">
-            {{ busy ? '提交中…' : `确认导入 ${csvPlan.valid} 行` }}
+            {{ busy ? '导入中…' : `确认导入 ${csvPlan.valid} 行` }}
           </button>
           <span v-if="csvPlan.duplicate > 0" class="hint">
             另有 {{ csvPlan.duplicate }} 行重复，不会重复建条目。
@@ -1275,7 +1275,7 @@ async function cloneTemplate(): Promise<void> {
             :disabled="busy || bundlePlan.valid === 0"
             @click="bundleSubmit"
           >
-            {{ busy ? '提交中…' : `确认回导 ${bundlePlan.valid} 条` }}
+            {{ busy ? '导入中…' : `确认回导 ${bundlePlan.valid} 条` }}
           </button>
           <span class="hint">{{ tr('ImportView.ac221e', '包内主体若不在你的可写范围，将统一落到上方选择的「目标主体」。') }}</span>
         </div>
@@ -1290,7 +1290,7 @@ async function cloneTemplate(): Promise<void> {
           刷新
         </button>
       </div>
-      <div v-if="!tasks.length" class="empty">{{ tr('ImportView.827096', '还没有导入任务。') }}</div>
+      <div v-if="!tasks.length" class="empty">{{ tr('ImportView.827096', '暂无导入任务') }}</div>
       <table v-else class="tbl">
         <thead>
           <tr>
@@ -1496,7 +1496,7 @@ code {
   line-height: 1.1;
 }
 .stat__k {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .stat--ok .stat__n {
@@ -1521,7 +1521,7 @@ code {
 }
 .tag {
   display: inline-block;
-  font-size: 11px;
+  font-size: 12px;
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--bg-hover);

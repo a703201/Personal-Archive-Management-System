@@ -17,7 +17,7 @@ import { useToast } from '../composables/useToast'
 
 const toast = useToast()
 
-type TabKey = 'health' | 'config' | 'jobs' | 'keys' | 'backup'
+type TabKey = 'health' | 'config' | 'jobs' | 'keys' | 'backup' | 'deployment'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'health', label: tr('viewsSystemView.9ac566', '健康看板') },
@@ -25,6 +25,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'jobs', label: tr('viewsSystemView.c97ffb', '定时任务') },
   { key: 'keys', label: tr('viewsSystemView.25c51c', '密钥管理') },
   { key: 'backup', label: tr('viewsSystemView.823396', '备份恢复') },
+  { key: 'deployment', label: tr('viewsSystemView.deploy', '部署配置') },
 ]
 
 const tab = ref<TabKey>('health')
@@ -58,10 +59,21 @@ function fmtBytes(n: number | string): string {
 }
 
 function fmtUptime(ms: number | string): string {
-  const s = Math.floor(Number(ms ?? 0) / 1000)
+  const total = Number(ms ?? 0)
+  if (!Number.isFinite(total) || total < 0) return '—'
+  const s = Math.floor(total / 1000)
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
-  return h > 0 ? `${h} 小时 ${m} 分` : tr('viewsSystemView.b0ec90', `${m} 分 ${s % 60} 秒`)
+  // i18n 目录是静态字符串，词条不能写 ${...}（会被原样显示）；
+  // 用 {h}/{m}/{s} 占位符 + 调用点 replace 完成插值，三语均可用。
+  if (h > 0) {
+    return tr('viewsSystemView.uptimeHours', `${h} 小时 ${m} 分`)
+      .replace('{h}', String(h))
+      .replace('{m}', String(m))
+  }
+  return tr('viewsSystemView.b0ec90', `${m} 分 ${s % 60} 秒`)
+    .replace('{m}', String(m))
+    .replace('{s}', String(s % 60))
 }
 
 const errorRateText = computed(() => {
@@ -316,7 +328,80 @@ async function loadAll(): Promise<void> {
   } catch {
     /* 忽略 */
   }
+  try {
+    await loadDeployment()
+  } catch {
+    /* 忽略：部署配置面板单独提示 */
+  }
   loading.value = false
+}
+
+
+// ---------------------------------------------------------------
+// 部署配置：数据库连接 + 邮件服务（/api/admin/deployment）
+// 与「配置中心」的区别：这里写的是容器持久卷上的 deployment.env，
+// 决定服务连哪个库、邮件怎么发；修改数据库后需重启服务生效。
+// ---------------------------------------------------------------
+interface DeployDb { host: string; port: string; name: string; user: string; password: string }
+interface DeployMail {
+  enabled: boolean; host: string; port: string; user: string
+  fromAddr: string; secure: string; password: string
+}
+const depDb = ref<DeployDb>({ host: '', port: '', name: '', user: '', password: '' })
+const depMail = ref<DeployMail>({ enabled: false, host: '', port: '465', user: '', fromAddr: '', secure: 'ssl', password: '' })
+const depBusy = ref(false)
+
+async function loadDeployment(): Promise<void> {
+  const d = await api<{ database: DeployDb; mail: DeployMail }>('/admin/deployment')
+  if (d.database) depDb.value = { ...d.database, password: '' }
+  if (d.mail) depMail.value = { ...d.mail, password: '' }
+}
+async function saveDeploymentDb(): Promise<void> {
+  depBusy.value = true
+  try {
+    const r = await api<{ message: string }>('/admin/deployment/database', { method: 'PUT', body: { ...depDb.value } })
+    toast.success(r.message || tr('SystemView.deploySaved', '已保存'))
+    depDb.value.password = ''
+  } catch (e) { toast.error((e as Error).message) } finally { depBusy.value = false }
+}
+async function testDeploymentDb(): Promise<void> {
+  depBusy.value = true
+  try {
+    const r = await api<{ ok: boolean; message: string }>('/admin/deployment/test-db', { method: 'POST', body: { ...depDb.value } })
+    if (r.ok) toast.success(tr('SystemView.dbOk', '数据库连接成功'))
+    else toast.error(r.message || tr('SystemView.dbFail', '连接失败'))
+  } catch (e) { toast.error((e as Error).message) } finally { depBusy.value = false }
+}
+async function resetDeploymentDb(): Promise<void> {
+  depBusy.value = true
+  try {
+    const r = await api<{ message: string }>('/admin/deployment/database', { method: 'DELETE' })
+    toast.success(r.message || tr('SystemView.deployReset', '已恢复默认'))
+    await loadDeployment()
+  } catch (e) { toast.error((e as Error).message) } finally { depBusy.value = false }
+}
+async function saveDeploymentMail(): Promise<void> {
+  depBusy.value = true
+  try {
+    await api('/admin/deployment/mail', {
+      method: 'PUT',
+      body: { ...depMail.value, enabled: String(depMail.value.enabled), password: depMail.value.password || undefined },
+    })
+    toast.success(tr('SystemView.mailSaved', '邮件配置已保存，重启服务后生效'))
+    depMail.value.password = ''
+  } catch (e) { toast.error((e as Error).message) } finally { depBusy.value = false }
+}
+async function testDeploymentMail(): Promise<void> {
+  if (!depMail.value.fromAddr) { toast.warning(tr('SystemView.needFrom', '请先填写发件邮箱')); return }
+  depBusy.value = true
+  try {
+    await saveDeploymentMail()
+    const r = await api<{ ok: boolean; message: string }>('/admin/deployment/test-mail', {
+      method: 'POST', body: { to: depMail.value.fromAddr },
+    })
+    if (r.ok) toast.success(tr('SystemView.mailQueued', '测试邮件已进入发送队列'))
+    else toast.info(r.message)
+  } catch (e) { toast.error((e as Error).message) } finally { depBusy.value = false }
 }
 
 onMounted(loadAll)
@@ -398,11 +483,11 @@ function fmtTime(ms: number | string | undefined): string {
     <!-- 配置中心 -->
     <template v-else-if="tab === 'config'">
       <div class="bar">
-        <p class="bar__hint">{{ tr('SystemView.b845a2', '敏感配置项的值以 *** 展示，编辑时需重新输入；留空表示不修改。') }}</p>
+        <p class="bar__hint">{{ tr('SystemView.b845a2', '敏感配置的值不会展示，编辑时留空表示不修改。') }}</p>
         <button class="btn-primary" type="button" @click="openSettingCreate">{{ tr('SystemView.679b34', '新增配置') }}</button>
       </div>
       <div class="card">
-        <p v-if="settings.length === 0" class="hint">{{ tr('SystemView.ab13c3', '还没有配置项。') }}</p>
+        <p v-if="settings.length === 0" class="hint">{{ tr('SystemView.ab13c3', '暂无配置项') }}</p>
         <div v-for="s in settings" :key="s.key" class="rowitem">
           <div class="rowitem__main">
             <div class="rowitem__title">
@@ -450,7 +535,7 @@ function fmtTime(ms: number | string | undefined): string {
     <!-- 密钥管理 -->
     <template v-else-if="tab === 'keys'">
       <div class="bar">
-        <p class="bar__hint">{{ tr('SystemView.4ea666', '此处只展示密钥的**版本与状态**，不存储也不展示任何密钥材料。') }}</p>
+        <p class="bar__hint">{{ tr('SystemView.4ea666', '此处只展示密钥的版本与状态，不存储也不展示任何密钥材料。') }}</p>
         <button class="btn-primary" type="button" :disabled="keyBusy" @click="rotateKey">
           轮换密钥
         </button>
@@ -498,7 +583,7 @@ function fmtTime(ms: number | string | undefined): string {
         </button>
       </div>
       <div class="card">
-        <p v-if="backups.length === 0" class="hint">{{ tr('SystemView.366fe0', '还没有备份。') }}</p>
+        <p v-if="backups.length === 0" class="hint">{{ tr('SystemView.366fe0', '暂无备份') }}</p>
         <div v-for="b in backups" :key="b.file" class="rowitem">
           <div class="rowitem__main">
             <div class="rowitem__title"><code>{{ b.file }}</code></div>
@@ -511,6 +596,50 @@ function fmtTime(ms: number | string | undefined): string {
           </div>
         </div>
       </div>
+
+    <!-- 部署配置：数据库连接 + 邮件服务 -->
+    </template>
+
+    <template v-else-if="tab === 'deployment'">
+      <div class="card deploy">
+        <h2 class="deploy__title">{{ tr('SystemView.dbTitle', '数据库连接') }}</h2>
+        <p class="hint">{{ tr('SystemView.dbDesc', '默认与项目部署在同一服务器。指向外部数据库时请先测试连接；保存后需重启服务生效。') }}</p>
+        <div class="deploy__grid">
+          <label class="field"><span class="field__label">{{ tr('SystemView.dbHost', '连接 IP / 主机') }}</span><input v-model="depDb.host" class="field-control" type="text" /></label>
+          <label class="field"><span class="field__label">{{ tr('SystemView.dbPort', '端口') }}</span><input v-model="depDb.port" class="field-control" type="text" inputmode="numeric" /></label>
+          <label class="field"><span class="field__label">{{ tr('SystemView.dbName', '数据库名') }}</span><input v-model="depDb.name" class="field-control" type="text" /></label>
+          <label class="field"><span class="field__label">{{ tr('SystemView.dbUser', '数据库用户名') }}</span><input v-model="depDb.user" class="field-control" type="text" /></label>
+          <label class="field"><span class="field__label">{{ tr('SystemView.dbPassword', '数据库密码（留空不修改）') }}</span><input v-model="depDb.password" class="field-control" type="password" /></label>
+        </div>
+        <div class="deploy__actions">
+          <button class="btn-primary" type="button" :disabled="depBusy" @click="saveDeploymentDb">{{ tr('SystemView.save', '保存') }}</button>
+          <button class="btn-ghost" type="button" :disabled="depBusy" @click="testDeploymentDb">{{ tr('SystemView.testDb', '测试连接') }}</button>
+          <button class="btn-text" type="button" :disabled="depBusy" @click="resetDeploymentDb">{{ tr('SystemView.resetDefault', '恢复为环境变量默认') }}</button>
+        </div>
+      </div>
+
+      <div class="card deploy">
+        <h2 class="deploy__title">{{ tr('SystemView.mailTitle', '邮件服务（SMTP）') }}</h2>
+        <p class="hint">{{ tr('SystemView.mailDesc', '用于找回口令时发送验证码。启用后由容器内投递服务通过 SMTP 真实发送。') }}</p>
+        <label class="deploy__switch">
+          <input v-model="depMail.enabled" type="checkbox" />
+          <span>{{ tr('SystemView.mailEnable', '启用 SMTP 邮件发送') }}</span>
+        </label>
+        <div class="deploy__grid">
+          <label class="field"><span class="field__label">{{ tr('SystemView.smtpHost', 'SMTP 服务器') }}</span><input v-model="depMail.host" class="field-control" type="text" placeholder="smtp.example.com" /></label>
+          <label class="field"><span class="field__label">{{ tr('SystemView.smtpPort', '端口') }}</span><input v-model="depMail.port" class="field-control" type="text" inputmode="numeric" /></label>
+          <label class="field"><span class="field__label">{{ tr('SystemView.smtpSecure', '加密方式') }}</span>
+            <select v-model="depMail.secure" class="field-control"><option value="ssl">SSL / 465</option><option value="starttls">STARTTLS / 587</option></select>
+          </label>
+          <label class="field"><span class="field__label">{{ tr('SystemView.smtpUser', 'SMTP 账号') }}</span><input v-model="depMail.user" class="field-control" type="text" /></label>
+          <label class="field"><span class="field__label">{{ tr('SystemView.smtpPassword', 'SMTP 密码（留空不修改）') }}</span><input v-model="depMail.password" class="field-control" type="password" /></label>
+          <label class="field"><span class="field__label">{{ tr('SystemView.smtpFrom', '发件邮箱') }}</span><input v-model="depMail.fromAddr" class="field-control" type="email" /></label>
+        </div>
+        <div class="deploy__actions">
+          <button class="btn-primary" type="button" :disabled="depBusy" @click="saveDeploymentMail">{{ tr('SystemView.save', '保存') }}</button>
+          <button class="btn-ghost" type="button" :disabled="depBusy" @click="testDeploymentMail">{{ tr('SystemView.testMail', '发送测试邮件') }}</button>
+        </div>
+      </div>
     </template>
   </section>
 
@@ -518,7 +647,7 @@ function fmtTime(ms: number | string | undefined): string {
        v-else-if 必须紧邻上一个分支，中间夹其它元素会让整条链失效） -->
   <AppSheet
     v-model="showSetting"
-    ::title="settingMode === 'create' ? tr('SystemView.227e8e.new', '新增配置') : tr('SystemView.227e8e.edit', '编辑配置')"
+    :title="settingMode === 'create' ? tr('SystemView.227e8e.new', '新增配置') : tr('SystemView.227e8e.edit', '编辑配置')"
     size="sm"
     :dismissible="!savingSetting"
   >
@@ -694,7 +823,7 @@ function fmtTime(ms: number | string | undefined): string {
 }
 
 .st {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 6px;
   border-radius: var(--g3-sm, 12px);
   border: 1px solid currentColor;
@@ -733,4 +862,24 @@ function fmtTime(ms: number | string | undefined): string {
     align-self: flex-end;
   }
 }
+
+/* 部署配置面板 */
+.deploy { margin-bottom: var(--sp-4); }
+.deploy__title { font-size: var(--font-size-lg); font-weight: 600; margin: 0 0 var(--sp-2); }
+.deploy__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+.deploy__actions {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2);
+  margin-top: var(--sp-5);
+}
+.deploy__switch {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  margin-top: var(--sp-3); font-size: var(--font-size-sm); color: var(--text-secondary); cursor: pointer;
+}
+.deploy__switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+@media (max-width: 639px) { .deploy__grid { grid-template-columns: 1fr; } }
 </style>

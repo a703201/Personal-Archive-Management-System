@@ -220,7 +220,7 @@ defineExpose({ load })
     <!-- 已有链接 -->
     <p v-if="loading" class="hint">{{ t('ShareLinkPanel.300ee3', '加载中…') }}</p>
     <p v-else-if="loadError" class="hint hint--error">{{ loadError }}</p>
-    <p v-else-if="myLinks.length === 0" class="hint">{{ t('ShareLinkPanel.ef4fa7', '该条目还没有共享链接。') }}</p>
+    <p v-else-if="myLinks.length === 0" class="hint">{{ t('ShareLinkPanel.ef4fa7', '暂无共享链接') }}</p>
 
     <ul v-else class="share__list">
       <li v-for="l in myLinks" :key="l.id" class="share__item">
@@ -359,7 +359,7 @@ defineExpose({ load })
 }
 
 .chip {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 8px;
   border-radius: var(--g3-pill);
   font-weight: 600;

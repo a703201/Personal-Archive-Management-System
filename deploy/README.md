@@ -7,10 +7,10 @@ deploy/
 ├── docker/
 │   ├── Dockerfile            # 多阶段镜像：builder(后端) + web(前端) + runtime
 │   ├── Dockerfile.cjbase     # 仓颉基础镜像（ubuntu22.04 + SDK1.2.0-beta.03 + stdx）
-│   └── Dockerfile.prebuilt   # 基于预编译产物构建运行镜像（含 web/dist，ams:1.0.0）
+│   └── Dockerfile.prebuilt   # 基于预编译产物构建运行镜像（含 web/dist，ams:1.2.0）
 │   ├── Dockerfile.web        # 前端独立镜像（多阶段：node:20 构建 → nginx:1.27-alpine）
 │   ├── Dockerfile.web.prebuilt # 前端独立镜像（秒级离线：把宿主 web/dist 烤入 nginx）
-│   ├── Dockerfile.merge      # 把最新 web/dist 叠加进既有 ams:1.0.0（前端并入后端镜像）
+│   ├── Dockerfile.merge      # 把最新 web/dist 叠加进既有 ams:1.2.0（前端并入后端镜像）
 │   └── nginx.conf            # 前端独立镜像的反代配置（/api → ams-server:8080 + SPA 回退）
 ├── compose/
 │   └── docker-compose.yml    # 单机编排：ams 应用 + openGauss 数据库（静态 IP 连库）
@@ -53,7 +53,7 @@ deploy/
 **A. 自举基础镜像（推荐）**
 
 ```bash
-docker build -t ams:1.0.0 \
+docker build -t ams:1.2.0 \
   --build-arg BASE_IMAGE=your-registry/cangjie:1.2.0-linux \
   -f deploy/docker/Dockerfile .
 ```
@@ -61,7 +61,7 @@ docker build -t ams:1.0.0 \
 **B. SDK 直链下载**
 
 ```bash
-docker build -t ams:1.0.0 \
+docker build -t ams:1.2.0 \
   --build-arg CANGJIE_SDK_URL=https://.../cangjie-1.2.0-linux.tar.gz \
   --build-arg CANGJIE_STDX_URL=https://.../cangjie-stdx-linux.tar.gz \
   -f deploy/docker/Dockerfile .
@@ -202,17 +202,17 @@ MOT（内存优化表引擎）启动时调用 `mbind` 做 NUMA 绑核，需要
 
 ### 4.4 前端并入后端镜像（刷新 UI 不重编后端）
 
-若你已有一个 `ams:1.0.0` 镜像（含后端二进制），只是想把它里面的前端换成
+若你已有一个 `ams:1.2.0` 镜像（含后端二进制），只是想把它里面的前端换成
 最新重做后的 UI，**无需重新编译仓颉后端**，用 `Dockerfile.merge` 叠加即可：
 
 ```bash
 cd web && npm run build                       # 先产出 web/dist
-docker build -f deploy/docker/Dockerfile.merge -t ams:1.0.0 .
+docker build -f deploy/docker/Dockerfile.merge -t ams:1.2.0 .
 # 重建并重启（compose 的 ams 服务默认 8080:8080，单容器同时提供 UI + /api）
 docker compose -p ams -f deploy/compose/docker-compose.yml up -d --no-build ams
 ```
 
-`Dockerfile.merge` 以既有 `ams:1.0.0` 为基底，仅 `COPY web/dist/ /app/web/`，
+`Dockerfile.merge` 以既有 `ams:1.2.0` 为基底，仅 `COPY web/dist/ /app/web/`，
 因此**不会引入后端回归**；旧 web 的孤儿哈希文件无害（浏览器只会请求新产物）。
 
 > 这与「§2.1 前端独立镜像」是两种互斥方案：要么单容器合并镜像（推荐，
@@ -242,3 +242,41 @@ docker compose -p ams -f deploy/compose/docker-compose.yml up -d --no-build ams
 - **容器**：适合编排、弹性、隔离部署（本目录）。
 - **物理机 / systemd**：适合裸金属或内网无容器环境（见 `docs/09` 与
   未来补充的 `deploy/systemd/`）。
+
+---
+
+## 7. 首次部署初始化与部署配置
+
+全新部署（库中无管理员）首次访问会自动进入 `/setup` 向导：
+
+1. **数据库连接** —— 默认与项目同服务器，沿用 compose 的 `AMS_DB_*`；
+   需要外部数据库时在向导里填连接 IP / 端口 / 库名 / 用户名 / 口令，可先「测试连接」。
+2. **创建管理员** —— 账号名称、昵称、密码、邮箱或手机号；首个账号自动获得
+   `owner` + `org_admin`，完成后向导永久关闭。
+3. **邮件服务** —— 可选，配置 SMTP 供找回密码发送验证码；可跳过，之后在
+   「系统运维 → 部署配置」补充。
+
+配置写入持久卷 `/app/config/deployment.env`（`ams-config` 卷）。规则：
+
+- 格式 `KEY=VALUE`，按**第一个 `=`** 切分（口令可含 `=`），值不可含换行；
+- **文件里没有的键继续读环境变量**，因此升级已有部署行为不变；
+- 数据库配置保存后**需重启 `ams-server` 才生效**（`docker compose -p ams restart ams`）；
+- 邮件参数随每封 `.eml` 传递，下一封信即生效；投递循环由镜像 CMD 后台拉起，
+  未启用 `MAIL_ENABLED=true` 时不产生任何网络请求。
+
+管理接口（均需 `system:admin`）：
+
+| 接口 | 作用 |
+| --- | --- |
+| `GET /api/admin/deployment` | 读取当前生效的数据库/邮件配置（口令脱敏） |
+| `PUT /api/admin/deployment/database` | 保存数据库配置 |
+| `DELETE /api/admin/deployment/database` | 清除文件覆盖，恢复环境变量默认 |
+| `PUT /api/admin/deployment/mail` | 保存 SMTP 配置 |
+| `POST /api/admin/deployment/test-db` | 测试数据库连接 |
+| `POST /api/admin/deployment/test-mail` | 发送测试邮件 |
+
+模板见 `deploy/config/deployment.env.example`。
+初始化接口 `GET/POST /api/setup/*` 为公开接口，但完成后自动关闭。
+
+> 历史演示/测试账号已清理；清理脚本 `scripts/cleanup-demo-data.sql` 与
+> `scripts/cleanup-test-accounts.sql` 幂等，可重复执行。

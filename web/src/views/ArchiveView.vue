@@ -823,7 +823,7 @@ function inputType(t: number | string): string {
           @change="reload"
         />
       </div>
-      <button class="btn-ghost" type="button" @click="reload">{{ tr('ArchiveView.711363', '查询') }}</button>
+      <button class="btn-ghost" type="button" @click="reload">{{ tr('ArchiveView.711363', '搜索') }}</button>
       <button class="btn-text" type="button" @click="openRecycle">{{ tr('ArchiveView.64ea87', '回收站') }}</button>
     </div>
 
@@ -837,7 +837,7 @@ function inputType(t: number | string): string {
     </div>
     <div v-else-if="items.length === 0" class="card empty">
       <div class="empty__title">{{ tr('ArchiveView.a5135e', '还没有档案') }}</div>
-      <p class="empty__sub">{{ tr('ArchiveView.f35149', '点击右上角「新建档案」，为当前主体添加第一条记录。') }}</p>
+      <p class="empty__sub">{{ tr('ArchiveView.f35149', '点击右上角「新建档案」，为当前主体添加第一条档案。') }}</p>
     </div>
 
     <div v-else class="list">
@@ -856,7 +856,7 @@ function inputType(t: number | string): string {
             type="checkbox"
             class="item__checkbox"
             :checked="selected.has(String(it.id))"
-            ::aria-label="tr('ArchiveView.888021', '`选择 ${it.title}`')"
+            :aria-label="tr('ArchiveView.888021', '`选择 ${it.title}`')"
             @change="toggleSelect(String(it.id))"
           />
         </label>
@@ -901,7 +901,7 @@ function inputType(t: number | string): string {
         <input
           type="checkbox"
           :checked="allSelected"
-          ::aria-label="allSelected ? tr('ArchiveView.c2eb1c.on', '取消全选') : tr('ArchiveView.c2eb1c.off', '全选本页')"
+          :aria-label="allSelected ? tr('ArchiveView.c2eb1c.on', '取消全选') : tr('ArchiveView.c2eb1c.off', '全选本页')"
           @change="toggleSelectAll"
         />
         已选 {{ selectedCount }} 项
@@ -927,7 +927,7 @@ function inputType(t: number | string): string {
         </select>
       </label>
       <button class="btn-primary" type="button" :disabled="batchEditing" @click="batchEdit">
-        {{ batchEditing ? '提交中…' : '应用修改' }}
+        {{ batchEditing ? '应用中…' : '应用修改' }}
       </button>
       <button class="btn-ghost" type="button" @click="selected = new Set()">取消</button>
       <button
@@ -958,7 +958,7 @@ function inputType(t: number | string): string {
     <!-- 新建 / 编辑 -->
     <AppSheet
       v-model="showForm"
-      ::title="formMode === 'create' ? tr('ArchiveView.a7c2c1.new', '新建档案') : tr('ArchiveView.a7c2c1.edit', '编辑档案')"
+      :title="formMode === 'create' ? tr('ArchiveView.a7c2c1.new', '新建档案') : tr('ArchiveView.a7c2c1.edit', '编辑档案')"
       size="lg"
       :dismissible="!saving"
     >
@@ -1052,7 +1052,7 @@ function inputType(t: number | string): string {
     </AppSheet>
 
     <!-- 详情 -->
-    <AppSheet v-model="showDetail" ::title="detailItem?.title ?? tr('ArchiveView.79abb2', '档案详情')" size="md">
+    <AppSheet v-model="showDetail" :title="detailItem?.title ?? tr('ArchiveView.79abb2', '档案详情')" size="md">
       <template v-if="detailItem">
         <dl class="kv">
           <dt>{{ tr('ArchiveView.435c52', '分类') }}</dt>
@@ -1104,7 +1104,7 @@ function inputType(t: number | string): string {
     <!-- 主体新建 / 编辑 -->
     <AppSheet
       v-model="showSubject"
-      ::title="subjectMode === 'create' ? tr('ArchiveView.70990b.new', '新增主体') : tr('ArchiveView.70990b.manage', '管理主体')"
+      :title="subjectMode === 'create' ? tr('ArchiveView.70990b.new', '新增主体') : tr('ArchiveView.70990b.manage', '管理主体')"
       size="sm"
       :dismissible="!subjectSaving"
     >
@@ -1180,14 +1180,14 @@ function inputType(t: number | string): string {
     <!-- 删除确认 -->
     <AppSheet v-model="showDelete" :title="tr('ArchiveView.298cbe', '移入回收站')" size="sm" :dismissible="!deleting">
       <p class="confirm-text">
-        确定要删除「{{ deleteTarget?.title }}」吗？条目将进入回收站，可在回收站中恢复。
+        确定要将「{{ deleteTarget?.title }}」移入回收站吗？可在回收站中恢复。
       </p>
       <div class="sheet-actions">
         <button class="btn-ghost" type="button" :disabled="deleting" @click="showDelete = false">
           取消
         </button>
         <button class="btn-danger" type="button" :disabled="deleting" @click="confirmDelete">
-          {{ deleting ? '删除中…' : '删除' }}
+          {{ deleting ? '处理中…' : '移入回收站' }}
         </button>
       </div>
     </AppSheet>
@@ -1318,18 +1318,19 @@ function inputType(t: number | string): string {
 .item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
+  gap: var(--sp-4);
   cursor: pointer;
+  /* 长列表滚动时鼠标会连续掠过多张卡片：只过渡颜色这类廉价属性，
+     不再过渡 box-shadow / transform（会触发昂贵的重绘与合成层重建）。 */
   transition:
-    transform var(--spring-fast) var(--ease-apple),
-    box-shadow var(--spring-fast) var(--ease-apple);
+    background-color var(--spring-fast) var(--ease-out-soft),
+    border-color var(--spring-fast) var(--ease-out-soft);
 }
 .item:hover {
-  box-shadow: var(--shadow-md);
+  background: var(--bg-hover);
 }
 .item:active {
-  transform: scale(0.995);
+  background: var(--bg-selected);
 }
 .item--selected {
   border-color: var(--accent);
@@ -1352,49 +1353,64 @@ function inputType(t: number | string): string {
   accent-color: var(--accent);
   cursor: pointer;
 }
+/* ⚠️ 中间内容块必须占据剩余宽度：此前缺 flex:1，justify-content:space-between
+   会把标题+元信息挤到卡片正中，两侧留大片空白、且与复选框/按钮不同基线。 */
+.item__main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .item__title {
   font-weight: 600;
   font-size: var(--font-size-md);
-  margin-bottom: 2px;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+/* 元信息统一为「两枚语义胶囊 + 纯文字」两种语言，字号/间距一致，
+   不再出现灰底、绿描边、纯文字、灰方块四种样式混排。 */
 .item__meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: var(--sp-2);
-  font-size: var(--font-size-sm);
+  gap: 6px var(--sp-2);
+  font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
-.item__time {
-  margin-left: auto;
+.item__meta .badge {
+  font-size: var(--font-size-xs);
+}
+.item__time,
+.item__source,
+.item__status,
+.item__issuer {
+  color: var(--text-muted);
+  font-size: inherit;
 }
 .item__source {
-  padding: 1px 6px;
-  border-radius: var(--g3-sm, 12px);
-  font-size: 11px;
-  background: var(--bg-soft, #f0f1f5);
-  color: var(--text-soft);
+  padding: 0;
+  background: none;
+  border-radius: 0;
 }
 .item__actions {
   display: flex;
-  gap: var(--sp-1);
+  gap: var(--sp-2);
   flex-shrink: 0;
 }
+/* 敏感度与分类胶囊同构：低饱和底 + 语义色文字，不再用 currentColor 描边 */
 .sens {
-  padding: 1px 6px;
-  border-radius: var(--g3-sm, 12px);
-  font-size: 11px;
-  border: 1px solid currentColor;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--g3-pill);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.4;
+  border: none;
 }
-.sens--1 {
-  color: var(--sens-normal);
-}
-.sens--2 {
-  color: var(--sens-sensitive);
-}
-.sens--3 {
-  color: var(--sens-high);
-}
+.sens--1 { color: var(--sens-normal); background: var(--success-soft); }
+.sens--2 { color: var(--sens-sensitive); background: var(--warning-soft); }
+.sens--3 { color: var(--sens-high); background: var(--danger-soft); }
 
 /* 空态 / 翻页 */
 .empty {

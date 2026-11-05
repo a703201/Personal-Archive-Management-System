@@ -68,4 +68,9 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -fSs http://127.0.0.1:8080/api/health || exit 1
 
-CMD ["/app/bin/ams-server"]
+# SMTP 投递循环：随镜像分发，未启用邮件时脚本低频等待、不产生任何网络请求。
+# 后台拉起后再 exec 后端主进程，保证 PID 1 仍是 ams-server（信号/健康检查正常）。
+COPY deploy/scripts/mail-spool.sh /app/scripts/mail-spool.sh
+RUN chmod +x /app/scripts/mail-spool.sh && mkdir -p /app/data-mail/spool
+
+CMD ["/bin/bash", "-c", "/app/scripts/mail-spool.sh & exec /app/bin/ams-server"]

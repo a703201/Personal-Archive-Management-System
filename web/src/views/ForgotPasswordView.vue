@@ -168,8 +168,9 @@ function goLogin(): void {
 
 <template>
   <div class="auth">
-    <aside class="auth__hero">
+    <aside class="auth__hero stagger">
       <div class="auth__brand">AMS</div>
+      <p class="auth__eyebrow">ACCOUNT RECOVERY</p>
       <h1 class="auth__headline">忘记口令？<br />一步找回。</h1>
       <p class="auth__tagline">验证身份后重设，全程无需联系人工。</p>
       <ul class="auth__points">
@@ -278,7 +279,7 @@ function goLogin(): void {
           <p class="hint-block">{{ t('ForgotPasswordView.2d7650', '重置成功后，该账号在所有设备上的登录状态将立即失效，需重新登录。') }}</p>
           <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
-            {{ busy ? '提交中…' : '重置口令' }}
+            {{ busy ? '重置中…' : '重置口令' }}
           </button>
           <div class="fgt-row">
             <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
@@ -292,7 +293,7 @@ function goLogin(): void {
           <p class="hint-block">
             为了安全，原会话已全部下线。请使用新口令重新登录；若账号已启用双因子，登录时还需输入动态码。
           </p>
-          <button class="btn-primary auth__submit" type="button" @click="goLogin">{{ t('ForgotPasswordView.6c01b0', '去登录') }}</button>
+          <button class="btn-primary auth__submit" type="button" @click="goLogin">{{ t('ForgotPasswordView.6c01b0', '返回登录') }}</button>
         </div>
 
         <p v-if="step < 4" class="auth__switch">
@@ -304,9 +305,6 @@ function goLogin(): void {
 </template>
 
 <style scoped>
-.auth__card {
-  animation: ams-enter-rise 0.5s var(--ease-apple) both;
-}
 .auth__submit {
   margin-top: var(--sp-2);
   width: 100%;

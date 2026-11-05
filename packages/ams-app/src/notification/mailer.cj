@@ -21,6 +21,7 @@ import std.collection.*
 
 import ams.data.repo.*
 import ams.kernel.log.*
+import ams.storage.*
 
 /**
  * 邮件发送器。
@@ -30,15 +31,19 @@ public class Mailer {
     private let configRepo: ConfigRepo
     /** 短信 provider（FR-NTF-005）：默认 Noop，sms.enabled=true 时启用。 */
     private let smsProvider: SmsProvider
+    /** SMTP 暂存（默认禁用，行为与旧版一致；启用后由 mail-spool.sh 真实投递）。 */
+    private let spool: MailSpool
 
     public init(
         emailRepo: EmailRepo,
         configRepo: ConfigRepo,
-        smsProvider!: SmsProvider = NoopSmsProvider()
+        smsProvider!: SmsProvider = NoopSmsProvider(),
+        spool!: MailSpool = MailSpool.disabled()
     ) {
         this.emailRepo = emailRepo
         this.configRepo = configRepo
         this.smsProvider = smsProvider
+        this.spool = spool
     }
 
     /**
@@ -53,6 +58,9 @@ public class Mailer {
             return 0
         }
         let id = this.emailRepo.enqueue(toAddr, subject, body)
+        // 启用邮件服务时同时写入 .eml，由容器内 mail-spool.sh 走真实 SMTP 投递。
+        // 失败不影响入队（邮件仍在 outbox 可查），主流程绝不因外部 SMTP 阻塞。
+        this.spool.enqueue(toAddr, subject, body)
         let enabled = this.configRepo.getValue("mail", "enabled", "false") == "true"
         // 控制台投递（开发/联调开关）：mail.console=true 时把正文打进日志，
         // 作用等同 Django 的 console email backend —— 本地没有 SMTP 时，

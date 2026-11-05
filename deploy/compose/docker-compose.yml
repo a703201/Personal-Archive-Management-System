@@ -10,7 +10,7 @@
 # 启动（单条命令，产生单个分组）：
 #   docker compose -p ams -f deploy/compose/docker-compose.yml up -d
 #   # 访问 http://localhost:8080  健康检查 http://localhost:8080/api/health
-#   # 注：单一 ams 容器同时托管新前端(ams:1.0.0 内 /app/web)与 /api；前端已并入镜像。
+#   # 注：单一 ams 容器同时托管新前端(ams:1.2.0 内 /app/web)与 /api；前端已并入镜像。
 #
 # 数据保护：
 #   - 数据库数据在命名卷 ams_ogdata（external，不随容器删除而消失），
@@ -93,7 +93,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.prebuilt
-    image: ams:1.0.0
+    image: ams:1.2.0
     container_name: ams-server
     depends_on:
       # 等迁移任务成功跑完再起应用（对应 returnguard 的 app 依赖 init）
@@ -113,6 +113,10 @@ services:
       AMS_TOKEN_SECRET: "${AMS_TOKEN_SECRET:-change-me-in-production-at-least-32-bytes}"
       AMS_KEK: "${AMS_KEK:-change-me-in-production}"
       AMS_WEB_DIR: /app/web
+      # 部署配置文件目录（持久卷，向导与「部署配置」页写入 deployment.env）
+      AMS_CONFIG_DIR: /app/config
+      # SMTP 投递暂存目录（mail-spool.sh 监听）
+      AMS_MAIL_SPOOL_DIR: /app/data-mail/spool
       # 附件 / 导出 / 备份的落盘目录（容器内），建议挂卷持久化
       AMS_STORAGE_DIR: /app/data-attachments
       AMS_EXPORT_DIR: /app/data-exports
@@ -123,6 +127,7 @@ services:
       - ams-config:/app/config
       - ams-data:/app/data-attachments
       - ams-exports:/app/data-exports
+      - ams-mail:/app/data-mail
     networks:
       - ams-net
     healthcheck:
@@ -148,3 +153,4 @@ volumes:
   ams-config:
   ams-data:
   ams-exports:
+  ams-mail:
