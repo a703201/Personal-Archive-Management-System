@@ -242,3 +242,41 @@ docker compose -p ams -f deploy/compose/docker-compose.yml up -d --no-build ams
 - **容器**：适合编排、弹性、隔离部署（本目录）。
 - **物理机 / systemd**：适合裸金属或内网无容器环境（见 `docs/09` 与
   未来补充的 `deploy/systemd/`）。
+
+---
+
+## 7. 首次部署初始化与部署配置
+
+全新部署（库中无管理员）首次访问会自动进入 `/setup` 向导：
+
+1. **数据库连接** —— 默认与项目同服务器，沿用 compose 的 `AMS_DB_*`；
+   需要外部数据库时在向导里填连接 IP / 端口 / 库名 / 用户名 / 口令，可先「测试连接」。
+2. **创建管理员** —— 账号名称、昵称、密码、邮箱或手机号；首个账号自动获得
+   `owner` + `org_admin`，完成后向导永久关闭。
+3. **邮件服务** —— 可选，配置 SMTP 供找回密码发送验证码；可跳过，之后在
+   「系统运维 → 部署配置」补充。
+
+配置写入持久卷 `/app/config/deployment.env`（`ams-config` 卷）。规则：
+
+- 格式 `KEY=VALUE`，按**第一个 `=`** 切分（口令可含 `=`），值不可含换行；
+- **文件里没有的键继续读环境变量**，因此升级已有部署行为不变；
+- 数据库配置保存后**需重启 `ams-server` 才生效**（`docker compose -p ams restart ams`）；
+- 邮件参数随每封 `.eml` 传递，下一封信即生效；投递循环由镜像 CMD 后台拉起，
+  未启用 `MAIL_ENABLED=true` 时不产生任何网络请求。
+
+管理接口（均需 `system:admin`）：
+
+| 接口 | 作用 |
+| --- | --- |
+| `GET /api/admin/deployment` | 读取当前生效的数据库/邮件配置（口令脱敏） |
+| `PUT /api/admin/deployment/database` | 保存数据库配置 |
+| `DELETE /api/admin/deployment/database` | 清除文件覆盖，恢复环境变量默认 |
+| `PUT /api/admin/deployment/mail` | 保存 SMTP 配置 |
+| `POST /api/admin/deployment/test-db` | 测试数据库连接 |
+| `POST /api/admin/deployment/test-mail` | 发送测试邮件 |
+
+模板见 `deploy/config/deployment.env.example`。
+初始化接口 `GET/POST /api/setup/*` 为公开接口，但完成后自动关闭。
+
+> 历史演示/测试账号已清理；清理脚本 `scripts/cleanup-demo-data.sql` 与
+> `scripts/cleanup-test-accounts.sql` 幂等，可重复执行。

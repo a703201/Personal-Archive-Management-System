@@ -98,8 +98,11 @@ public class ServerConfig {
      * 从环境变量装载配置。
      */
     public static func load(): ServerConfig {
-        let host = getVariable("AMS_HTTP_HOST") ?? "127.0.0.1"
-        let portStr = getVariable("AMS_HTTP_PORT") ?? "8080"
+        // 部署配置（/app/config/deployment.env）优先于环境变量；文件里没有的键
+        // 继续走环境变量，保证既有部署零回归。
+        let store = DeploymentStore()
+        let host = store.resolve("HTTP_HOST", "AMS_HTTP_HOST", "127.0.0.1")
+        let portStr = store.resolve("HTTP_PORT", "AMS_HTTP_PORT", "8080")
         // 端口解析：先校验全为数字，再累加
         //（注意：不能在校验和累加里各写一遍循环，否则会累加两次）
         var port: Int64 = 0
@@ -116,13 +119,13 @@ public class ServerConfig {
         }
 
         // 口令：优先环境变量，其次本地默认值
-        let dbPass = getVariable("AMS_DB_PASSWORD") ?? "Ams@Gauss2026"
+        let dbPass = store.resolve("DB_PASSWORD", "AMS_DB_PASSWORD", "Ams@Gauss2026")
         // [FR-AUD-006] 受限运行时账号：
         //   生产应通过 AMS_DB_APP_USER / AMS_DB_APP_PASSWORD 让应用以「受限角色」连接，
         //   该角色业务表全 DML、审计表仅 SELECT/INSERT（见 006_audit_restricted_role.sql）。
         //   未配置时回退到管理账号（本地开发兼容）。
         let appUser = getVariable("AMS_DB_APP_USER")
-        let dbUser = appUser ?? (getVariable("AMS_DB_USER") ?? "gaussdb")
+        let dbUser = appUser ?? store.resolve("DB_USER", "AMS_DB_USER", "gaussdb")
         let dbRuntimePass = match (appUser) {
             case Some(_) => getVariable("AMS_DB_APP_PASSWORD") ?? dbPass
             case None => dbPass
@@ -131,11 +134,11 @@ public class ServerConfig {
         // 端口：容器部署时 openGauss 在 compose 网络内是 5432，
         // 物理机本地开发默认 15432。此前此处硬编码 15432，导致
         // AMS_DB_PORT 被静默忽略（容器内永远连不上 db:5432）。
-        let dbPort = parseIntEnv(getVariable("AMS_DB_PORT") ?? "15432", 15432)
+        let dbPort = parseIntEnv(store.resolve("DB_PORT", "AMS_DB_PORT", "15432"), 15432)
         let db = DbConfig(
-            getVariable("AMS_DB_HOST") ?? "127.0.0.1",
+            store.resolve("DB_HOST", "AMS_DB_HOST", "127.0.0.1"),
             dbPort,
-            getVariable("AMS_DB_NAME") ?? "ams",
+            store.resolve("DB_NAME", "AMS_DB_NAME", "ams"),
             dbUser,
             dbRuntimePass,
             sslMode: "disable"
@@ -177,6 +180,19 @@ main(): Int64 {
 
     // ---- 2. 配置 ----
     let config = ServerConfig.load()
+
+    // ---- 2.1 部署期配置（初始化向导 / 部署配置管理页共用同一份持久文件）----
+    let deployStore = DeploymentStore()
+    let mailSpool = MailSpool(
+        getVariable("AMS_MAIL_SPOOL_DIR") ?? "./data-mail/spool",
+        deployStore.resolve("MAIL_ENABLED", "AMS_MAIL_ENABLED", "false") == "true",
+        deployStore.resolve("MAIL_HOST", "AMS_MAIL_HOST", ""),
+        deployStore.resolve("MAIL_PORT", "AMS_MAIL_PORT", "465"),
+        deployStore.resolve("MAIL_USER", "AMS_MAIL_USER", ""),
+        deployStore.resolve("MAIL_PASSWORD", "AMS_MAIL_PASSWORD", ""),
+        deployStore.resolve("MAIL_FROM", "AMS_MAIL_FROM", ""),
+        deployStore.resolve("MAIL_SECURE", "AMS_MAIL_SECURE", "ssl")
+    )
 
     // ---- 3. ID 生成器 ----
     Ids.setup(1)
@@ -245,7 +261,7 @@ main(): Int64 {
     let emailRepo = EmailRepo(db)
     // ---- FR-NTF-005：短信 provider（默认 Noop，sms.enabled=true 时启用）----
     let smsProvider = makeSmsProvider(configRepo)
-    let mailer = Mailer(emailRepo, configRepo, smsProvider: smsProvider)
+    let mailer = Mailer(emailRepo, configRepo, smsProvider: smsProvider, spool: mailSpool)
 
     // ---- 自助找回口令（FR-AUTH-008）：验证码 → 一次性令牌 → 强制下线 ----
     let resetRepo = PasswordResetRepo(db)
@@ -293,6 +309,9 @@ main(): Int64 {
     NotifyRoutes(ConfigRepo(db)).register(router)
     // 多语言框架（FR-CFG-009）：公开只读的语言清单出口。
     I18nRoutes().register(router)
+    // 首次部署向导（公开、仅初始化前可用）+ 部署配置管理（system:admin）
+    SetupRoutes(userRepo, roleRepo, authService, deployStore, spool: mailSpool).register(router)
+    DeploymentRoutes(deployStore, mailSpool).register(router)
     AuthRoutes(authService, resetService: passwordResetService).register(router)
 
     ManagementRoutes(

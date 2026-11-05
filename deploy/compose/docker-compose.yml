@@ -113,6 +113,10 @@ services:
       AMS_TOKEN_SECRET: "${AMS_TOKEN_SECRET:-change-me-in-production-at-least-32-bytes}"
       AMS_KEK: "${AMS_KEK:-change-me-in-production}"
       AMS_WEB_DIR: /app/web
+      # 部署配置文件目录（持久卷，向导与「部署配置」页写入 deployment.env）
+      AMS_CONFIG_DIR: /app/config
+      # SMTP 投递暂存目录（mail-spool.sh 监听）
+      AMS_MAIL_SPOOL_DIR: /app/data-mail/spool
       # 附件 / 导出 / 备份的落盘目录（容器内），建议挂卷持久化
       AMS_STORAGE_DIR: /app/data-attachments
       AMS_EXPORT_DIR: /app/data-exports
@@ -123,6 +127,7 @@ services:
       - ams-config:/app/config
       - ams-data:/app/data-attachments
       - ams-exports:/app/data-exports
+      - ams-mail:/app/data-mail
     networks:
       - ams-net
     healthcheck:
@@ -148,3 +153,4 @@ volumes:
   ams-config:
   ams-data:
   ams-exports:
+  ams-mail:
