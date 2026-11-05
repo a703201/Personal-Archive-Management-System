@@ -311,7 +311,7 @@ onMounted(load)
     </AppSheet>
 
     <!-- 权限设置 -->
-    <AppSheet v-model="showPerms" ::title="`权限设置 · ${permTarget?.name ?? ''}`" size="lg">
+    <AppSheet v-model="showPerms" :title="`权限设置 · ${permTarget?.name ?? ''}`" size="lg">
       <div v-if="isBuiltin(permTarget)" class="notice">
         内置角色由系统管理，此处仅展示权限目录（只读）。如需调整，请新建自定义角色后分配。
       </div>
@@ -367,7 +367,7 @@ onMounted(load)
     <!-- 权限预览（FR-ACL-013 · 方案 A） -->
     <AppSheet
       v-model="showPreview"
-      ::title="`权限预览 · ${previewTarget?.name ?? ''}`"
+      :title="`权限预览 · ${previewTarget?.name ?? ''}`"
       size="md"
     >
       <div class="notice">
@@ -633,7 +633,7 @@ onMounted(load)
 .tag-sens {
   background: var(--sens-high);
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 6px;
   border-radius: var(--g3-pill);
   margin-left: 4px;

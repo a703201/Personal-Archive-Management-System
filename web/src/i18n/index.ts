@@ -130,10 +130,19 @@ export function t(key: string, fallback?: string): string {
   // 【关键】空串必须视为「未翻译」：codemod 产出的 en 目录默认全为空串，
   // 若直接返回，界面会大片空白（原实现用 ?? 只判 null/undefined，会踩这个坑）。
   const v = dict[key]
-  if (typeof v === 'string' && v.trim() !== '') return v
+  if (typeof v === 'string' && v.trim() !== '') {
+    // codemod 会把 `...${expr}...` 模板字符串原样抽成词条，这类「死译文」
+    // 在浏览器里不会求值，界面会显示字面量 `${...}`（健康看板运行时长即此坑）。
+    // 调用点传入的 fallback 是已插值好的真实文案，优先回退给它。
+    // 动态文案如需完整多语化，应改用 {name} 占位符 + 调用点 replace（见 fmtUptime）。
+    if (v.includes('${') && fallback && fallback.trim() !== '') {
+      return fallback
+    }
+    return v
+  }
   if (fallback && fallback.trim() !== '') return fallback
   const base = catalogs[defaultLocale][key]
-  if (typeof base === 'string' && base.trim() !== '') return base
+  if (typeof base === 'string' && base.trim() !== '' && !base.includes('${')) return base
   return key
 }
 

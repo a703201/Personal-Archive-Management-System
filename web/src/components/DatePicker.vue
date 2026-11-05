@@ -266,13 +266,13 @@ onBeforeUnmount(() => {
     </button>
 
     <Transition name="dp-pop">
-      <div v-if="open" class="dp__panel" role="dialog" ::aria-label="t('dp.dialog', '选择日期')">
+      <div v-if="open" class="dp__panel" role="dialog" :aria-label="t('dp.dialog', '选择日期')">
         <div class="dp__head">
           <button
             v-if="view === 'day'"
             type="button"
             class="dp__nav"
-            ::aria-label="t('dp.prevMonth', '上一月')"
+            :aria-label="t('dp.prevMonth', '上一月')"
             @click="shiftMonth(-1)"
           >
             ‹
@@ -281,7 +281,7 @@ onBeforeUnmount(() => {
             v-else-if="view === 'month'"
             type="button"
             class="dp__nav"
-            ::aria-label="t('dp.prevYear', '上一年')"
+            :aria-label="t('dp.prevYear', '上一年')"
             @click="cursorYear = cursorYear - 1"
           >
             ‹
@@ -296,7 +296,7 @@ onBeforeUnmount(() => {
             v-if="view === 'day'"
             type="button"
             class="dp__nav"
-            ::aria-label="t('dp.nextMonth', '下一月')"
+            :aria-label="t('dp.nextMonth', '下一月')"
             @click="shiftMonth(1)"
           >
             ›
@@ -305,7 +305,7 @@ onBeforeUnmount(() => {
             v-else-if="view === 'month'"
             type="button"
             class="dp__nav"
-            ::aria-label="t('dp.nextYear', '下一年')"
+            :aria-label="t('dp.nextYear', '下一年')"
             @click="cursorYear = cursorYear + 1"
           >
             ›

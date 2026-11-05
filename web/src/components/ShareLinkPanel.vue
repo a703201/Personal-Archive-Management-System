@@ -359,7 +359,7 @@ defineExpose({ load })
 }
 
 .chip {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 8px;
   border-radius: var(--g3-pill);
   font-weight: 600;

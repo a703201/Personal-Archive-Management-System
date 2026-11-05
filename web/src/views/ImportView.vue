@@ -1496,7 +1496,7 @@ code {
   line-height: 1.1;
 }
 .stat__k {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .stat--ok .stat__n {
@@ -1521,7 +1521,7 @@ code {
 }
 .tag {
   display: inline-block;
-  font-size: 11px;
+  font-size: 12px;
   padding: 2px 8px;
   border-radius: 999px;
   background: var(--bg-hover);

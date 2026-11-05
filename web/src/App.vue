@@ -10,9 +10,26 @@
  *
  * 顶栏常驻全局搜索入口与主题开关（FR-UX-005 / FR-UX-002）。
  */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { t } from './i18n'
 import { RouterLink, RouterView, useRoute } from 'vue-router'
+// 顶栏滚动状态：内容滚动后才浮现极淡的分界线（Apple 用边缘效果替代硬边框）。
+// 高刷屏下 scroll 事件可达 120~144 次/秒，用 rAF 合并到每帧一次，且只在
+// 布尔值真正翻转时才写 ref（避免无意义的响应式触发）。
+const mainEl = ref<HTMLElement | null>(null)
+const scrolled = ref(false)
+let scrollRaf = 0
+function onMainScroll(): void {
+  if (scrollRaf) return
+  scrollRaf = window.requestAnimationFrame(() => {
+    scrollRaf = 0
+    const next = (mainEl.value?.scrollTop ?? 0) > 4
+    if (next !== scrolled.value) scrolled.value = next
+  })
+}
+onBeforeUnmount(() => {
+  if (scrollRaf) window.cancelAnimationFrame(scrollRaf)
+})
 import GlobalSearch from './components/GlobalSearch.vue'
 import ToastHost from './components/ToastHost.vue'
 import Onboarding from './components/Onboarding.vue'
@@ -98,7 +115,7 @@ onMounted(async () => {
     </aside>
 
     <div class="app-body">
-      <header class="topbar">
+      <header class="topbar" :class="{ 'is-scrolled': scrolled }">
         <!-- 移动端顶部导航 -->
         <nav class="nav nav--inline">
           <RouterLink class="nav__item" to="/archive">{{ t('App.3ca928', '档案') }}</RouterLink>
@@ -121,19 +138,28 @@ onMounted(async () => {
           <RouterLink
             to="/notifications"
             class="bell"
-            ::aria-label="`通知（${unread} 条未读）`"
+            :aria-label="`通知（${unread} 条未读）`"
           >
-            <span class="bell__icon" aria-hidden="true">🔔</span>
+            <svg class="bell__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+              <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+            </svg>
             <span v-if="unread > 0" class="bell__badge">{{ unread > 99 ? '99+' : unread }}</span>
           </RouterLink>
           <GlobalSearch />
           <button
             class="theme-btn"
             type="button"
-            ::aria-label="resolved === 'dark' ? '切换到浅色' : '切换到深色'"
+            :aria-label="resolved === 'dark' ? '切换到浅色' : '切换到深色'"
             @click="toggle"
           >
-            {{ resolved === 'dark' ? '☀' : '☾' }}
+            <svg v-if="resolved === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="4" />
+              <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z" />
+            </svg>
           </button>
           <select
             class="theme-select"
@@ -156,13 +182,27 @@ onMounted(async () => {
         </div>
       </header>
 
-      <main id="main-content" tabindex="-1" class="app-main">
-        <RouterView />
+      <main
+        id="main-content"
+        ref="mainEl"
+        tabindex="-1"
+        class="app-main"
+        @scroll.passive="onMainScroll"
+      >
+        <RouterView v-slot="{ Component, route: currentRoute }">
+          <Transition name="route" mode="out-in">
+            <component :is="Component" :key="currentRoute.path" />
+          </Transition>
+        </RouterView>
       </main>
     </div>
   </div>
   <div v-else class="login-only">
-    <RouterView />
+    <RouterView v-slot="{ Component, route: currentRoute }">
+      <Transition name="auth-fade" mode="out-in">
+        <component :is="Component" :key="currentRoute.path" />
+      </Transition>
+    </RouterView>
   </div>
   <ToastHost />
   <Onboarding />
@@ -182,16 +222,15 @@ onMounted(async () => {
 }
 
 .topbar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  /* Apple 材质：半透明玻璃层 + 模糊，承载层级（见 apple-design §12）。
-     顶栏已脱离滚动层（.app-main 内层滚动），不再随内容滚动逐帧重算模糊。 */
-  background: var(--material-toolbar);
-  backdrop-filter: blur(var(--material-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(180%);
-  border-bottom: 1px solid var(--border-subtle);
+  padding: var(--sp-3) var(--sp-5);
+  /* 顶栏用不透明实底：backdrop-filter 会把它抬进合成层，
+     层内小字（导航、搜索框、下拉）会失去 ClearType 而发虚。
+     层级改由实底色 + 滚动后浮现的极淡边缘线表达（见 motion.css ::after）。 */
+  background: var(--bg-surface);
   flex-wrap: wrap;
 }
 
@@ -206,26 +245,26 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: var(--sp-4) var(--sp-4) var(--sp-5);
+  padding: var(--sp-6) var(--sp-5) var(--sp-6);
 }
 .brand__mark {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   flex: none;
-  border-radius: 7px;
-  background: var(--accent);
-  color: #fff;
+  border-radius: 9px;
+  background: var(--text-primary);
+  color: var(--bg-surface);
   display: grid;
   place-items: center;
   font-weight: 700;
-  font-size: 14px;
-  letter-spacing: 0.02em;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  box-shadow: none;
 }
 .brand__name {
   font-weight: 700;
   font-size: var(--font-size-lg);
-  letter-spacing: 0.02em;
+  letter-spacing: -0.022em;
   color: var(--text-primary);
 }
 
@@ -244,7 +283,7 @@ onMounted(async () => {
 /* 分组标题：小字号 + 略正字距（apple-design §15：小字不收紧） */
 .nav__group {
   margin: var(--sp-3) var(--sp-3) var(--sp-1);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -256,11 +295,13 @@ onMounted(async () => {
 
 .nav__item {
   padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--g3-xs);
+  border-radius: var(--g3-sm);
   color: var(--text-secondary);
   font-size: var(--font-size-sm);
-  font-weight: 500;
-  transition: background-color var(--spring-fast) ease, color var(--spring-fast) ease;
+  /* Apple 字重阶梯只用 400 / 600 / 700，不用 500 */
+  font-weight: 400;
+  transition: background-color var(--spring-fast) var(--ease-out-soft),
+    color var(--spring-fast) var(--ease-out-soft);
 }
 .nav__item:hover {
   background: var(--bg-hover);
@@ -275,7 +316,7 @@ onMounted(async () => {
   height: 18px;
   padding: 0 5px;
   margin-left: var(--sp-1);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
   color: #fff;
@@ -293,16 +334,18 @@ onMounted(async () => {
   height: 38px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
-  border-radius: var(--radius-md);
+  border-radius: var(--g3-pill);
   cursor: pointer;
   color: var(--text-secondary);
 }
 .bell:hover {
   background: var(--bg-hover);
 }
+/* 单色线性图标（SF Symbols 风格），替代彩色 emoji */
 .bell__icon {
-  font-size: 16px;
-  line-height: 1;
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 .bell__badge {
   position: absolute;
@@ -314,7 +357,7 @@ onMounted(async () => {
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
   color: #fff;
@@ -329,22 +372,31 @@ onMounted(async () => {
 }
 
 .theme-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   color: var(--text-primary);
-  border-radius: var(--radius-md);
-  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--g3-pill);
   cursor: pointer;
 }
 .theme-btn:hover {
   background: var(--bg-hover);
+}
+.theme-btn svg {
+  width: 18px;
+  height: 18px;
+  display: block;
 }
 
 .theme-select {
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
   color: var(--text-primary);
-  border-radius: var(--radius-md);
+  border-radius: var(--g3-sm);
   padding: var(--sp-2);
   font-size: var(--font-size-sm);
 }
@@ -354,11 +406,10 @@ onMounted(async () => {
   .sidebar {
     display: flex;
     flex-direction: column;
-    width: 220px;
-    background: var(--material-sidebar);
-    backdrop-filter: blur(var(--material-blur)) saturate(180%);
-    -webkit-backdrop-filter: blur(var(--material-blur)) saturate(180%);
-    border-right: 1px solid var(--border-subtle);
+    width: 240px;
+    /* 实底侧栏：同上，避免整列导航文字被抬进合成层后走灰度抗锯齿 */
+    background: var(--bg-surface);
+    border-right: 1px solid var(--hairline);
     flex-shrink: 0;
   }
   .nav--inline {

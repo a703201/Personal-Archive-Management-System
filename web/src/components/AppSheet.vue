@@ -3,7 +3,9 @@
  * AppSheet —— 通用浮层（Modal / Sheet）。
  *
  * Apple 质感要点（见 apple-design 技能 + docs §9.8）：
- *   - 材质：半透明玻璃层（backdrop-filter 模糊）+ 更强阴影，承载层级
+ *   - 材质：不透明实底 + 更强阴影承载层级。**不用 backdrop-filter**：
+ *     它会把面板抬进合成层，层内表单小字失去 ClearType 而发虚/锯齿，
+ *     且长表单滚动时逐帧重算模糊造成卡顿。
  *   - 圆角：统一 G3 scale（--g3-lg）
  *     注：Web 无标准 corner-style 属性，圆角实为圆弧（G1 连续）；
  *     真正的连续曲率需 SVG mask 等方案，属「美观 vs 性能」权衡，暂不全局启用。
@@ -153,8 +155,8 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   background: var(--material-scrim);
-  backdrop-filter: blur(2px);
-  -webkit-backdrop-filter: blur(2px);
+  /* 不在遮罩上做 blur：它是覆盖全屏的固定层，内部滚动时 Chrome 会连带
+     重算背景模糊，是长表单「滑动卡、钝」的主要来源之一。 */
 }
 
 .sheet-panel {
@@ -164,9 +166,9 @@ onBeforeUnmount(() => {
   max-height: 86vh;
   display: flex;
   flex-direction: column;
-  background: var(--material-sheet);
-  backdrop-filter: blur(var(--material-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(180%);
+  /* 面板内是高频滚动的长表单：用不透明实底替代 backdrop-filter。
+     Apple 的 modal 材质本就该比顶栏更「实」，且能避免每帧重算模糊。 */
+  background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--g3-lg);
   box-shadow: var(--shadow-pop);
@@ -177,11 +179,13 @@ onBeforeUnmount(() => {
 .sheet-root--lg .sheet-panel { max-width: 760px; }
 
 .sheet-head {
+  flex: none;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-4) var(--sp-5);
   border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
 }
 .sheet-title {
   margin: 0;
@@ -204,16 +208,28 @@ onBeforeUnmount(() => {
 .sheet-close:active { transform: scale(0.92); }
 
 .sheet-body {
+  /* ⚠️ flex 列布局里子项默认 min-height:auto，不会收缩；缺 flex/min-height:0
+     时内容会把 panel 撑过 max-height，底部 footer 被 overflow:hidden 裁掉
+     （表现为「保存按钮只露一半」），且滚动落不到这个容器上。 */
+  flex: 1 1 auto;
+  min-height: 0;
   padding: var(--sp-5);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  /* ⚠️ 这里刻意不加 transform:translateZ(0)。滚动流畅已由
+     「去掉 backdrop-filter + 头尾固定 + content-visibility」保证；
+     把滚动容器抬进合成层会让其中所有表单文字失去 ClearType、
+     改用灰度抗锯齿（小字明显发虚/锯齿），代价大于收益。 */
 }
 
 .sheet-foot {
+  flex: none;
   display: flex;
   justify-content: flex-end;
   gap: var(--sp-3);
   padding: var(--sp-4) var(--sp-5);
-  border-top: 1px solid var(--border-subtle);
+  border-top: 1px solid var(--hairline);
   background: var(--bg-surface);
 }
 

@@ -72,7 +72,7 @@ onMounted(load)
 
     <template v-else-if="data">
       <!-- 关键指标 -->
-      <div class="grid">
+      <div class="grid" v-reveal>
         <div class="card stat">
           <div class="stat__label">{{ t('OverviewView.cf2efb', '档案总数') }}</div>
           <div class="stat__value">{{ data.total }}</div>
@@ -95,7 +95,7 @@ onMounted(load)
 
       <!-- 分类分布 -->
       <h2 class="section-title">{{ t('OverviewView.245475', '分类分布') }}</h2>
-      <div class="card">
+      <div class="card" v-reveal="80">
         <p v-if="topCategories.length === 0" class="hint">{{ t('OverviewView.2e545d', '还没有档案，先去创建一条吧。') }}</p>
         <ul v-else class="bars">
           <li v-for="c in topCategories" :key="c.category" class="bar">
@@ -113,7 +113,7 @@ onMounted(load)
 
       <!-- 最近更新 -->
       <h2 class="section-title">{{ t('OverviewView.80920c', '最近更新') }}</h2>
-      <div class="card">
+      <div class="card" v-reveal="120">
         <p v-if="data.recent.length === 0" class="hint">{{ t('OverviewView.4952df', '暂无更新记录。') }}</p>
         <ul v-else class="recent">
           <li v-for="it in data.recent" :key="it.id" class="recent__row">
@@ -155,7 +155,7 @@ onMounted(load)
 }
 .stat__value--sm {
   font-size: var(--font-size-md);
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .bars,

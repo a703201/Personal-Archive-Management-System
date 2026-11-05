@@ -303,12 +303,12 @@ onMounted(load)
   display: inline-block;
   padding: 1px var(--sp-2);
   border-radius: var(--g3-pill);
-  font-size: 11px;
+  font-size: 12px;
 }
 .tag-imp {
   background: color-mix(in srgb, var(--warning) 16%, transparent);
   color: var(--warning);
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 6px;
   border-radius: var(--g3-pill);
 }

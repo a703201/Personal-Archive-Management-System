@@ -462,7 +462,7 @@ onMounted(() => {
     </AppSheet>
 
     <!-- 角色管理 -->
-    <AppSheet v-model="showRoles" ::title="`角色管理 · ${roleTarget?.username ?? ''}`" size="lg">
+    <AppSheet v-model="showRoles" :title="`角色管理 · ${roleTarget?.username ?? ''}`" size="lg">
       <div class="roles">
         <div class="roles__col">
           <h3 class="roles__h">{{ t('UsersView.9723b3', '当前角色') }}</h3>

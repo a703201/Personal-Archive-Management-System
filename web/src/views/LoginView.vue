@@ -100,11 +100,12 @@ async function onSubmit(): Promise<void> {
 
 <template>
   <div class="auth">
-    <aside class="auth__hero">
+    <aside class="auth__hero stagger">
       <div class="auth__brand">
         <img v-if="branding.logoUrl" :src="branding.logoUrl" :alt="branding.brandName" />
         <span v-else>{{ branding.brandName }}</span>
       </div>
+      <p class="auth__eyebrow">PRIVATE ARCHIVE</p>
       <h1 class="auth__headline">你的私人档案，<br />安全归位。</h1>
       <p class="auth__tagline">证件、学历、资产、健康 —— 一处归集，端到端加密。</p>
       <ul class="auth__points">
@@ -181,9 +182,6 @@ async function onSubmit(): Promise<void> {
 </template>
 
 <style scoped>
-.auth__card {
-  animation: ams-enter-rise 0.5s var(--ease-apple) both;
-}
 .notice {
   margin: 0 0 var(--sp-4);
   padding: 10px 12px;

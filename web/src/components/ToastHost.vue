@@ -73,9 +73,8 @@ const ICONS: Record<string, string> = {
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
-  background: var(--material-sheet);
-  backdrop-filter: blur(var(--material-blur)) saturate(180%);
-  -webkit-backdrop-filter: blur(var(--material-blur)) saturate(180%);
+  /* 实底：Toast 是小字提示，不能因 backdrop-filter 被抬进合成层 */
+  background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--g3-md);
   box-shadow: var(--shadow-pop);

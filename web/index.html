@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AMS · 个人档案管理系统</title>
+    <!-- 自托管 MiSans 可变字体（150–700）：按 unicode-range 分片按需加载，
+         首片为最常用中文+标点，预加载避免首屏字形回退闪烁。离线/Docker 可用。 -->
+    <link rel="preload" href="/fonts/misans/MiSansVF.16240990c6f7f7dd.0.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/fonts/misans/misans.css" />
     <script>
       /* 无闪烁主题：在首帧绘制前根据已保存偏好设置 data-theme，避免浅色闪烁（FR-UX-002） */
       (function () {

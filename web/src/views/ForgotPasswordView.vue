@@ -168,8 +168,9 @@ function goLogin(): void {
 
 <template>
   <div class="auth">
-    <aside class="auth__hero">
+    <aside class="auth__hero stagger">
       <div class="auth__brand">AMS</div>
+      <p class="auth__eyebrow">ACCOUNT RECOVERY</p>
       <h1 class="auth__headline">忘记口令？<br />一步找回。</h1>
       <p class="auth__tagline">验证身份后重设，全程无需联系人工。</p>
       <ul class="auth__points">
@@ -304,9 +305,6 @@ function goLogin(): void {
 </template>
 
 <style scoped>
-.auth__card {
-  animation: ams-enter-rise 0.5s var(--ease-apple) both;
-}
 .auth__submit {
   margin-top: var(--sp-2);
   width: 100%;

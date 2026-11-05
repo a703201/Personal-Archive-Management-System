@@ -836,7 +836,7 @@ async function changePassword(): Promise<void> {
   border-radius: 8px;
   background: rgba(148, 163, 184, 0.18);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
 }
 .sec-row__tag--on {
@@ -881,7 +881,7 @@ async function changePassword(): Promise<void> {
 .sec-setup__url {
   margin-top: 8px;
   word-break: break-all;
-  font-size: 11px;
+  font-size: 12px;
 }
 .sec-msg {
   margin-top: var(--sp-2);

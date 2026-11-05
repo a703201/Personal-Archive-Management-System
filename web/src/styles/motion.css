@@ -1,0 +1,408 @@
+/* ============================================================
+   AMS · 交互动效层（Apple Fluid Interfaces 的 Web 映射）
+   ------------------------------------------------------------
+   设计原则（apple-design §1 / §3 / §7 / §11 / §12 / §14）：
+     ① 反馈落在 pointer-down：按下瞬间就有响应，不等 click 结束。
+     ② 过渡从「当前屏幕值」出发、随时可被新输入打断（CSS transition
+        天然从当前计算值续接，比固定时长 @keyframes 更可打断；
+        手势驱动的部分不用 @keyframes 锁死）。
+     ③ 只动 transform / opacity / filter 等合成友好属性，不触发布局重排。
+     ④ 进出沿同一路径（enter 自下 8px 淡入，leave 向下 8px 淡出），
+        保持空间一致性；不做方向错乱的转场。
+     ⑤ 玻璃层的出现是「materialize」：blur 半径 + scale + opacity
+        一起变化，读起来像材质抵达，而不是普通淡入。
+     ⑥ 动画是「适量」的：微交互 100–160ms，转场 280–420ms，
+        无循环摆动、无持续漂浮、无全屏运动背景（避免 AI 味与眩动）。
+     ⑦ reduced-motion ≠ 无反馈：换成不引起前庭不适的短交叉淡入，
+        保留颜色/透明度变化，去掉位移、缩放、弹性与循环。
+   ============================================================ */
+
+/* ------------------------------------------------------------
+   1. 关键帧（全部可被 reduced-motion 降级覆盖）
+   ------------------------------------------------------------ */
+@keyframes ams-rise {
+  from { opacity: 0; transform: translate3d(0, 14px, 0); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes ams-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 弹层材质抵达：模糊 + 缩放 + 透明度同步 */
+@keyframes ams-materialize {
+  from { opacity: 0; transform: scale(0.96) translate3d(0, 8px, 0); filter: blur(10px); }
+  to   { opacity: 1; transform: scale(1) translate3d(0, 0, 0); filter: blur(0); }
+}
+
+/* 遮罩只做透明度淡入：backdrop-filter 会把整个层抬进合成层，
+   连带让层内文字失去 ClearType 子像素抗锯齿（发虚/锯齿）。 */
+@keyframes ams-scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes ams-sheet-up {
+  from { opacity: 0; transform: translate3d(0, 28px, 0) scale(0.99); }
+  to   { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes ams-skeleton-shimmer {
+  0%   { background-position: -480px 0; }
+  100% { background-position: 480px 0; }
+}
+
+@keyframes ams-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 数字/进度：仅内容数值变化，不做装饰性跳动 */
+@keyframes ams-bar-grow {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+
+/* ------------------------------------------------------------
+   2. 微交互：按下即时反馈（pointer-down，可打断）
+   ------------------------------------------------------------ */
+button:not(:disabled),
+[role='button'],
+.btn,
+.clickable,
+.btn-primary,
+.btn-ghost,
+.btn-danger,
+.btn-text {
+  transition:
+    transform 100ms var(--ease-out-soft),
+    background-color var(--spring-fast) var(--ease-out-soft),
+    border-color var(--spring-fast) var(--ease-out-soft),
+    color var(--spring-fast) var(--ease-out-soft),
+    box-shadow var(--spring-mid) var(--ease-out-soft),
+    filter var(--spring-fast) var(--ease-out-soft);
+}
+
+button:not(:disabled):active,
+[role='button']:active,
+.btn:active,
+.clickable:active,
+.btn-primary:active,
+.btn-ghost:active,
+.btn-danger:active {
+  transform: scale(0.97);
+}
+.btn-text:active { transform: scale(0.98); }
+
+/* 链接：hover 下划线从左侧展开（transform，不重排） */
+a {
+  text-decoration-color: transparent;
+  transition: color var(--spring-fast) var(--ease-out-soft),
+    text-decoration-color var(--spring-fast) var(--ease-out-soft);
+}
+a:hover { text-decoration-color: currentColor; }
+
+/* 输入聚焦环平滑出现 */
+.field-control {
+  transition: border-color var(--spring-fast) var(--ease-out-soft),
+    box-shadow var(--spring-fast) var(--ease-out-soft),
+    background-color var(--spring-fast) var(--ease-out-soft);
+}
+
+/* 卡片：Apple 卡片不做 hover 上浮（会显得浮夸），只做极轻的
+   边框/背景响应；真正浮起的层是弹窗与 sheet，见 §5。 */
+.card {
+  transition: border-color var(--spring-mid) var(--ease-out-soft),
+    background-color var(--spring-mid) var(--ease-out-soft);
+}
+.card:hover { border-color: var(--border-strong); }
+
+/* 表格行 / 列表行：hover 一层极淡 wash */
+tbody tr, .list-row {
+  transition: background-color var(--spring-fast) var(--ease-out-soft);
+}
+tbody tr:hover, .list-row:hover { background: color-mix(in srgb, var(--bg-hover) 55%, transparent); }
+
+/* ------------------------------------------------------------
+   3. 交错入场（stagger）：容器加 .stagger，子元素依次浮现
+   延迟用 CSS 变量 --i 显式指定，或由 nth-child 兜底。
+   ------------------------------------------------------------ */
+.stagger > * {
+  animation: ams-rise 0.52s var(--ease-apple) backwards;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+.stagger > *:nth-child(1) { --i: 0; }
+.stagger > *:nth-child(2) { --i: 1; }
+.stagger > *:nth-child(3) { --i: 2; }
+.stagger > *:nth-child(4) { --i: 3; }
+.stagger > *:nth-child(5) { --i: 4; }
+.stagger > *:nth-child(6) { --i: 5; }
+.stagger > *:nth-child(7) { --i: 6; }
+.stagger > *:nth-child(8) { --i: 7; }
+.stagger > *:nth-child(n + 9) { --i: 8; }
+
+/* 页面级进入统一交给 §4 的 <Transition>（App.vue 两处 RouterView 均已接入）。
+   这里刻意不写 .login-only > * 的 animation：CSS animation 的 fill-mode 会
+   锁住 opacity，与 Transition 的 leave 过渡抢同一属性，导致退场失效。 */
+
+/* 认证卡整体浮现（三页共用；各页 scoped 不再重复声明动画） */
+.auth__card { animation: ams-rise 0.55s var(--ease-apple) 60ms backwards; }
+
+/* 找回口令的步骤条：状态切换用颜色过渡，不做跳动 */
+.stepper__dot {
+  transition: background-color var(--spring-mid) var(--ease-out-soft),
+    color var(--spring-mid) var(--ease-out-soft),
+    transform var(--spring-fast) var(--ease-out-soft);
+}
+.stepper__item--active .stepper__dot { transform: scale(1.06); }
+
+/* 校验提示：渐显而非插入时硬跳 */
+.reg-err, .reg-error, .fgt-error, .fgt-hint, .fgt-notice, .hint-block, .error, .notice {
+  animation: ams-fade 0.24s var(--ease-out-soft) backwards;
+}
+
+/* ------------------------------------------------------------
+   4. 路由转场：进出沿同一路径（对称），mode="out-in"
+   Apple §7：从哪来，回哪去；不做横向/纵向混搭。
+   ------------------------------------------------------------ */
+.route-enter-active {
+  transition: opacity 0.3s var(--ease-out-soft), transform 0.42s var(--ease-apple);
+}
+.route-leave-active {
+  transition: opacity 0.18s var(--ease-in-out-soft), transform 0.24s var(--ease-in-out-soft);
+}
+.route-enter-from {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0);
+}
+.route-leave-to {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0);
+}
+
+/* 认证页之间的切换：更轻的交叉淡入 */
+.auth-fade-enter-active,
+.auth-fade-leave-active {
+  transition: opacity 0.24s var(--ease-out-soft);
+}
+.auth-fade-enter-from,
+.auth-fade-leave-to { opacity: 0; }
+
+/* ------------------------------------------------------------
+   5. 浮层 / 材质（materialize，见 apple-design §12）
+   ------------------------------------------------------------ */
+/* 全局搜索遮罩：scrim 淡入 + 对话框材质抵达 */
+.mask {
+  animation: ams-scrim-in 0.28s var(--ease-out-soft) backwards;
+}
+.mask .dialog,
+.onboard__card,
+.onboard {
+  animation: ams-materialize 0.38s var(--ease-apple) backwards;
+}
+.onboard { animation-name: ams-scrim-in; }
+
+/* 底部 Sheet：从下方沿原路返回 */
+.app-sheet__panel {
+  animation: ams-sheet-up 0.42s var(--ease-apple) backwards;
+}
+
+/* Toast：短距上浮，不做弹跳 */
+.toast-item {
+  animation: ams-rise 0.32s var(--ease-apple) backwards;
+}
+
+/* 批量操作浮出栏 */
+.batchbar {
+  animation: ams-sheet-up 0.34s var(--ease-apple) backwards;
+}
+
+/* 骨架屏微光（唯一的循环动画，且只作用于加载占位） */
+.skeleton {
+  animation: ams-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+/* 加载指示器（若组件使用 .spinner） */
+.spinner {
+  animation: ams-spin 0.8s linear infinite;
+}
+
+/* 进度条 */
+.progress__fill {
+  transform-origin: left center;
+  animation: ams-bar-grow 0.42s var(--ease-apple) backwards;
+}
+
+/* ------------------------------------------------------------
+   6. 滚动显现（配合 v-reveal 指令 / useReveal）
+   初始态只在 JS 可用时生效，避免脚本失败导致内容永久不可见：
+   指令 mounted 时给元素加 [data-reveal] 属性，才有初始隐藏。
+   ------------------------------------------------------------ */
+[data-reveal] {
+  opacity: 0;
+  transform: translate3d(0, 18px, 0);
+  transition:
+    opacity 0.55s var(--ease-out-soft),
+    transform 0.62s var(--ease-apple);
+  transition-delay: var(--reveal-delay, 0ms);
+  /* 不写 will-change：常驻会白占合成层，并让层内文字改走灰度抗锯齿。
+     过渡本身足够短，浏览器会自行在过渡期间提升、结束后释放。 */
+}
+[data-reveal].is-visible {
+  opacity: 1;
+  /* 必须是 none，不能是 translate3d(0,0,0)：后者会永久保留合成层 */
+  transform: none;
+}
+
+/* 导航选中指示条：从中心竖向展开，切换时可被打断 */
+.nav__item { position: relative; }
+.nav__item.router-link-active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  margin-top: -9px;
+  border-radius: var(--g3-pill);
+  background: var(--accent);
+  transform: scaleY(0);
+  transform-origin: center;
+  animation: ams-nav-indicator 0.32s var(--ease-apple) forwards;
+}
+@keyframes ams-nav-indicator {
+  from { transform: scaleY(0); opacity: 0; }
+  to   { transform: scaleY(1); opacity: 1; }
+}
+/* 内联（移动端）导航改横向指示条 */
+.nav--inline .nav__item.router-link-active::before {
+  left: 50%;
+  top: auto;
+  bottom: 0;
+  width: 18px;
+  height: 3px;
+  margin: 0 0 0 -9px;
+  transform: scaleX(0);
+  animation-name: ams-nav-indicator-x;
+}
+@keyframes ams-nav-indicator-x {
+  from { transform: scaleX(0); opacity: 0; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+
+/* 顶栏滚动边缘效果：滚动后才浮现极淡的分界（替代硬 1px 边框） */
+.topbar {
+  transition: box-shadow var(--spring-mid) var(--ease-out-soft),
+    background-color var(--spring-mid) var(--ease-out-soft);
+}
+.topbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: var(--hairline);
+  opacity: 0;
+  transition: opacity var(--spring-mid) var(--ease-out-soft);
+  pointer-events: none;
+}
+.topbar.is-scrolled::after { opacity: 1; }
+
+/* 主题切换：颜色平滑过渡，避免亮度突跳（apple-design §14） */
+body, .card, .topbar, .sidebar, .field-control, .badge {
+  transition:
+    background-color 0.28s var(--ease-out-soft),
+    border-color 0.28s var(--ease-out-soft),
+    color 0.28s var(--ease-out-soft);
+}
+
+/* ------------------------------------------------------------
+   6.1 滚动性能与高帧率适配
+   ------------------------------------------------------------
+   高刷（90/120/144Hz）下 CSS 过渡按时间插值、由合成器按刷新率出帧，
+   本身不需要改时长；真正让高刷变「钝」的是**主线程每帧被叫醒做重绘**。
+   因此这里只做三件事：
+     ① 滚动祖先不叠 backdrop-filter / box-shadow 过渡（见 AppSheet.vue）；
+     ② 长列表跳过屏外卡片的布局与绘制（content-visibility）；
+     ③ 滚动监听 rAF 节流（见 App.vue onMainScroll），避免每帧跑 JS。
+   ------------------------------------------------------------ */
+
+/* 细滚动条：替代 Windows 默认粗条，滚动时不再有硬边与布局跳动感 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 38%, transparent) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 34%, transparent);
+  background-clip: content-box;
+  border: 3px solid transparent;
+  border-radius: var(--g3-pill);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-muted) 58%, transparent);
+  background-clip: content-box;
+}
+
+/* 长列表：屏外条目跳过布局/绘制；auto 关键字让浏览器记住真实高度，
+   避免滚动条随估算误差抖动。条目仍可被 Tab 聚焦与 Ctrl+F 查找。 */
+.list > .item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 88px;
+}
+
+/* ------------------------------------------------------------
+   7. 无障碍降级
+   reduced-motion：降级为短交叉淡入（保留可理解性），
+   去掉位移/缩放/弹性/循环；reduced-transparency：材质转实；
+   contrast：近实底 + 明确边框。
+   ------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 120ms !important;
+    transition-property: opacity, background-color, border-color, color !important;
+  }
+
+  /* 只保留淡入，取消所有位移/缩放/模糊 */
+  .stagger > *, .login-only > *, .toast-item,
+  .mask .dialog, .onboard__card, .batchbar,
+  .app-sheet__panel, .progress__fill {
+    animation: ams-fade 0.12s ease backwards !important;
+    transform: none !important;
+    filter: none !important;
+  }
+  [data-reveal] { opacity: 1 !important; transform: none !important; }
+  .route-enter-from, .route-leave-to { transform: none !important; }
+  .nav__item.router-link-active::before { transform: none !important; animation: none !important; opacity: 1; }
+  button:not(:disabled):active,
+  [role='button']:active, .btn:active, .clickable:active,
+  .btn-primary:active, .btn-ghost:active, .btn-danger:active {
+    transform: none !important;
+  }
+  .skeleton { animation: none !important; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .topbar, .sidebar, .batchbar, .sheet-panel, .onboard,
+  [class*='material'] {
+    background: var(--bg-surface) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  .mask, .sheet-scrim { backdrop-filter: none !important; }
+}
+
+@media (prefers-contrast: more) {
+  .card, .field-control, .auth__card, .onboard__card {
+    border-color: var(--text-primary) !important;
+  }
+  .btn-ghost { border-color: var(--text-primary) !important; }
+  .badge { border: 1px solid currentColor; }
+  .topbar, .sidebar { background: var(--bg-surface) !important; }
+}

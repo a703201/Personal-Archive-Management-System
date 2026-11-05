@@ -484,7 +484,7 @@ async function confirmMerge(t: TagNode): Promise<void> {
   line-height: 1.1;
 }
 .stat__k {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
 }
 .stat--ok .stat__n {

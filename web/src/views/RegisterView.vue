@@ -101,8 +101,9 @@ async function onSubmit(): Promise<void> {
 
 <template>
   <div class="auth">
-    <aside class="auth__hero">
+    <aside class="auth__hero stagger">
       <div class="auth__brand">AMS</div>
+      <p class="auth__eyebrow">GET STARTED</p>
       <h1 class="auth__headline">几步创建，<br />长久安心。</h1>
       <p class="auth__tagline">本地优先、最小暴露 —— 你的档案只属于你。</p>
       <ul class="auth__points">
@@ -172,9 +173,6 @@ async function onSubmit(): Promise<void> {
 </template>
 
 <style scoped>
-.auth__card {
-  animation: ams-enter-rise 0.5s var(--ease-apple) both;
-}
 .auth__submit {
   margin-top: var(--sp-2);
   width: 100%;

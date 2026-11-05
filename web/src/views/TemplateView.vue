@@ -322,7 +322,7 @@ onMounted(load)
     <!-- 新建 / 编辑 -->
     <AppSheet
       v-model="showEdit"
-      ::title="isEditing ? tr('TemplateView.bbc586.edit', '编辑模板') : tr('TemplateView.bbc586.new', '新建模板')"
+      :title="isEditing ? tr('TemplateView.bbc586.edit', '编辑模板') : tr('TemplateView.bbc586.new', '新建模板')"
       size="md"
       :dismissible="!saving"
     >
@@ -421,7 +421,7 @@ onMounted(load)
     <!-- 套用 -->
     <AppSheet
       v-model="showApply"
-      ::title="tr('TemplateView.f8231a', '`套用模板 · ${applyTarget?.name ?? \'\'}`')"
+      :title="tr('TemplateView.f8231a', '`套用模板 · ${applyTarget?.name ?? \'\'}`')"
       size="sm"
       :dismissible="!applying"
     >
@@ -569,7 +569,7 @@ onMounted(load)
 }
 
 .chip {
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 8px;
   border-radius: var(--g3-pill);
   background: var(--bg-hover);
