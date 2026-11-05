@@ -7,7 +7,7 @@
 [![Backend](https://img.shields.io/badge/backend-Cangjie-1f6feb)](./packages)
 [![Frontend](https://img.shields.io/badge/frontend-Vue%203%20%2B%20TS-42b883)](./web)
 [![Database](https://img.shields.io/badge/database-openGauss-orange)](./db/migrations)
-[![Tests](https://img.shields.io/badge/tests-272%20passed-brightgreen)](./scripts/test.sh)
+[![Tests](https://img.shields.io/badge/tests-338%20passed-brightgreen)](./scripts/test.sh)
 
 ---
 
@@ -60,7 +60,7 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 > 门禁：`bash scripts/build.sh` → 0 error、`npm run build` → 0 error、`bash scripts/test.sh` → 0 fail。
 > 三者未同时通过不算完成。
 
-> **前端界面（Apple 设计语言 · 2026-11-05 完整重做）**：以 `apple.com` 当前站点实测参数为准 —— 卡片零投影（靠白卡浮在雾灰画布上的明度差分层）、交互元素胶囊几何、17px 正文与超大 display 字阶、单一强调蓝、字重只用 400/600/700、单色线性图标；并配套 `styles/motion.css` 交互动效层（可打断的按下反馈、对称路由转场、交错入场、滚动显现、材质化弹层）与三类无障碍偏好降级。容器化部署见 `deploy/README.md`，变更明细见 `CHANGELOG.md` 的 `[1.1.0]`。
+> **前端界面（Apple 设计语言 · 2026-11-05 完整重做）**：以 `apple.com` 当前站点实测参数为准 —— 卡片零投影（靠白卡浮在雾灰画布上的明度差分层）、交互元素胶囊几何、17px 正文与超大 display 字阶、单一强调蓝、字重只用 400/600/700、单色线性图标；并配套 `styles/motion.css` 交互动效层（可打断的按下反馈、对称路由转场、交错入场、滚动显现、材质化弹层）与三类无障碍偏好降级。容器化部署见 `deploy/README.md`，变更明细见 `CHANGELOG.md` 的 `[1.2.0]`。
 
 ---
 
