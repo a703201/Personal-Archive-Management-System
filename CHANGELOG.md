@@ -213,9 +213,155 @@ P2（23 条）累计 **23 条实现 / 0 条评估中（FR-IMP-005 已按方案 C
   高约 50px 的顶栏、搜索面板错位。修复：在 `GlobalSearch.vue` 用 `<Teleport to="body">`
   把遮罩传送到 `body`，脱离含 `backdrop-filter` 的祖先，`fixed` 重新相对视口全屏。
 
+### 增量 · 2026-11-05 二次设计调校 + 交互动效层
+
+按 `apple.com` 当前站点实测参数做**全站完整重做**（不只是认证页），并补齐交互动画：
+
+- **`theme.css` 重做**：卡片改为**零 box-shadow**（Apple 官网 73 个卡片实例无投影，
+  层级靠 `#ffffff` 卡浮在 `#f5f5f7` 画布上的明度差）；交互元素统一 999px 胶囊、
+  卡片 28px 圆角；正文 17px / `-0.022em` / 1.47，display 字阶 44–96px；
+  字重阶梯收敛到 400 / 600 / 700（去掉 500）；`#0071e3` 仅给填充 CTA，
+  行内链接另用 `#0066cc`；章节靠交替色带分隔而非硬边框；补齐
+  `--bg-soft` / `--bg-base` 等别名，吸收组件里的硬编码 fallback 色值。
+  保留全部既有变量名与类名，17 个业务视图零改动即继承新体系。
+- **新增 `styles/motion.css`**（动效层，与静态视觉职责分离）：pointer-down 即时反馈、
+  对称路径的路由转场、`.stagger` 交错入场、材质化弹层（blur+scale+opacity 同步）、
+  导航选中指示条、顶栏滚动边缘效果、Toast/Sheet/进度条；
+  全量支持 `prefers-reduced-motion`（降级为短交叉淡入，保留颜色反馈）、
+  `prefers-reduced-transparency`、`prefers-contrast` 三类偏好。
+- **新增 `composables/useReveal.ts`**：基于 IntersectionObserver 的 `v-reveal`
+  指令（渐进增强：脚本不可用/减少动效时内容保持可见），`main.ts` 注册，
+  `OverviewView` 的指标网格与两张卡片接入滚动显现。
+- **`App.vue`**：两处 `RouterView` 接入 `<Transition>`；彩色 emoji（🔔/☀/☾）
+  换成单色线性 SVG；顶栏按滚动状态浮现极淡边缘；品牌字标与导航按新令牌精修。
+- **无障碍修复**：全仓 7 处 `::aria-label`（双冒号导致属性失效，屏幕阅读器读不到）
+  已在 `App.vue` / `AttachmentPanel` / `DatePicker` / `ArchiveView` 修正为 `:aria-label`。
+- **三张认证页**：补 eyebrow 标签、hero 交错入场、卡片统一浮现（移除各自 scoped
+  里已失效的 `ams-enter-rise` 引用）；`GlobalSearch` 触发框改胶囊 + 线性放大镜。
+
+> 视觉复核：无头 Chrome 以 1440×900 实截 `/login` 确认分屏、字距、胶囊按钮、
+> 对勾图标与留白均正常，无重叠/截断/廉价装饰。
+
+### 增量 · 2026-11-05 字体替换、列表显示修正与滚动性能
+
+- **字体：MiSans 优先 + HarmonyOS Sans 兜底**。自托管 MiSans 可变字体
+  （`web/public/fonts/misans/`，56 个 unicode-range 分片 / 4.6 MB，
+  `font-weight: 150 700`，`font-display: swap`，离线与 Docker 可用）；
+  `--font-sans` 依次为 `MiSans → MiSans VF → HarmonyOS Sans SC →
+  HarmonyOS Sans → 系统字体`。`index.html` 预加载首片避免首屏字形回退闪烁。
+- **修复中文边缘发虚**：`body` 的 `-webkit-font-smoothing: antialiased`
+  在 Windows + Chrome 下会关闭 ClearType 子像素抗锯齿（中文笔画发灰发虚），
+  改回 `auto`；同时移除 `text-rendering: optimizeLegibility`（中文下会引入
+  不必要的 kern 调整）。另补 `--text-soft` 别名，消除组件里的无效变量引用。
+- **档案条目行显示修正**（`ArchiveView.vue`）：`.item__main` 补
+  `flex: 1 1 auto; min-width: 0`，解决标题/元信息被挤到卡片正中、与复选框和
+  操作按钮不同基线；6 个元信息统一为「两枚语义胶囊 + 纯文字」，
+  敏感度徽标由 `currentColor` 描边改为低饱和底 + 语义色文字；
+  移除 `.item:hover` 的 `box-shadow` 过渡与 `:active` 整卡缩放
+  （长列表滚动时鼠标连续掠过会触发昂贵重绘）。
+- **弹窗底部裁切与滚动卡顿**（`AppSheet.vue`）：`.sheet-body` 补
+  `flex: 1 1 auto; min-height: 0`，此前 flex 子项默认 `min-height:auto`
+  不收缩，内容撑破 `max-height:86vh` 导致「保存」按钮被 `overflow:hidden`
+  裁掉；`.sheet-head` / `.sheet-foot` 设 `flex: none`；移除面板与遮罩上的
+  `backdrop-filter`（滚动时逐帧重算模糊是「钝」的主因），面板改不透明实底。
+- **高帧率 / 滚动性能**（`motion.css` + `App.vue`）：细滚动条；
+  长列表 `content-visibility: auto` + `contain-intrinsic-size` 跳过屏外渲染；
+  滚动监听改为 `requestAnimationFrame` 合并每帧一次、仅在布尔值翻转时写 ref；
+  滚动容器独立合成层。高刷（90/120/144Hz）下 CSS 过渡按时间插值，
+  改动目标是消除主线程每帧重绘，而非硬改动画时长。
+- **验证证据**：真实 Chrome（CDP）确认 `document.fonts.check('16px MiSans')`
+  为 `true`、声明 56 个分片但首屏仅按需加载 13 个、标题计算样式为
+  `MiSans / 80px`、`-webkit-font-smoothing: auto`；条目行与弹窗的 flex 修复
+  用**本地模拟布局页**（`.tmp/layout-check.html`）在真实浏览器截图验证，
+  非业务页真实数据验收。
+
+### 修复 · 2026-11-05 字体锯齿/发虚（根因：GPU 合成层）
+
+用户反馈业务页 11–12px 小字（权限点徽标、审计日志、密钥说明）仍有锯齿。
+CDP 实测定位到**不是字体文件问题，而是文本被抬进 GPU 合成层**：
+Chrome 在合成层上禁用 ClearType 子像素抗锯齿、改走灰度 AA。
+诊断证据（`/login`，dpr=1，MiSans 已加载、smoothing=auto）：
+文本元素自身带 `transform` 的有 **3** 个、祖先链带 transform/filter/backdrop-filter
+的有 **12** 个，`.auth__headline` 的 computed transform 为
+`matrix(1,0,0,1,0,0)` —— 入场动画 `animation-fill-mode: both` 把
+`translate3d(0,0,0)` 永久保留了。
+
+- **动画**：`motion.css` 所有入场动画 `fill-mode` 由 `both` 改为 `backwards`，
+  动画结束后 transform/filter 归零；`ams-scrim-in` 去掉 `backdrop-filter` 变化，
+  遮罩只做 opacity 淡入；`[data-reveal]` 去掉 `will-change`，
+  `.is-visible` 的 `transform` 改为 `none`（不能写 `translate3d(0,0,0)`）。
+- **弹窗**：移除 `AppSheet` 的 `.sheet-body { transform: translateZ(0) }`
+  （滚动流畅已由「去 backdrop-filter + 头尾固定 + content-visibility」保证）。
+- **玻璃层改实底**：`App.vue` 顶栏/侧栏、`ToastHost`、`.batchbar` 去掉
+  `backdrop-filter`，改用 `--bg-surface` 实底 + 边缘线/柔影表达层级。
+  保留 `<Teleport to="body">` 作为防御（未来任何祖先带 transform 仍会重演
+  fixed 包含块问题）。
+- **小字可读性**：14 个文件里硬编码的 `font-size: 11px` 统一提到设计下限
+  `12px`；浅色 `--text-muted` 由 `#86868b`（白底约 3.5:1，低于 WCAG AA）
+  加深到 `#6e6e73`（约 4.9:1）。
+- **复测证据**：同一 CDP 脚本 reload 后，自身带合成层的文本元素 **3 → 0**、
+  祖先链带合成层的 **12 → 0**，标题 transform `none`，MiSans 仍正常加载；
+  登录页实截与 12px 三栏字体对比页（MiSans / HarmonyOS Sans SC / 雅黑）
+  均未再见点阵感或发虚。
+- **权衡说明**：去掉玻璃模糊会损失一点材质通透感，换取中文小字的
+  ClearType 锐利度与滚动帧率；这是针对 Windows + Chrome 的显式取舍。
+
+### 新增 · 2026-11-05 首次部署初始化与部署配置
+
+- **删除测试账户**：清理 `tpl_probe_01` 演示账号及 161 个 E2E/压测账号
+  （`scripts/cleanup-demo-data.sql`、`scripts/cleanup-test-accounts.sql`，均幂等）。
+  系统表 `sys_roles`(9) / `cfg_settings`(11) / `sys_perms`(40) 与审计表完整保留；
+  账号清单备份于 `.tmp/users-backup-20261105.txt`。删除 `deploy/DEMO_ACCOUNT.md`。
+- **首次部署向导** `/setup`：四步（数据库 → 创建管理员 → 邮件服务 → 完成）。
+  后端新增公开接口 `GET /api/setup/status`、`POST /api/setup/test-db|database|mail|test-mail|admin`；
+  仅在「无管理员且未初始化」时开放，创建管理员后写 `SETUP_INITIALIZED=true` 永久关闭，
+  重复调用返回 403。首个账号自动授予 `owner` + `org_admin`。
+  前端路由守卫按 `/setup/status` 缓存引导，旧后端无该接口时按「已初始化」处理（零回归）。
+- **部署配置体系**：新增 `ams-storage` 层的 `DeploymentStore` / `MailSpool`。
+  配置落在容器持久卷 `/app/config/deployment.env`（`KEY=VALUE`，按首个 `=` 切分）；
+  **文件里没有的键继续读环境变量**，`ServerConfig.load()` 合并后启动，既有部署零回归。
+  管理页「系统运维 → 部署配置」通过 `GET/PUT/DELETE /api/admin/deployment/*`
+  （`system:admin`）读写数据库 IP/端口/库名/用户名/口令与 SMTP 配置，
+  提供测试连接、发送测试邮件、恢复环境变量默认。数据库配置保存后重启生效。
+- **SMTP 真实投递**：`Mailer` 在启用邮件时额外写 `.eml` 到 `ams-mail` 卷，
+  `deploy/scripts/mail-spool.sh`（随镜像分发）用 `curl smtps://` 真实投递并移出队列。
+  不引入仓颉网络库/子进程 API，保持单容器部署；未启用时行为与旧版一致（只入队）。
+  支持 SSL(465) / STARTTLS(587)、账号口令、发件人配置；测试邮件可在管理页触发。
+- **顺带修复**：全仓 5 个视图的 `::title` 双冒号写回 `:title`（此前 AppSheet 标题 prop 失效）。
+- **验证证据**：Linux 后端编译 39 包全绿；`bash scripts/test.sh` **338 例 0 失败**
+  （同时内嵌 `build.sh` 成功、`error:` 计数 0、产出 `build/ams-server.exe`）；`npm run build` 0 error；
+  `/api/setup/status` 返回 `initialized:false` 且口令脱敏；`test-db` 真实连库 `ok:true`；
+  创建管理员→登录→`/api/admin/deployment`→重复创建 403 全链路通过（验证账号已回滚）；
+  `/setup` 无头 Chrome 实截正常；容器 `ams-server` 8080 healthy。
+
+### 修复 · 2026-11-05 健康看板「运行时长」显示源码片段
+
+- **现象**：运行时长卡片显示字面量 `${m} 分 ${s % 60} 秒`，其余指标正常。
+- **根因**：i18n 目录由 codemod 自动抽取，把 `` `${m} 分 ${s % 60} 秒` `` 这类
+  **JS 模板字符串原样**当成译文写进 `catalog.zh-CN/en/fr.ts`；`t()` 是纯查表、
+  不做插值，运行时直接返回词条里的源码片段。这不是后端 `uptimeMs` 的问题
+  （后端 `system.cj` 输出的是裸数字 JSON）。
+- **系统性排查**：三个语言包各有 47 条含 `${` 的死词条，源码 42 处动态文案调用；
+  全仓交叉复核确认 42 条调用点**全部传了 fallback**，另 4 条为无引用的孤儿词条。
+- **修复**：
+  1. `web/src/i18n/index.ts` 的 `t()` 增加防御：词条值含 `${` 时回退到调用点
+     已插值的 fallback，一次覆盖全部 42 处动态文案（toast / 确认框 / aria-label），
+     静态词条与正常翻译不受影响；
+  2. `viewsSystemView.b0ec90` 三语词条改为 `{m}` / `{s}` 占位符，新增
+     `viewsSystemView.uptimeHours`（`{h}` / `{m}`），`SystemView.vue` 的
+     `fmtUptime()` 用 `.replace()` 完成插值，并补 `Number.isFinite` 与负值保护
+     （异常值显示 `—` 而非 `NaN`）；≥1 小时的分支也纳入多语。
+- **验证**：用真实源码（`.vue` 提取的 `fmtUptime` 函数体 + 真实 `i18n` 模块）
+  在 Node 中跑三语 × 9 组边界值：`16 分 5 秒` / `16 min 5 s`，无 `${`、无残留占位符；
+  7 条同类死词条回退正确、fr 静态词条仍正确翻译；`npm run build` 0 error；
+  镜像内 `SystemView` chunk 含 `uptimeHours`、旧字面量 0 处；容器 8080 healthy。
+- **说明**：`t()` 防御会让 en/fr 下这 42 条动态文案回退为中文（原本显示的是坏掉的
+  `${...}`，属改善）。若要三语完整翻译动态文案，需把每条词条改为命名占位符并
+  逐个改造调用点，作为独立一轮处理。
+
 ### 文档
 
-- 本文件新增 `[1.1.0]` 条目。
+- 本文件新增 `[1.1.0]` 条目与上述三段增量段落。
 - `deploy/README.md`：目录树补充 `Dockerfile.web` / `Dockerfile.web.prebuilt` /
   `Dockerfile.merge` / `nginx.conf`，新增「§2.1 前端独立镜像」「§4.4 前端并入后端
   镜像」与 nginx 反代说明。
