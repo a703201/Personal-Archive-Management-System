@@ -1,21 +1,27 @@
 # ============================================================
-# AMS · 发布（GitHub Release）
+# AMS · 发布（GitHub Release · 源码包）
 #
-# 触发：推送形如 v* 的 tag
+# 触发：推送形如 v* 的 tag，或手动 workflow_dispatch
 #
-# 流程：准备工具链 → 构建 → 测试 → 打包 → 校验 → 创建 Release 并上传资产
+# 流程：
+#   ① 检出源码（含完整历史，供 git archive 生成干净源码树）
+#   ② 前端构建门禁（npm ci + npm run build，验证源码可构建）
+#   ③ 打包源码（git archive 生成 tar.gz + zip，自动排除 .git 与忽略文件）
+#   ④ 创建 / 复用 Release 并上传源码包资产
 #
 # 用法（本地）：
-#   git tag -a v1.0.0 -m "AMS 1.0.0"
-#   git push origin v1.0.0
-#   # 本 workflow 会自动构建并发布
+#   git tag -a v1.2.0 -m "AMS 1.2.0"
+#   git push origin v1.2.0
+#   # 本 workflow 会自动打包源码并发布
 #
 #   或一步到位（脚本方式，不需要配 runner）：
-#   bash scripts/release.sh --version 1.0.0
+#   bash scripts/release.sh --version 1.2.0
 #
-# 产物：
-#   ams-release-<version>-windows-x86_64.zip
-#   含：bin/（exe + 全部运行时 DLL）、config/、scripts/、docs/、CHECKSUMS.sha256
+# 产物（跨平台源码分发，不再发布特定平台的编译二进制）：
+#   ams-source-<version>.tar.gz
+#   ams-source-<version>.zip
+#   含：仓颉后端源码 / web 前端源码 / deploy/ / docs/ / 配置与脚本
+#   部署：见 deploy/README.md；前端构建见 web/ 内说明
 # ============================================================
 name: Release
 
@@ -26,7 +32,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '版本号（如 1.0.0），手动触发时必填'
+        description: '版本号（如 1.2.0），手动触发时必填'
         required: true
         type: string
 
@@ -38,11 +44,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: windows-latest
+  release-source:
+    # 源码包跨平台、且需要的是 git + node（前端门禁），用 ubuntu 最轻量稳定。
+    runs-on: ubuntu-latest
 
     steps:
-      - name: 检出代码（含 tag）
+      - name: 检出代码（含 tag 与完整历史）
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -53,46 +60,39 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VER="${{ inputs.version }}"
-            VER="${VER#v}"
           else
             VER="${GITHUB_REF_NAME#v}"
           fi
+          VER="${VER#v}"
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "发布版本：${VER}"
 
-      - name: 缓存工具链
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/ams-toolchain
-            ~/.cache/ams-stdx
-          key: ams-toolchain-${{ runner.os }}-1.2.0
-          restore-keys: |
-            ams-toolchain-${{ runner.os }}-
-
-      - name: 准备工具链（SDK / stdx / 驱动）
-        shell: bash
-        run: bash scripts/ci/setup-toolchain.sh
-
-      - name: 构建
-        shell: bash
-        run: bash scripts/build.sh
-
-      - name: 单元测试
-        shell: bash
-        run: bash scripts/test.sh
-
-      - name: 打包
-        shell: bash
-        run: bash scripts/package.sh --skip-build --version "${{ steps.ver.outputs.version }}"
-
-      - name: 校验发布包可独立运行
-        shell: bash
+      - name: 前端构建门禁（验证源码可构建）
+        working-directory: web
         run: |
-          bash scripts/ci/verify-package.sh \
-            "dist/ams-release-${{ steps.ver.outputs.version }}-windows-x86_64" 18099
+          npm ci
+          npm run build
 
-      - name: 上传资产到 GitHub Release
+      - name: 打包源码（tar.gz + zip）
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          VER="${VERSION}"
+          PREFIX="ams-${VER}"
+          mkdir -p dist
+          # git archive 生成干净源码树：不含 .git、不含被 .gitignore 忽略的文件
+          # （如 node_modules / 构建产物 / .tmp 等），跨平台且轻量。
+          git archive --format=tar --prefix="${PREFIX}/" HEAD \
+            | gzip -9 > "dist/ams-source-${VER}.tar.gz"
+          git archive --format=zip --prefix="${PREFIX}/" HEAD \
+            -o "dist/ams-source-${VER}.zip"
+          echo "### 源码包" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh dist/ams-source-* >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 创建 / 复用 Release
+        id: rel
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,17 +100,12 @@ jobs:
         run: |
           set -e
           VER="${VERSION}"
-          ZIP="dist/ams-release-${VER}-windows-x86_64.zip"
           TAG="v${VER}"
-
-          # Release 已存在则复用（支持重跑本 workflow）
           REL_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
             2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
-
           if [ -z "$REL_ID" ]; then
-            echo "创建 Release ${TAG}..."
             NOTES="$(mktemp)"
             if [ -f CHANGELOG.md ]; then
               python3 - "$VER" "$NOTES" <<'PYEOF'
@@ -142,51 +137,58 @@ print(json.dumps({"tag_name": tag, "name": "AMS " + version, "body": body,
                   "draft": False, "prerelease": False}, ensure_ascii=False))
 PYEOF
 )" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")"
-            echo "      已创建（id=${REL_ID}）"
+            echo "已创建 Release ${TAG}（id=${REL_ID}）"
           else
-            echo "      Release 已存在（id=${REL_ID}），重新上传资产"
-            # 删掉同名旧资产，避免 422
+            echo "Release 已存在（id=${REL_ID}），复用并上传资产"
+          fi
+          echo "id=${REL_ID}" >> "$GITHUB_OUTPUT"
+
+      - name: 上传源码包资产
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          REL_ID: ${{ steps.rel.outputs.id }}
+        run: |
+          set -e
+          VER="${VERSION}"
+          REL_ID="${REL_ID}"
+          for PKG in "dist/ams-source-${VER}.tar.gz" "dist/ams-source-${VER}.zip"; do
+            NAME="$(basename "$PKG")"
+            echo "上传 ${NAME} ..."
+            # 删除同名旧资产，避免 422
             ASSET_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets" \
-              2>/dev/null | python3 -c "
+              2>/dev/null | python3 -c '
 import sys, json
+name = sys.argv[1]
 try:
     for a in json.load(sys.stdin):
-        if a.get('name') == '$(basename "$ZIP")':
-            print(a['id']); break
+        if a.get("name") == name:
+            print(a["id"]); break
 except Exception:
     pass
-")"
+' "$NAME")"
             if [ -n "$ASSET_ID" ]; then
               curl --ssl-no-revoke -fsS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" \
                 "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" || true
             fi
-          fi
-
-          echo "上传 ${ZIP} ..."
-          # ⚠️ 必须用 `-F "file=@..."`（multipart/form-data）。
-          #   `--data-binary "@file"` 发的是原始 body，GitHub 不接受（400）。
-          #   `-F` 还会流式发送，不把整个文件读进内存。
-          # --ssl-no-revoke：Windows runner 的 curl 用 schannel，
-          # 默认查证书吊销状态，被代理/防火墙挡住时失败
-          # （CRYPT_E_NO_REVOCATION_CHECK 0x80092012）。
-          CODE="$(curl -sS -o /tmp/ams_upload.out -w "%{http_code}" \
-            --ssl-no-revoke \
-            --max-time 1800 \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -F "file=@${ZIP}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=$(python3 -c "
+            CODE="$(curl -sS -o /tmp/ams_upload.out -w "%{http_code}" \
+              --ssl-no-revoke --max-time 1800 -X POST \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -F "file=@${PKG}" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=$(python3 -c "
 import urllib.parse, sys
-print(urllib.parse.quote(sys.argv[1]))" "$(basename "$ZIP")")")"
-          if [ "$CODE" != "201" ] && [ "$CODE" != "200" ]; then
-            echo "::error::资产上传失败（HTTP ${CODE}）"
-            head -c 500 /tmp/ams_upload.out
-            exit 1
-          fi
-          echo "上传完成"
+print(urllib.parse.quote(sys.argv[1]))" "$NAME")")"
+            if [ "$CODE" != "201" ] && [ "$CODE" != "200" ]; then
+              echo "::error::资产上传失败（HTTP ${CODE}）"
+              head -c 500 /tmp/ams_upload.out
+              exit 1
+            fi
+            echo "  ${NAME} 上传完成"
+          done
 
       - name: 写入发布摘要
         shell: bash
@@ -194,9 +196,9 @@ print(urllib.parse.quote(sys.argv[1]))" "$(basename "$ZIP")")")"
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           {
-            echo "## AMS ${VERSION} 发布成功"
+            echo "## AMS ${VERSION} 源码发布成功"
             echo ""
-            echo "- 产物：\`ams-release-${VERSION}-windows-x86_64.zip\`"
-            echo "- 校验和：见包内 \`CHECKSUMS.sha256\`"
-            echo "- 部署：见包内 \`DEPLOY.md\`"
+            echo "- 源码包：\`ams-source-${VERSION}.tar.gz\` / \`ams-source-${VERSION}.zip\`"
+            echo "- 内容：仓颉后端源码 / web 前端源码 / deploy/ / docs/ / 配置脚本"
+            echo "- 构建与部署：见 \`deploy/README.md\`；前端 \`cd web && npm ci && npm run build\`"
           } >> "$GITHUB_STEP_SUMMARY"

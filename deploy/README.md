@@ -7,10 +7,10 @@ deploy/
 ├── docker/
 │   ├── Dockerfile            # 多阶段镜像：builder(后端) + web(前端) + runtime
 │   ├── Dockerfile.cjbase     # 仓颉基础镜像（ubuntu22.04 + SDK1.2.0-beta.03 + stdx）
-│   └── Dockerfile.prebuilt   # 基于预编译产物构建运行镜像（含 web/dist，ams:1.0.0）
+│   └── Dockerfile.prebuilt   # 基于预编译产物构建运行镜像（含 web/dist，ams:1.2.0）
 │   ├── Dockerfile.web        # 前端独立镜像（多阶段：node:20 构建 → nginx:1.27-alpine）
 │   ├── Dockerfile.web.prebuilt # 前端独立镜像（秒级离线：把宿主 web/dist 烤入 nginx）
-│   ├── Dockerfile.merge      # 把最新 web/dist 叠加进既有 ams:1.0.0（前端并入后端镜像）
+│   ├── Dockerfile.merge      # 把最新 web/dist 叠加进既有 ams:1.2.0（前端并入后端镜像）
 │   └── nginx.conf            # 前端独立镜像的反代配置（/api → ams-server:8080 + SPA 回退）
 ├── compose/
 │   └── docker-compose.yml    # 单机编排：ams 应用 + openGauss 数据库（静态 IP 连库）
@@ -53,7 +53,7 @@ deploy/
 **A. 自举基础镜像（推荐）**
 
 ```bash
-docker build -t ams:1.0.0 \
+docker build -t ams:1.2.0 \
   --build-arg BASE_IMAGE=your-registry/cangjie:1.2.0-linux \
   -f deploy/docker/Dockerfile .
 ```
@@ -61,7 +61,7 @@ docker build -t ams:1.0.0 \
 **B. SDK 直链下载**
 
 ```bash
-docker build -t ams:1.0.0 \
+docker build -t ams:1.2.0 \
   --build-arg CANGJIE_SDK_URL=https://.../cangjie-1.2.0-linux.tar.gz \
   --build-arg CANGJIE_STDX_URL=https://.../cangjie-stdx-linux.tar.gz \
   -f deploy/docker/Dockerfile .
@@ -202,17 +202,17 @@ MOT（内存优化表引擎）启动时调用 `mbind` 做 NUMA 绑核，需要
 
 ### 4.4 前端并入后端镜像（刷新 UI 不重编后端）
 
-若你已有一个 `ams:1.0.0` 镜像（含后端二进制），只是想把它里面的前端换成
+若你已有一个 `ams:1.2.0` 镜像（含后端二进制），只是想把它里面的前端换成
 最新重做后的 UI，**无需重新编译仓颉后端**，用 `Dockerfile.merge` 叠加即可：
 
 ```bash
 cd web && npm run build                       # 先产出 web/dist
-docker build -f deploy/docker/Dockerfile.merge -t ams:1.0.0 .
+docker build -f deploy/docker/Dockerfile.merge -t ams:1.2.0 .
 # 重建并重启（compose 的 ams 服务默认 8080:8080，单容器同时提供 UI + /api）
 docker compose -p ams -f deploy/compose/docker-compose.yml up -d --no-build ams
 ```
 
-`Dockerfile.merge` 以既有 `ams:1.0.0` 为基底，仅 `COPY web/dist/ /app/web/`，
+`Dockerfile.merge` 以既有 `ams:1.2.0` 为基底，仅 `COPY web/dist/ /app/web/`，
 因此**不会引入后端回归**；旧 web 的孤儿哈希文件无害（浏览器只会请求新产物）。
 
 > 这与「§2.1 前端独立镜像」是两种互斥方案：要么单容器合并镜像（推荐，

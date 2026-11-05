@@ -413,6 +413,20 @@ Chrome 在合成层上禁用 ClearType 子像素抗锯齿、改走灰度 AA。
 - ⚠️ **待同步**：`docs/07-视觉与交互设计规范.md` 为改版前的设计基线，本次视觉重构
   未回写该文档；如需对外一致，应安排一次 `docs/07` 与实现的对齐刷新。
 
+### 工程化 · 2026-11-05 发布流程改为源码包上传
+
+- **`.github/workflows/release.yml` 重写为「源码发布」**：不再在 CI 编译并上传平台特定的
+  二进制包（`ams-release-<v>-windows-x86_64.zip`），改为用 `git archive` 生成跨平台源码树
+  `ams-source-<v>.tar.gz` + `ams-source-<v>.zip`（自动排除 `.git` 与被 `.gitignore`
+  忽略的文件），作为 GitHub Release 资产上传；runner 由 `windows-latest` 改为更轻量的
+  `ubuntu-latest`，保留「前端 `npm ci && npm run build`」作为可构建门禁。
+- **`.github/workflows/ci.yml` 末尾两步同步**：「打包校验 / 校验发布包可独立运行」改为
+  「源码包生成校验」（`git archive` 生成源码包并列出），与新发布形态一致；顶部流程注释同步。
+- ⚠️ **待同步（非 workflow）**：`scripts/release.sh` 仍调用 `scripts/package.sh` 打二进制
+  包；`docs/09-部署与发布指南.md`、`README.md` 的发布章节、`scripts/package.sh` /
+  `scripts/ci/verify-package.sh` 仍描述旧的「编译二进制发布」方式。如需本地发布也走源码
+  包、且文档与实际一致，应安排一次同步刷新（见下条消息的询问）。
+
 ---
 
 ## [未发布] — 工程化与交付增强（Linux / 容器 / 对外 API / 信创）
