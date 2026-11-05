@@ -112,6 +112,11 @@ onMounted(async () => {
           <RouterLink v-if="canSystem" class="nav__item" to="/system">{{ t('App.08f206', '系统运维') }}</RouterLink>
         </template>
       </nav>
+      <!-- 关于：固定在侧栏底部，任何权限都能查看 -->
+      <div class="nav__footer">
+        <p class="nav__group">{{ t('App.aboutGroup', '其他') }}</p>
+        <RouterLink class="nav__item" to="/about">{{ t('App.about', '关于') }}</RouterLink>
+      </div>
     </aside>
 
     <div class="app-body">
@@ -127,11 +132,13 @@ onMounted(async () => {
           <RouterLink class="nav__item" to="/import">{{ t('App.60e2bc', '导入') }}</RouterLink>
           <RouterLink class="nav__item" to="/templates">{{ t('App.06d0f3', '模板') }}</RouterLink>
           <RouterLink class="nav__item" to="/family">{{ t('App.7cc8d6', '家庭') }}</RouterLink>
+          <RouterLink class="nav__item" to="/tags">{{ t('App.tagsShort', '标签') }}</RouterLink>
           <RouterLink class="nav__item" to="/profile">{{ t('App.d04c1f', '个人主页') }}</RouterLink>
           <RouterLink v-if="canUsers" class="nav__item" to="/users">{{ t('App.9ba763', '用户') }}</RouterLink>
           <RouterLink v-if="canRoles" class="nav__item" to="/roles">{{ t('App.6b2669', '角色') }}</RouterLink>
           <RouterLink v-if="canAudit" class="nav__item" to="/audit">{{ t('App.3a96c5', '审计') }}</RouterLink>
           <RouterLink v-if="canSystem" class="nav__item" to="/system">{{ t('App.1a1f6d', '系统') }}</RouterLink>
+          <RouterLink class="nav__item" to="/about">{{ t('App.about', '关于') }}</RouterLink>
         </nav>
 
         <div class="topbar__right">
@@ -276,7 +283,8 @@ onMounted(async () => {
 }
 .nav--inline {
   flex-direction: row;
-  gap: var(--sp-3);
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
   padding: 0;
 }
 
@@ -291,6 +299,11 @@ onMounted(async () => {
 }
 .nav--inline .nav__group {
   display: none;
+}
+/* 侧栏底部：关于入口推到底部，与上方导航保持同一视觉语言 */
+.nav__footer {
+  margin-top: auto;
+  padding-bottom: var(--sp-3);
 }
 
 .nav__item {

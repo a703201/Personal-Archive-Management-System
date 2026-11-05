@@ -282,7 +282,7 @@ onMounted(load)
           把常用档案的骨架存成模板，套用时一次生成多条，省去重复填写。
         </p>
       </div>
-      <button class="btn-primary" type="button" @click="openCreate">{{ tr('TemplateView.1eaf5c', '+ 新建模板') }}</button>
+      <button class="btn-primary" type="button" @click="openCreate">{{ tr('TemplateView.1eaf5c', '新建模板') }}</button>
     </div>
 
     <p v-if="loading" class="hint">{{ tr('TemplateView.300ee3', '加载中…') }}</p>
@@ -445,7 +445,7 @@ onMounted(load)
             max="50"
           />
           <span class="field__hint">
-            超过 1 条时，标题会按序号展开（`{n}` 占位或自动追加 ` (i)`）
+            超过 1 条时，标题会按序号展开（使用 {n} 占位，或自动追加序号）
           </span>
         </label>
       </div>

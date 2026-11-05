@@ -158,7 +158,7 @@ async function next(): Promise<void> {
     }
     if (step.value === 2) {
       if (admin.value.password !== admin.value.confirm) {
-        toast.warning(t('setup.pwdMismatch', '两次输入的密码不一致')); return
+        toast.warning(t('setup.pwdMismatch', '两次输入的口令不一致')); return
       }
       await api('/setup/admin', {
         method: 'POST', auth: false,
@@ -257,7 +257,7 @@ function goLogin(): void {
                 <input v-model="db.user" class="field-control" type="text" placeholder="gaussdb" />
               </label>
               <label class="auth__field setup__full">
-                <span class="auth__label">{{ t('setup.dbPassword', '数据库密码（留空表示不修改）') }}</span>
+                <span class="auth__label">{{ t('setup.dbPassword', '数据库密码（留空不修改）') }}</span>
                 <input v-model="db.password" class="field-control" type="password" autocomplete="new-password" />
               </label>
             </div>
@@ -275,7 +275,7 @@ function goLogin(): void {
             <p class="auth__subtitle">{{ t('setup.adminDesc', '首个账号将自动获得所有者与机构管理员权限。') }}</p>
             <div class="setup__grid">
               <label class="auth__field">
-                <span class="auth__label">{{ t('setup.username', '账号名称') }} <em>*</em></span>
+                <span class="auth__label">{{ t('setup.username', '用户名') }} <em>*</em></span>
                 <input v-model="admin.username" class="field-control" type="text" autocomplete="username" />
               </label>
               <label class="auth__field">
@@ -283,11 +283,11 @@ function goLogin(): void {
                 <input v-model="admin.nickname" class="field-control" type="text" />
               </label>
               <label class="auth__field">
-                <span class="auth__label">{{ t('setup.password', '密码') }} <em>*</em></span>
+                <span class="auth__label">{{ t('setup.password', '口令') }} <em>*</em></span>
                 <input v-model="admin.password" class="field-control" type="password" autocomplete="new-password" />
               </label>
               <label class="auth__field">
-                <span class="auth__label">{{ t('setup.confirm', '确认密码') }} <em>*</em></span>
+                <span class="auth__label">{{ t('setup.confirm', '确认口令') }} <em>*</em></span>
                 <input v-model="admin.confirm" class="field-control" type="password" autocomplete="new-password" />
               </label>
               <label class="auth__field">
@@ -305,7 +305,7 @@ function goLogin(): void {
           <!-- ③ 邮件服务 -->
           <section v-else-if="step === 3" class="setup__section">
             <h2 class="auth__title">{{ t('setup.mailTitle', '邮件服务') }}</h2>
-            <p class="auth__subtitle">{{ t('setup.mailDesc', '用于找回密码时发送验证码。可以跳过，之后在「系统运维 → 部署配置」中配置。') }}</p>
+            <p class="auth__subtitle">{{ t('setup.mailDesc', '用于找回口令时发送验证码。可以跳过，之后在「系统运维 → 部署配置」中配置。') }}</p>
             <label class="setup__switch">
               <input v-model="mail.enabled" type="checkbox" />
               <span>{{ t('setup.mailEnable', '启用 SMTP 邮件发送') }}</span>
@@ -331,7 +331,7 @@ function goLogin(): void {
                 <input v-model="mail.user" class="field-control" type="text" autocomplete="username" />
               </label>
               <label class="auth__field setup__full">
-                <span class="auth__label">{{ t('setup.smtpPassword', 'SMTP 密码（留空表示不修改）') }}</span>
+                <span class="auth__label">{{ t('setup.smtpPassword', 'SMTP 密码（留空不修改）') }}</span>
                 <input v-model="mail.password" class="field-control" type="password" autocomplete="new-password" />
               </label>
               <label class="auth__field setup__full">
@@ -352,7 +352,7 @@ function goLogin(): void {
             <div class="setup__check">✓</div>
             <h2 class="auth__title">{{ t('setup.finishTitle', '初始化完成') }}</h2>
             <p class="auth__subtitle">{{ t('setup.finishDesc', '管理员账号已创建。请使用刚设置的账号登录，随后可在「系统运维 → 部署配置」中随时调整数据库与邮件服务。') }}</p>
-            <button class="btn-primary setup__wide" type="button" @click="finish">{{ t('setup.goLogin', '前往登录') }}</button>
+            <button class="btn-primary setup__wide" type="button" @click="finish">{{ t('setup.goLogin', '返回登录') }}</button>
           </section>
 
           <div v-if="step < 4" class="setup__nav">

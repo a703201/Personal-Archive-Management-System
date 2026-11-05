@@ -823,7 +823,7 @@ function inputType(t: number | string): string {
           @change="reload"
         />
       </div>
-      <button class="btn-ghost" type="button" @click="reload">{{ tr('ArchiveView.711363', '查询') }}</button>
+      <button class="btn-ghost" type="button" @click="reload">{{ tr('ArchiveView.711363', '搜索') }}</button>
       <button class="btn-text" type="button" @click="openRecycle">{{ tr('ArchiveView.64ea87', '回收站') }}</button>
     </div>
 
@@ -837,7 +837,7 @@ function inputType(t: number | string): string {
     </div>
     <div v-else-if="items.length === 0" class="card empty">
       <div class="empty__title">{{ tr('ArchiveView.a5135e', '还没有档案') }}</div>
-      <p class="empty__sub">{{ tr('ArchiveView.f35149', '点击右上角「新建档案」，为当前主体添加第一条记录。') }}</p>
+      <p class="empty__sub">{{ tr('ArchiveView.f35149', '点击右上角「新建档案」，为当前主体添加第一条档案。') }}</p>
     </div>
 
     <div v-else class="list">
@@ -927,7 +927,7 @@ function inputType(t: number | string): string {
         </select>
       </label>
       <button class="btn-primary" type="button" :disabled="batchEditing" @click="batchEdit">
-        {{ batchEditing ? '提交中…' : '应用修改' }}
+        {{ batchEditing ? '应用中…' : '应用修改' }}
       </button>
       <button class="btn-ghost" type="button" @click="selected = new Set()">取消</button>
       <button
@@ -1180,14 +1180,14 @@ function inputType(t: number | string): string {
     <!-- 删除确认 -->
     <AppSheet v-model="showDelete" :title="tr('ArchiveView.298cbe', '移入回收站')" size="sm" :dismissible="!deleting">
       <p class="confirm-text">
-        确定要删除「{{ deleteTarget?.title }}」吗？条目将进入回收站，可在回收站中恢复。
+        确定要将「{{ deleteTarget?.title }}」移入回收站吗？可在回收站中恢复。
       </p>
       <div class="sheet-actions">
         <button class="btn-ghost" type="button" :disabled="deleting" @click="showDelete = false">
           取消
         </button>
         <button class="btn-danger" type="button" :disabled="deleting" @click="confirmDelete">
-          {{ deleting ? '删除中…' : '删除' }}
+          {{ deleting ? '处理中…' : '移入回收站' }}
         </button>
       </div>
     </AppSheet>

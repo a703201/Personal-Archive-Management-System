@@ -96,7 +96,7 @@ onMounted(load)
       <!-- 分类分布 -->
       <h2 class="section-title">{{ t('OverviewView.245475', '分类分布') }}</h2>
       <div class="card" v-reveal="80">
-        <p v-if="topCategories.length === 0" class="hint">{{ t('OverviewView.2e545d', '还没有档案，先去创建一条吧。') }}</p>
+        <p v-if="topCategories.length === 0" class="hint">{{ t('OverviewView.2e545d', '暂无档案') }}</p>
         <ul v-else class="bars">
           <li v-for="c in topCategories" :key="c.category" class="bar">
             <span class="bar__name">{{ categoryName(c.category) }}</span>
@@ -114,7 +114,7 @@ onMounted(load)
       <!-- 最近更新 -->
       <h2 class="section-title">{{ t('OverviewView.80920c', '最近更新') }}</h2>
       <div class="card" v-reveal="120">
-        <p v-if="data.recent.length === 0" class="hint">{{ t('OverviewView.4952df', '暂无更新记录。') }}</p>
+        <p v-if="data.recent.length === 0" class="hint">{{ t('OverviewView.4952df', '暂无更新记录') }}</p>
         <ul v-else class="recent">
           <li v-for="it in data.recent" :key="it.id" class="recent__row">
             <span class="recent__title">{{ it.title }}</span>

@@ -151,7 +151,7 @@ const INVITE_STATE_LABEL: Record<string, string> = {
   revoked: t('viewsFamilyView.61063b', '已撤销'),
   expired: t('viewsFamilyView.135437', '已过期'),
   exhausted: t('viewsFamilyView.c70b0a', '已用尽'),
-  too_many_fails: t('viewsFamilyView.f49cd8', '错误过多'),
+  too_many_fails: t('viewsFamilyView.f49cd8', '邀请码输错次数过多'),
 }
 
 function roleLabel(code: string): string {

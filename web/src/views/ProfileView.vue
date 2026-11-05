@@ -4,7 +4,7 @@
  *
  * 数据来自 /api/me：账号、昵称、掩码后的联系方式、权限点。
  * 注意后端**不会**返回任何凭据字段（口令哈希 / KDF 参数），
- * 前端也没有任何途径拿到 —— 这是设计上的保证，不是t('viewsProfileView.701280', "懒得展示")。
+ * 前端也没有任何途径拿到 —— 这是设计上的保证，不是界面偷懒。
  *
  * 【自助维护】
  *   PUT  /api/me            改昵称 / 邮箱 / 手机号
@@ -664,7 +664,7 @@ async function changePassword(): Promise<void> {
           取消
         </button>
         <button class="btn-primary" type="button" :disabled="savingPwd || !pwdOk" @click="changePassword">
-          {{ savingPwd ? '提交中…' : '确认修改' }}
+          {{ savingPwd ? '保存中…' : '保存' }}
         </button>
       </div>
     </AppSheet>

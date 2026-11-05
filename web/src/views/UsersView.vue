@@ -324,7 +324,7 @@ onMounted(() => {
   <section>
     <div class="page-head">
       <h1 class="page-title">{{ t('UsersView.baf847', '用户管理') }}</h1>
-      <button class="btn-primary" type="button" @click="showCreate = true">{{ t('UsersView.ccbaef', '+ 新建用户') }}</button>
+      <button class="btn-primary" type="button" @click="showCreate = true">{{ t('UsersView.ccbaef', '新建用户') }}</button>
     </div>
 
     <div class="toolbar">

@@ -455,7 +455,7 @@ onMounted(load)
     </div>
 
     <p v-if="loading" class="hint">{{ tr('AttachmentPanel.300ee3', '加载中…') }}</p>
-    <p v-else-if="list.length === 0" class="hint">{{ tr('AttachmentPanel.c0bf82', '还没有附件。') }}</p>
+    <p v-else-if="list.length === 0" class="hint">{{ tr('AttachmentPanel.c0bf82', '暂无附件') }}</p>
     <template v-else>
       <div class="pickbar">
         <label class="pickbar__all">

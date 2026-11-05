@@ -483,11 +483,11 @@ function fmtTime(ms: number | string | undefined): string {
     <!-- 配置中心 -->
     <template v-else-if="tab === 'config'">
       <div class="bar">
-        <p class="bar__hint">{{ tr('SystemView.b845a2', '敏感配置项的值以 *** 展示，编辑时需重新输入；留空表示不修改。') }}</p>
+        <p class="bar__hint">{{ tr('SystemView.b845a2', '敏感配置的值不会展示，编辑时留空表示不修改。') }}</p>
         <button class="btn-primary" type="button" @click="openSettingCreate">{{ tr('SystemView.679b34', '新增配置') }}</button>
       </div>
       <div class="card">
-        <p v-if="settings.length === 0" class="hint">{{ tr('SystemView.ab13c3', '还没有配置项。') }}</p>
+        <p v-if="settings.length === 0" class="hint">{{ tr('SystemView.ab13c3', '暂无配置项') }}</p>
         <div v-for="s in settings" :key="s.key" class="rowitem">
           <div class="rowitem__main">
             <div class="rowitem__title">
@@ -535,7 +535,7 @@ function fmtTime(ms: number | string | undefined): string {
     <!-- 密钥管理 -->
     <template v-else-if="tab === 'keys'">
       <div class="bar">
-        <p class="bar__hint">{{ tr('SystemView.4ea666', '此处只展示密钥的**版本与状态**，不存储也不展示任何密钥材料。') }}</p>
+        <p class="bar__hint">{{ tr('SystemView.4ea666', '此处只展示密钥的版本与状态，不存储也不展示任何密钥材料。') }}</p>
         <button class="btn-primary" type="button" :disabled="keyBusy" @click="rotateKey">
           轮换密钥
         </button>
@@ -583,7 +583,7 @@ function fmtTime(ms: number | string | undefined): string {
         </button>
       </div>
       <div class="card">
-        <p v-if="backups.length === 0" class="hint">{{ tr('SystemView.366fe0', '还没有备份。') }}</p>
+        <p v-if="backups.length === 0" class="hint">{{ tr('SystemView.366fe0', '暂无备份') }}</p>
         <div v-for="b in backups" :key="b.file" class="rowitem">
           <div class="rowitem__main">
             <div class="rowitem__title"><code>{{ b.file }}</code></div>
@@ -620,7 +620,7 @@ function fmtTime(ms: number | string | undefined): string {
 
       <div class="card deploy">
         <h2 class="deploy__title">{{ tr('SystemView.mailTitle', '邮件服务（SMTP）') }}</h2>
-        <p class="hint">{{ tr('SystemView.mailDesc', '用于找回密码时发送验证码。启用后由容器内投递服务通过 SMTP 真实发送。') }}</p>
+        <p class="hint">{{ tr('SystemView.mailDesc', '用于找回口令时发送验证码。启用后由容器内投递服务通过 SMTP 真实发送。') }}</p>
         <label class="deploy__switch">
           <input v-model="depMail.enabled" type="checkbox" />
           <span>{{ tr('SystemView.mailEnable', '启用 SMTP 邮件发送') }}</span>

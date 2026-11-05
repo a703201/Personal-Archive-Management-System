@@ -65,7 +65,7 @@ const needTotp = ref(false)
 async function onSubmit(): Promise<void> {
   error.value = ''
   if (!username.value || !password.value) {
-    error.value = '请输入用户名和密码'
+    error.value = '请输入用户名和口令'
     return
   }
   submitting.value = true
@@ -86,7 +86,7 @@ async function onSubmit(): Promise<void> {
     const redirect = (route.query.redirect as string) || '/overview'
     router.replace(redirect)
   } catch (e) {
-    const msg = (e as Error).message || t('viewsLoginView.6d207e', '登录失败，请重试')
+    const msg = (e as Error).message || t('viewsLoginView.6d207e', '登录失败，请检查用户名与口令后重试')
     error.value = msg
     // 「请输入 6 位动态码」「动态码不正确」「动态码已使用」都说明该账号启用了双因子
     if (msg.includes(t('viewsLoginView.dae7c8', '双因子')) || msg.includes(t('viewsLoginView.08f63a', '动态码'))) {
@@ -139,13 +139,13 @@ async function onSubmit(): Promise<void> {
           </label>
 
           <label class="auth__field">
-            <span class="auth__label">{{ t('LoginView.c839a8', '密码') }}</span>
+            <span class="auth__label">{{ t('LoginView.c839a8', '口令') }}</span>
             <input
               v-model="password"
               class="field-control"
               type="password"
               autocomplete="current-password"
-              :placeholder="t('LoginView.713b73', '请输入密码')"
+              :placeholder="t('LoginView.713b73', '请输入口令')"
             />
           </label>
 

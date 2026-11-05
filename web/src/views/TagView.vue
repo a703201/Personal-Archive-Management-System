@@ -314,7 +314,7 @@ async function confirmMerge(t: TagNode): Promise<void> {
         <h2 class="block__title">{{ tr('TagView.6eba89', '标签层级') }}</h2>
         <button class="btn-ghost" type="button" :disabled="busy" @click="load">{{ tr('TagView.38108e', '刷新') }}</button>
       </div>
-      <div v-if="!tags.length" class="empty">{{ tr('TagView.be5c53', '还没有标签。') }}</div>
+      <div v-if="!tags.length" class="empty">{{ tr('TagView.be5c53', '暂无标签') }}</div>
       <table v-else class="tbl">
         <thead>
           <tr>

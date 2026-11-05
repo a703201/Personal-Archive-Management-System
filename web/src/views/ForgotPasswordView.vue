@@ -279,7 +279,7 @@ function goLogin(): void {
           <p class="hint-block">{{ t('ForgotPasswordView.2d7650', '重置成功后，该账号在所有设备上的登录状态将立即失效，需重新登录。') }}</p>
           <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
-            {{ busy ? '提交中…' : '重置口令' }}
+            {{ busy ? '重置中…' : '重置口令' }}
           </button>
           <div class="fgt-row">
             <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
@@ -293,7 +293,7 @@ function goLogin(): void {
           <p class="hint-block">
             为了安全，原会话已全部下线。请使用新口令重新登录；若账号已启用双因子，登录时还需输入动态码。
           </p>
-          <button class="btn-primary auth__submit" type="button" @click="goLogin">{{ t('ForgotPasswordView.6c01b0', '去登录') }}</button>
+          <button class="btn-primary auth__submit" type="button" @click="goLogin">{{ t('ForgotPasswordView.6c01b0', '返回登录') }}</button>
         </div>
 
         <p v-if="step < 4" class="auth__switch">

@@ -248,7 +248,7 @@ onMounted(load)
   <section>
     <div class="page-head">
       <h1 class="page-title">{{ t('RolesView.0c1a09', '角色与权限') }}</h1>
-      <button class="btn-primary" type="button" @click="showCreate = true">{{ t('RolesView.e40632', '+ 新建角色') }}</button>
+      <button class="btn-primary" type="button" @click="showCreate = true">{{ t('RolesView.e40632', '新建角色') }}</button>
     </div>
 
     <p v-if="loading" class="hint">{{ t('RolesView.300ee3', '加载中…') }}</p>

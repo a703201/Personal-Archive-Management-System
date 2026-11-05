@@ -25,6 +25,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/roles', name: 'roles', component: () => import('../views/RolesView.vue'), meta: { title: '角色与权限', admin: true } },
   { path: '/audit', name: 'audit', component: () => import('../views/AuditView.vue'), meta: { title: '审计日志', admin: true } },
   { path: '/system', name: 'system', component: () => import('../views/SystemView.vue'), meta: { title: '系统运维', admin: true } },
+  { path: '/about', name: 'about', component: () => import('../views/AboutView.vue'), meta: { title: '关于' } },
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { title: '登录', public: true } },
   { path: '/register', name: 'register', component: () => import('../views/RegisterView.vue'), meta: { title: '注册', public: true } },
   {

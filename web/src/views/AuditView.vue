@@ -133,7 +133,7 @@ onMounted(load)
         <option value="1">{{ t('AuditView.3e3c80', '失败') }}</option>
       </select>
       <div class="filters__btns">
-        <button class="btn-primary" type="button" @click="search">{{ t('AuditView.711363', '查询') }}</button>
+        <button class="btn-primary" type="button" @click="search">{{ t('AuditView.711363', '搜索') }}</button>
         <button class="btn-ghost" type="button" @click="reset">{{ t('AuditView.3d8134', '重置') }}</button>
       </div>
     </div>
