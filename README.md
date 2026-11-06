@@ -119,8 +119,8 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 
 | 层 | 选型 | 说明 |
 | --- | --- | --- |
-| 后端语言 | **仓颉 Cangjie**（SDK 1.0.5） | 静态编译、原生二进制；子包粒度手写构建脚本（`cjpm` 在本机 Windows 触发堆损坏，故本机构建走 `scripts/build.sh`，CI 用 `cjpm`） |
-| 密码学扩展 | **stdx 1.0.5.1** | 提供 SM3 / SM4；`bash scripts/verify-stdx.sh` 可一键复现 14 项国标向量校验 |
+| 后端语言 | **仓颉 Cangjie**（SDK 1.2.0） | 静态编译、原生二进制；子包粒度手写构建脚本（`cjpm` 在本机 Windows 触发堆损坏，故本机构建走 `scripts/build.sh`，CI 用 `cjpm`） |
+| 密码学扩展 | **stdx 1.2.0.1** | 提供 SM3 / SM4；`bash scripts/verify-stdx.sh` 可一键复现 14 项国标向量校验 |
 | 数据库 | **openGauss** | 通过自编译的 `tpc` 驱动接入（`tools/vendor/opengauss-driver`） |
 | 前端 | **Vue 3.5 + TypeScript + Vite 6** | 零 UI 框架依赖，手写设计系统（深浅色、四档响应式断点、Apple 质感动效） |
 | 状态管理 | 组合式 API + `AppStorage` 式信号 | 不引入 Pinia，规模未到需要 |
@@ -186,8 +186,8 @@ ams-server   ← 入口：装配依赖、启动
 
 | 依赖 | 版本 / 说明 |
 | --- | --- |
-| 仓颉 SDK | 1.0.5，`CANGJIE_HOME` 指向安装目录（或放 `tools/cangjie/`） |
-| stdx | 1.0.5.1，`bash scripts/install-stdx.sh` 安装，`bash scripts/verify-stdx.sh` 校验 |
+| 仓颉 SDK | 1.2.0，`CANGJIE_HOME` 指向安装目录（或放 `tools/cangjie/`） |
+| stdx | 1.2.0.1，`bash scripts/install-stdx.sh` 安装，`bash scripts/verify-stdx.sh` 校验 |
 | openGauss | 一个可连实例（本地开发常用容器，默认端口 `15432`） |
 | Node.js | ≥ 20（前端 Vite 6 / vue-tsc） |
 | 平台 | 本机已验证 Windows + Git Bash；CI 覆盖 Linux |

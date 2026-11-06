@@ -109,9 +109,13 @@ WEB_DIST="web/dist"
 if [ "$SKIP_WEB" = "0" ]; then
     echo "[2/6] 构建前端..."
     if [ ! -d "web/node_modules" ]; then
-        echo "[ERROR] web/node_modules 不存在，请先：cd web && npm install"
-        echo "        或加 --skip-web 复用已有的 ${WEB_DIST}/"
-        exit 1
+        echo "[INFO] 未找到 web/node_modules，自动安装前端依赖（cd web && npm ci）..."
+        ( cd web && npm ci ) > /tmp/ams_package_web_install.log 2>&1 || {
+            echo "[ERROR] 前端依赖安装失败，日志尾部："
+            tail -30 /tmp/ams_package_web_install.log | sed 's/^/  /'
+            echo "        也可手动：cd web && npm install"
+            exit 1
+        }
     fi
     # npm run build = vue-tsc --noEmit && vite build —— 类型错误会挡住打包，
     # 这是有意的：前端类型漂移不该被带进交付物。
@@ -183,6 +187,29 @@ if [ "$OS" = "windows" ]; then
         done
     fi
     echo "      运行时 DLL：${DLL_COUNT} 个"
+
+    # ---- 兜底：若关键运行时 DLL 仍未就位，从 SDK bin 与 Git for Windows 补齐 ----
+    # 背景：CI 上下载的 SDK 可能未把 MinGW DLL 放入
+    #   runtime/lib/windows_x86_64_cjnative，上面两步（build/*.dll、
+    #   CJ_RUNTIME）都扫不到。这里再做一次兜底搜索，确保发布包必含
+    #   libgcc_s_seh-1.dll / libwinpthread-1.dll 等，否则 exe 启动即报
+    #   "error while loading shared libraries"。
+    _sdk_home="${CANGJIE_HOME:-E:/Cangjie}"
+    _cand_dirs=(
+        "${_sdk_home}/bin"
+        "${_sdk_home}/third_party/llvm/bin"
+        "${_sdk_home}/runtime/lib/windows_x86_64_cjnative"
+    )
+    if command -v git >/dev/null 2>&1; then
+        _gb="$(dirname "$(command -v git)")"
+        _cand_dirs+=("$_gb" "$_gb/../mingw64/bin" "/mingw64/bin" "/c/Program Files/Git/mingw64/bin")
+    fi
+    for req in libgcc_s_seh-1.dll libwinpthread-1.dll libpcre2-8.dll libcangjie-runtime.dll; do
+        [ -e "$STAGE/bin/$req" ] && continue
+        for c in "${_cand_dirs[@]}"; do
+            [ -e "$c/$req" ] && { cp -f "$c/$req" "$STAGE/bin/"; DLL_COUNT=$((DLL_COUNT + 1)); echo "      [兜底] 补齐 $req <- $c"; break; }
+        done
+    done
 
     # ---- 关键校验：MinGW 运行库必须齐全 ----
     MISSING=""

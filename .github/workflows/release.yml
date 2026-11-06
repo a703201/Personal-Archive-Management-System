@@ -1,27 +1,31 @@
 # ============================================================
-# AMS · 发布（GitHub Release · 源码包）
+# AMS · 发布（GitHub Release · 二进制程序）
 #
 # 触发：推送形如 v* 的 tag，或手动 workflow_dispatch
 #
-# 流程：
-#   ① 检出源码（含完整历史，供 git archive 生成干净源码树）
-#   ② 前端构建门禁（npm ci + npm run build，验证源码可构建）
-#   ③ 打包源码（git archive 生成 tar.gz + zip，自动排除 .git 与忽略文件）
-#   ④ 创建 / 复用 Release 并上传源码包资产
+# 流程：检出 → 准备工具链 → 构建（编译后端） → 单元测试 →
+#       打包二进制发布包 → 校验可独立运行 → 创建 Release 并上传资产；
+#       **Release 说明（notes）自动取自 CHANGELOG.md 对应版本段落**。
 #
 # 用法（本地）：
 #   git tag -a v1.2.0 -m "AMS 1.2.0"
 #   git push origin v1.2.0
-#   # 本 workflow 会自动打包源码并发布
+#   # 本 workflow 会自动编译并发布二进制程序
 #
 #   或一步到位（脚本方式，不需要配 runner）：
 #   bash scripts/release.sh --version 1.2.0
 #
-# 产物（跨平台源码分发，不再发布特定平台的编译二进制）：
-#   ams-source-<version>.tar.gz
-#   ams-source-<version>.zip
-#   含：仓颉后端源码 / web 前端源码 / deploy/ / docs/ / 配置与脚本
-#   部署：见 deploy/README.md；前端构建见 web/ 内说明
+# 产物：
+#   ams-release-<version>-windows-x86_64.zip
+#   含：bin/（exe + 全部运行时 DLL）/ web/dist/ / config/ / scripts/ / docs/ / LICENSE / CHECKSUMS.sha256
+#
+# ⚠️ 工具链前提（编译后端需要仓颉 SDK）：
+#   本 job 默认在 windows-latest（GitHub 托管）运行，工具链来源见
+#   scripts/ci/setup-toolchain.sh：
+#     ① 仓库变量 CANGJIE_TOOLCHAIN_TAG 指定的 GitHub Release 工具链资产（推荐）
+#     ② 仓库变量 CANGJIE_SDK_URL 指定的 SDK 直链
+#   若使用已装好仓颉 SDK 的自托管 Windows runner，把下方
+#   runs-on 改为对应 self-hosted 标签即可（setup-toolchain.sh 会跳过下载）。
 # ============================================================
 name: Release
 
@@ -44,12 +48,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-source:
-    # 源码包跨平台、且需要的是 git + node（前端门禁），用 ubuntu 最轻量稳定。
-    runs-on: ubuntu-latest
+  release:
+    runs-on: windows-latest
 
     steps:
-      - name: 检出代码（含 tag 与完整历史）
+      - name: 检出代码（含 tag）
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -60,38 +63,50 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VER="${{ inputs.version }}"
+            VER="${VER#v}"
           else
             VER="${GITHUB_REF_NAME#v}"
           fi
-          VER="${VER#v}"
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "发布版本：${VER}"
 
-      - name: 前端构建门禁（验证源码可构建）
-        working-directory: web
-        run: |
-          npm ci
-          npm run build
+      - name: 缓存工具链
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/ams-toolchain
+            ~/.cache/ams-stdx
+          key: ams-toolchain-${{ runner.os }}-1.2.0
+          restore-keys: |
+            ams-toolchain-${{ runner.os }}-
 
-      - name: 打包源码（tar.gz + zip）
+      - name: 准备工具链（SDK / stdx / 驱动）
         shell: bash
-        env:
-          VERSION: ${{ steps.ver.outputs.version }}
-        run: |
-          set -euo pipefail
-          VER="${VERSION}"
-          PREFIX="ams-${VER}"
-          mkdir -p dist
-          # git archive 生成干净源码树：不含 .git、不含被 .gitignore 忽略的文件
-          # （如 node_modules / 构建产物 / .tmp 等），跨平台且轻量。
-          git archive --format=tar --prefix="${PREFIX}/" HEAD \
-            | gzip -9 > "dist/ams-source-${VER}.tar.gz"
-          git archive --format=zip --prefix="${PREFIX}/" HEAD \
-            -o "dist/ams-source-${VER}.zip"
-          echo "### 源码包" >> "$GITHUB_STEP_SUMMARY"
-          ls -lh dist/ams-source-* >> "$GITHUB_STEP_SUMMARY"
+        run: bash scripts/ci/setup-toolchain.sh
 
-      - name: 创建 / 复用 Release
+      - name: 构建（编译后端二进制）
+        shell: bash
+        run: bash scripts/build.sh
+
+      - name: 单元测试
+        shell: bash
+        run: bash scripts/test.sh
+
+      - name: 构建前端
+        shell: bash
+        run: cd web && npm ci && npm run build
+
+      - name: 打包二进制发布包
+        shell: bash
+        run: bash scripts/package.sh --skip-build --skip-web --version "${{ steps.ver.outputs.version }}"
+
+      - name: 校验发布包可独立运行
+        shell: bash
+        run: |
+          bash scripts/ci/verify-package.sh \
+            "dist/ams-release-${{ steps.ver.outputs.version }}-windows-x86_64" 18099
+
+      - name: 创建 / 复用 Release（notes 取自 CHANGELOG）
         id: rel
         shell: bash
         env:
@@ -101,49 +116,43 @@ jobs:
           set -e
           VER="${VERSION}"
           TAG="v${VER}"
+          ZIP="dist/ams-release-${VER}-windows-x86_64.zip"
+          NOTES="$(mktemp)"
+          # 取 CHANGELOG.md 中本版本段落作为 Release 说明
+          python3 -c "import re,sys; v=sys.argv[1]; t=open('CHANGELOG.md',encoding='utf-8').read(); m=re.search(r'^##\s+\[?v?'+re.escape(v)+r'\]?.*?(?=^##\s|\Z)',t,re.M|re.S); open(sys.argv[2],'w',encoding='utf-8').write(m.group(0).strip() if m else 'AMS '+sys.argv[1])" "$VER" "$NOTES"
+          [ -s "$NOTES" ] || echo "AMS ${VER}" > "$NOTES"
+
           REL_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
             2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
+
           if [ -z "$REL_ID" ]; then
-            NOTES="$(mktemp)"
-            if [ -f CHANGELOG.md ]; then
-              python3 - "$VER" "$NOTES" <<'PYEOF'
-import re, sys
-version, out = sys.argv[1], sys.argv[2]
-try:
-    text = open("CHANGELOG.md", encoding="utf-8").read()
-except Exception:
-    sys.exit(0)
-m = re.search(r"^##\s+\[?v?" + re.escape(version) + r"\]?.*?(?=^##\s|\Z)", text, re.M | re.S)
-if m:
-    open(out, "w", encoding="utf-8").write(m.group(0).strip())
-PYEOF
-            fi
-            [ -s "$NOTES" ] || echo "AMS ${VER}" > "$NOTES"
+            echo "创建 Release ${TAG}..."
             REL_ID="$(curl --ssl-no-revoke -fsS -X POST \
               -H "Authorization: Bearer ${GH_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
               -H "Content-Type: application/json" \
               "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases" \
-              -d "$(python3 - "$TAG" "$VER" "$NOTES" <<'PYEOF'
-import json, sys
-tag, version, notes_file = sys.argv[1], sys.argv[2], sys.argv[3]
-try:
-    body = open(notes_file, encoding="utf-8").read()
-except Exception:
-    body = ""
-print(json.dumps({"tag_name": tag, "name": "AMS " + version, "body": body,
-                  "draft": False, "prerelease": False}, ensure_ascii=False))
-PYEOF
-)" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")"
-            echo "已创建 Release ${TAG}（id=${REL_ID}）"
+              -d "$(python3 -c \"import json,sys; print(json.dumps({'tag_name':sys.argv[1],'name':'AMS '+sys.argv[2],'body':open(sys.argv[3],encoding='utf-8').read(),'draft':False,'prerelease':False},ensure_ascii=False))\" "$TAG" "$VER" "$NOTES")" \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))")"
+            echo "      已创建（id=${REL_ID}）"
           else
-            echo "Release 已存在（id=${REL_ID}），复用并上传资产"
+            echo "      Release 已存在（id=${REL_ID}），复用并上传资产"
+            # 删掉同名旧资产，避免 422
+            ASSET_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets" \
+              2>/dev/null | python3 -c "import sys,json; n=sys.argv[1]; print(next((a['id'] for a in json.load(sys.stdin) if a.get('name')==n),''))" "$(basename "$ZIP")")"
+            if [ -n "$ASSET_ID" ]; then
+              curl --ssl-no-revoke -fsS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" || true
+            fi
           fi
+
           echo "id=${REL_ID}" >> "$GITHUB_OUTPUT"
 
-      - name: 上传源码包资产
+      - name: 上传二进制资产
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -153,42 +162,28 @@ PYEOF
           set -e
           VER="${VERSION}"
           REL_ID="${REL_ID}"
-          for PKG in "dist/ams-source-${VER}.tar.gz" "dist/ams-source-${VER}.zip"; do
-            NAME="$(basename "$PKG")"
-            echo "上传 ${NAME} ..."
-            # 删除同名旧资产，避免 422
-            ASSET_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets" \
-              2>/dev/null | python3 -c '
-import sys, json
-name = sys.argv[1]
-try:
-    for a in json.load(sys.stdin):
-        if a.get("name") == name:
-            print(a["id"]); break
-except Exception:
-    pass
-' "$NAME")"
-            if [ -n "$ASSET_ID" ]; then
-              curl --ssl-no-revoke -fsS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" \
-                "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${ASSET_ID}" || true
-            fi
-            CODE="$(curl -sS -o /tmp/ams_upload.out -w "%{http_code}" \
-              --ssl-no-revoke --max-time 1800 -X POST \
-              -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              -F "file=@${PKG}" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=$(python3 -c "
-import urllib.parse, sys
-print(urllib.parse.quote(sys.argv[1]))" "$NAME")")"
-            if [ "$CODE" != "201" ] && [ "$CODE" != "200" ]; then
-              echo "::error::资产上传失败（HTTP ${CODE}）"
-              head -c 500 /tmp/ams_upload.out
-              exit 1
-            fi
-            echo "  ${NAME} 上传完成"
-          done
+          ZIP="dist/ams-release-${VER}-windows-x86_64.zip"
+          echo "上传 ${ZIP} ..."
+          # ⚠️ 必须用 `-F "file=@..."`（multipart/form-data）。
+          #   `--data-binary "@file"` 发的是原始 body，GitHub 不接受（400）。
+          #   `-F` 还会流式发送，不把整个文件读进内存。
+          # --ssl-no-revoke：Windows runner 的 curl 用 schannel，
+          # 默认查证书吊销状态，被代理/防火墙挡住时失败
+          # （CRYPT_E_NO_REVOCATION_CHECK 0x80092012）。
+          CODE="$(curl -sS -o /tmp/ams_upload.out -w "%{http_code}" \
+            --ssl-no-revoke \
+            --max-time 1800 \
+            -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -F "file=@${ZIP}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$(basename "$ZIP")")")"
+          if [ "$CODE" != "201" ] && [ "$CODE" != "200" ]; then
+            echo "::error::资产上传失败（HTTP ${CODE}）"
+            head -c 500 /tmp/ams_upload.out
+            exit 1
+          fi
+          echo "上传完成"
 
       - name: 写入发布摘要
         shell: bash
@@ -196,9 +191,10 @@ print(urllib.parse.quote(sys.argv[1]))" "$NAME")")"
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           {
-            echo "## AMS ${VERSION} 源码发布成功"
+            echo "## AMS ${VERSION} 发布成功"
             echo ""
-            echo "- 源码包：\`ams-source-${VERSION}.tar.gz\` / \`ams-source-${VERSION}.zip\`"
-            echo "- 内容：仓颉后端源码 / web 前端源码 / deploy/ / docs/ / 配置脚本"
-            echo "- 构建与部署：见 \`deploy/README.md\`；前端 \`cd web && npm ci && npm run build\`"
+            echo "- 产物：\`ams-release-${VERSION}-windows-x86_64.zip\`"
+            echo "- 校验和：见包内 \`CHECKSUMS.sha256\`"
+            echo "- 部署：见包内 \`DEPLOY.md\` / \`docs/09\`"
+            echo "- Release 说明：自动取自 \`CHANGELOG.md\` 的 \`[${VERSION}]\` 段落"
           } >> "$GITHUB_STEP_SUMMARY"

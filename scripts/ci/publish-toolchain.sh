@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # ============================================================
 # AMS · CI 工具链发布（把 SDK + stdx 做成 GitHub Release 资产）
 #
@@ -40,6 +40,10 @@ SDK_SRC="${CANGJIE_HOME:-${ROOT}/tools/cangjie}"
 STDX_SRC="${STDX_ROOT:-E:/CangjieLibs}/windows_x86_64_cjnative/dynamic/stdx"
 SDK_SRC="$(ams_path_norm "$SDK_SRC")"
 STDX_SRC="$(ams_path_norm "$STDX_SRC")"
+# Python 解释器（兼容 python3 / python；Git Bash 下可能只有 python）
+# 必须提前定义：当 SDK/stdx 包已存在被复用时，打包分支不会执行，
+# 否则后面的上传逻辑会因 $PY 未赋值而在 set -u 下崩溃。
+PY="$(command -v python3 || command -v python)"
 
 # 参数
 while [ $# -gt 0 ]; do
@@ -58,12 +62,19 @@ while [ $# -gt 0 ]; do
     shift
 done
 DRY_RUN="${DRY_RUN:-0}"
-AUTO_UPLOAD=0
+AUTO_UPLOAD="${AUTO_UPLOAD:-0}"
 
 echo "=== AMS · 发布 CI 工具链 ==="
 echo "  SDK  : ${SDK_SRC}  (${SDK_VERSION})"
 echo "  stdx : ${STDX_SRC}  (${STDX_VERSION})"
 echo "  tag  : ${TAG}"
+if [ "$AUTO_UPLOAD" = "1" ]; then
+    if [ -n "${GITHUB_TOKEN:-}" ] || [ -n "${GH_TOKEN:-}" ]; then
+        echo "  模式 : 自动上传（--upload）；Token 已设置"
+    else
+        echo "  模式 : 自动上传（--upload）；⚠️ Token 未设置，稍后将报错退出"
+    fi
+fi
 ams_path_env_info
 echo ""
 
@@ -119,27 +130,33 @@ MINGW_CANDIDATES=(
     "/c/Program Files/Git/mingw64/bin"
 )
 ADDED=0
+# 找到 SDK 源目录下所有 bin 目录（含 third_party/llvm/bin 等），
+# 把 MinGW DLL 补到**每一个** bin 目录 —— opt.exe 等第三方工具才能找到运行时 DLL，
+# 否则 CI runner 上会报 0xC0000135 (DLL not found)。
+mapfile -t SDK_BIN_DIRS < <(find "${SDK_SRC}" -type d -name bin 2>/dev/null)
 for req in $MINGW_DLLS; do
-    if [ -e "${SDK_SRC}/bin/$req" ]; then
-        continue
-    fi
     for c in "${MINGW_CANDIDATES[@]}"; do
         [ -z "$c" ] && continue
-        if [ -e "$c/$req" ]; then
-            cp -f "$c/$req" "${SDK_SRC}/bin/" && ADDED=$((ADDED + 1))
-            echo "      补齐 MinGW 运行库: $req  (来自 $c)"
-            break
-        fi
+        [ -e "$c/$req" ] || continue
+        for b in "${SDK_BIN_DIRS[@]:-}"; do
+            if [ ! -e "$b/$req" ]; then
+                cp -f "$c/$req" "$b/" && ADDED=$((ADDED + 1))
+            fi
+        done
+        break
     done
 done
-# 只对**必需**的 DLL 做硬校验（可选的找不到不算错）
+echo "      已补齐 MinGW 运行库到 ${#SDK_BIN_DIRS[@]} 个 bin 目录"
+# 只对**必需**的 DLL 做硬校验（可选找不到不算错）：要求所有 bin 目录都具备
 MISSING=""
 for req in $MINGW_REQUIRED; do
-    [ -e "${SDK_SRC}/bin/$req" ] || MISSING="$MISSING $req"
+    for b in "${SDK_BIN_DIRS[@]:-}"; do
+        [ -e "$b/$req" ] || { MISSING="$MISSING $req($b)"; break; }
+    done
 done
 if [ -n "$MISSING" ]; then
-    echo "[ERROR] 找不到必需的 MinGW 运行库：$MISSING"
-    echo "       CI 上编译 @Test 用例会失败（RunCJTask 找不到）。"
+    echo "[ERROR] 找不到/未补齐必需的 MinGW 运行库：$MISSING"
+    echo "       CI 上 opt.exe 会因 DLL not found 失败（0xC0000135）。"
     echo "       请运行 bash scripts/install-sdk.sh 补齐，或手动放置。"
     exit 1
 fi
@@ -172,7 +189,8 @@ EXCLUDE_EXACT = {
     "third_party/llvm/bin/libclang-cpp.dll",
     "third_party/llvm/bin/libclang.dll",
     "third_party/llvm/bin/liblldb.dll",
-    "third_party/llvm/bin/libunwind.dll",
+    # 注意：libunwind.dll 不再剔除——opt.exe 等 LLVM 工具在 MinGW 构建下会
+    # 依赖它，剔除后会导致 third_party/llvm/bin 缺该 DLL 而 0xC0000135。
     "third_party/llvm/bin/libLTO.dll",
     "third_party/llvm/bin/libcangjie-lsp.dll",
 }
@@ -238,7 +256,7 @@ if [ "$AUTO_UPLOAD" != "1" ]; then
     echo "[3/3] 跳过自动上传（加 --upload 可启用）"
     echo ""
     echo "=== Release 已创建，工具链资产请手动上传 ==="
-    echo "  Release: https://github.com/${ownerRepo}/releases/tag/${TAG}"
+    echo "  Release: https://github.com/${OWNER_REPO}/releases/tag/${TAG}"
     echo "  待上传  :"
     echo "    ${SDK_ZIP}"
     echo "    ${STDX_ZIP}"
@@ -248,7 +266,7 @@ if [ "$AUTO_UPLOAD" != "1" ]; then
     echo ""
     echo "方式 B：GitHub CLI（推荐，绕开 API 网关限制）"
     echo "  winget install GitHub.cli"
-    echo "  gh release upload ${TAG} \"${SDK_ZIP}\" \"${STDX_ZIP}\" --repo ${ownerRepo} --clobber"
+    echo "  gh release upload ${TAG} \"${SDK_ZIP}\" \"${STDX_ZIP}\" --repo ${OWNER_REPO} --clobber"
     echo ""
     echo "下一步："
     echo "  在仓库 Settings -> Secrets and variables -> Actions -> Variables"
@@ -257,19 +275,25 @@ if [ "$AUTO_UPLOAD" != "1" ]; then
 fi
 
 echo "[3/3] 上传到 Release ${TAG}..."
-REL_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${TOKEN}" \
+REL_ID=""
+REL_HTTP="$(curl --ssl-no-revoke -sS -o /tmp/ams_tc_getrel.out -w '%{http_code}' \
+    -H "Authorization: Bearer ${TOKEN}" \
     -H "Accept: application/vnd.github+json" \
-    "${API}/releases/tags/${TAG}" 2>/dev/null \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
+    "${API}/releases/tags/${TAG}")"
+if [ "$REL_HTTP" = "200" ]; then
+    REL_ID="$("$PY" -c "import sys,json; print(json.load(open('/tmp/ams_tc_getrel.out')).get('id',''))" 2>/dev/null || true)"
+fi
+echo "      查询 Release HTTP=${REL_HTTP} id=${REL_ID:-<无>}"
 
 if [ -z "$REL_ID" ]; then
     echo "      创建 Release..."
-    REL_ID="$(curl --ssl-no-revoke -fsS -X POST \
+    REL_HTTP="$(curl --ssl-no-revoke -sS -X POST \
         -H "Authorization: Bearer ${TOKEN}" \
         -H "Accept: application/vnd.github+json" \
         -H "Content-Type: application/json" \
+        -o /tmp/ams_tc_create.out -w '%{http_code}' \
         "${API}/releases" \
-        -d "$(python3 - "$TAG" <<'PYEOF_BODY'
+        -d "$("$PY" - "$TAG" <<'PYEOF_BODY'
 import json, sys
 tag = sys.argv[1]
 print(json.dumps({
@@ -283,9 +307,13 @@ print(json.dumps({
     "prerelease": False,
 }, ensure_ascii=False))
 PYEOF_BODY
-)" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
+)")"
+    REL_ID="$("$PY" -c "import sys,json; print(json.load(open('/tmp/ams_tc_create.out')).get('id',''))" 2>/dev/null || true)"
+    echo "      创建 Release HTTP=${REL_HTTP} id=${REL_ID:-<无>}"
     if [ -z "$REL_ID" ]; then
-        echo "[ERROR] 创建 Release 失败。"
+        echo "[ERROR] 创建 Release 失败（HTTP ${REL_HTTP}）。响应："
+        head -c 400 /tmp/ams_tc_create.out
+        echo ""
         exit 1
     fi
     echo "      已创建（id=${REL_ID}）"
@@ -299,7 +327,7 @@ for ZIP in "$SDK_ZIP" "$STDX_ZIP"; do
     # 删掉同名旧资产（否则 422）
     AID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${TOKEN}" \
         -H "Accept: application/vnd.github+json" \
-        "${API}/releases/${REL_ID}/assets" 2>/dev/null | python3 -c "
+        "${API}/releases/${REL_ID}/assets" 2>/dev/null | "$PY" -c "
 import sys, json
 try:
     for a in json.load(sys.stdin):
@@ -334,6 +362,28 @@ except Exception:
     fi
     echo "      ✓ ${NAME}"
 done
+
+echo ""
+echo "=== 校验：重新查询 Release 资产 ==="
+ASSET_JSON="$(curl --ssl-no-revoke -sS -H "Authorization: Bearer ${TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    "${API}/releases/${REL_ID}/assets")"
+"$PY" - "$ASSET_JSON" "$SDK_ZIP" "$STDX_ZIP" <<'PYEOF_VERIFY'
+import sys, json, os
+try:
+    data = json.loads(sys.argv[1])
+except Exception:
+    print("[WARN] 校验阶段无法解析资产列表（不影响已上传内容）")
+    sys.exit(0)
+names = {a.get("name") for a in data}
+zips = [os.path.basename(x) for x in sys.argv[2:]]
+for n in zips:
+    print(("  ✓ 已确认 " if n in names else "  ✗ 缺失 ") + n)
+missing = [n for n in zips if n not in names]
+if missing:
+    print("[ERROR] 以下资产未确认上传成功：", missing)
+    sys.exit(1)
+PYEOF_VERIFY
 
 echo ""
 echo "=== 工具链发布完成 ==="
