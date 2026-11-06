@@ -1,0 +1,47 @@
+[dependencies]
+
+[package]
+  cjc-version = "1.1.0"
+  compile-option = "-Woff unused --diagnostic-format=noColor"
+  description = "opengauss driver for cangjie"
+  link-option = "-lcrypto"
+  organization = "cangjie_tpc"
+  name = "opengauss"
+  output-type = "dynamic"
+  src-dir = "src"
+  target-dir = ""
+  version = "1.1.0"
+  package-configuration = {}
+  category = ["Utility"]
+  license = ["MulanPSL2"]
+  include = ["./src"]
+  exclude = ["cjpm.toml.bak", "cangjie.sh", ".gitignore", ".gitatributes", "CHANGELOG", "cjpm.lock", "target"]
+
+
+
+# 需要配置环境变量CANGJIE_STDX来指定stdx扩展包的路径
+#
+# Windows X64平台环境变量设置示例：
+# SET CANGJIE_STDX_PATH=D:\cangjie-stdx-windows-x64-0.60.5.1\windows_x86_64_llvm\dynamic\stdx
+# SET PATH=%CANGJIE_STDX_PATH%;%PATH%
+#
+# Linux X64平台环境变量设置示例：
+# export CANGJIE_STDX_PATH=/opt/cangjie-stdx-linux-x64-0.60.5.1/linux_x86_64_llvm/dynamic/stdx
+# export LD_LIBRARY_PATH=$CANGJIE_STDX_PATH:$LD_LIBRARY_PATH
+
+[target]
+    [target.x86_64-unknown-linux-gnu]
+        [target.x86_64-unknown-linux-gnu.bin-dependencies]
+            path-option = ["${CANGJIE_STDX_PATH}"]
+    [target.aarch64-unknown-linux-gnu]
+        [target.aarch64-unknown-linux-gnu.bin-dependencies]
+            path-option = ["${CANGJIE_STDX_PATH}"]
+    [target.x86_64-apple-darwin]
+        [target.x86_64-apple-darwin.bin-dependencies]
+            path-option = ["${CANGJIE_STDX_PATH}"]
+    [target.x86_64-w64-mingw32]
+        [target.x86_64-w64-mingw32.bin-dependencies]
+            path-option = ["${CANGJIE_STDX_PATH}"]
+    [target.aarch64-apple-darwin]
+        [target.aarch64-apple-darwin.bin-dependencies]
+            path-option = ["${CANGJIE_STDX_PATH}"]

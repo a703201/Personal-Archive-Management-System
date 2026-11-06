@@ -1,0 +1,13 @@
+[dependencies]
+  opengauss = { path = "../..", version = "1.0.1"}
+[package]
+  cjc-version = "0.53.4"
+  compile-option = "-Woff unused --diagnostic-format=noColor"
+  description = "sqltype example"
+  link-option = "-lcrypto"
+  name = "sqltype_example"
+  output-type = "executable"
+  src-dir = "src"
+  target-dir = ""
+  version = "1.0.1"
+  package-configuration = {}
