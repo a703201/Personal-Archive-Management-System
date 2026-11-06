@@ -68,6 +68,13 @@ echo "=== AMS · 发布 CI 工具链 ==="
 echo "  SDK  : ${SDK_SRC}  (${SDK_VERSION})"
 echo "  stdx : ${STDX_SRC}  (${STDX_VERSION})"
 echo "  tag  : ${TAG}"
+if [ "$AUTO_UPLOAD" = "1" ]; then
+    if [ -n "${GITHUB_TOKEN:-}" ] || [ -n "${GH_TOKEN:-}" ]; then
+        echo "  模式 : 自动上传（--upload）；Token 已设置"
+    else
+        echo "  模式 : 自动上传（--upload）；⚠️ Token 未设置，稍后将报错退出"
+    fi
+fi
 ams_path_env_info
 echo ""
 
@@ -268,17 +275,23 @@ if [ "$AUTO_UPLOAD" != "1" ]; then
 fi
 
 echo "[3/3] 上传到 Release ${TAG}..."
-REL_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${TOKEN}" \
+REL_ID=""
+REL_HTTP="$(curl --ssl-no-revoke -sS -o /tmp/ams_tc_getrel.out -w '%{http_code}' \
+    -H "Authorization: Bearer ${TOKEN}" \
     -H "Accept: application/vnd.github+json" \
-    "${API}/releases/tags/${TAG}" 2>/dev/null \
-    | "$PY" -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
+    "${API}/releases/tags/${TAG}")"
+if [ "$REL_HTTP" = "200" ]; then
+    REL_ID="$("$PY" -c "import sys,json; print(json.load(open('/tmp/ams_tc_getrel.out')).get('id',''))" 2>/dev/null || true)"
+fi
+echo "      查询 Release HTTP=${REL_HTTP} id=${REL_ID:-<无>}"
 
 if [ -z "$REL_ID" ]; then
     echo "      创建 Release..."
-    REL_ID="$(curl --ssl-no-revoke -fsS -X POST \
+    REL_HTTP="$(curl --ssl-no-revoke -sS -X POST \
         -H "Authorization: Bearer ${TOKEN}" \
         -H "Accept: application/vnd.github+json" \
         -H "Content-Type: application/json" \
+        -o /tmp/ams_tc_create.out -w '%{http_code}' \
         "${API}/releases" \
         -d "$("$PY" - "$TAG" <<'PYEOF_BODY'
 import json, sys
@@ -294,9 +307,13 @@ print(json.dumps({
     "prerelease": False,
 }, ensure_ascii=False))
 PYEOF_BODY
-)" 2>/dev/null | "$PY" -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
+)")"
+    REL_ID="$("$PY" -c "import sys,json; print(json.load(open('/tmp/ams_tc_create.out')).get('id',''))" 2>/dev/null || true)"
+    echo "      创建 Release HTTP=${REL_HTTP} id=${REL_ID:-<无>}"
     if [ -z "$REL_ID" ]; then
-        echo "[ERROR] 创建 Release 失败。"
+        echo "[ERROR] 创建 Release 失败（HTTP ${REL_HTTP}）。响应："
+        head -c 400 /tmp/ams_tc_create.out
+        echo ""
         exit 1
     fi
     echo "      已创建（id=${REL_ID}）"
@@ -345,6 +362,28 @@ except Exception:
     fi
     echo "      ✓ ${NAME}"
 done
+
+echo ""
+echo "=== 校验：重新查询 Release 资产 ==="
+ASSET_JSON="$(curl --ssl-no-revoke -sS -H "Authorization: Bearer ${TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    "${API}/releases/${REL_ID}/assets")"
+"$PY" - "$ASSET_JSON" "$SDK_ZIP" "$STDX_ZIP" <<'PYEOF_VERIFY'
+import sys, json, os
+try:
+    data = json.loads(sys.argv[1])
+except Exception:
+    print("[WARN] 校验阶段无法解析资产列表（不影响已上传内容）")
+    sys.exit(0)
+names = {a.get("name") for a in data}
+zips = [os.path.basename(x) for x in sys.argv[2:]]
+for n in zips:
+    print(("  ✓ 已确认 " if n in names else "  ✗ 缺失 ") + n)
+missing = [n for n in zips if n not in names]
+if missing:
+    print("[ERROR] 以下资产未确认上传成功：", missing)
+    sys.exit(1)
+PYEOF_VERIFY
 
 echo ""
 echo "=== 工具链发布完成 ==="
