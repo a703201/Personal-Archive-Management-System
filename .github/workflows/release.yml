@@ -120,32 +120,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.ver.outputs.version }}
           REL_ID: ${{ steps.rel.outputs.id }}
-        run: |
-          set -e
-          VER="${VERSION}"
-          REL_ID="${REL_ID}"
-          ZIP="dist/ams-release-${VER}-windows-x86_64.zip"
-          echo "上传 ${ZIP} ..."
-          # ⚠️ 必须用 `-F "file=@..."`（multipart/form-data）。
-          #   `--data-binary "@file"` 发的是原始 body，GitHub 不接受（400）。
-          #   `-F` 还会流式发送，不把整个文件读进内存。
-          # --ssl-no-revoke：Windows runner 的 curl 用 schannel，
-          # 默认查证书吊销状态，被代理/防火墙挡住时失败
-          # （CRYPT_E_NO_REVOCATION_CHECK 0x80092012）。
-          CODE="$(curl -sS -o /tmp/ams_upload.out -w "%{http_code}" \
-            --ssl-no-revoke \
-            --max-time 1800 \
-            -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            -F "file=@${ZIP}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${REL_ID}/assets?name=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$(basename "$ZIP")")")"
-          if [ "$CODE" != "201" ] && [ "$CODE" != "200" ]; then
-            echo "::error::资产上传失败（HTTP ${CODE}）"
-            head -c 500 /tmp/ams_upload.out
-            exit 1
-          fi
-          echo "上传完成"
+        run: bash scripts/ci/upload-asset.sh
 
       - name: 写入发布摘要
         shell: bash
