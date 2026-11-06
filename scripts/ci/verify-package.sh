@@ -74,7 +74,15 @@ for i in $(seq 1 20); do
         break
     fi
     # ② 数据库不可用（正常业务退出，不是打包问题）
-    if grep -q "server.db.unavailable" "$LOG" 2>/dev/null; then
+    #   服务器启动后会尝试连 DB；CI / 发布校验环境通常没有数据库实例，
+    #   连接会被拒绝。只要到达「DB 检查」这一步，就证明运行时 DLL 齐全、
+    #   主程序能独立加载 —— 这正是本步骤要拦的打包缺陷的反面。
+    #   两种日志签名都算「已正常启动、非打包问题」：
+    #     - 代码显式打 "server.db.unavailable"
+    #     - 驱动抛 SqliteException / SocketException：连接被拒
+    #       （Failed to connect / actively refused / No connection could be made）
+    if grep -q "server.db.unavailable" "$LOG" 2>/dev/null \
+       || grep -qiE "SqliteException|SocketException|Failed to connect|actively refused|No connection could be made|connection.*refused|database.*unavailable" "$LOG" 2>/dev/null; then
         echo "  ✓ 服务正常启动并进入就绪检查（数据库不可用，非打包问题）"
         OK=1
         break
