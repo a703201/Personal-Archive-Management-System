@@ -158,47 +158,59 @@ fi
 #   · Git CMD / 本机安装：git 在 C:/Program Files/Git/bin/git
 #     → DLL 位于 C:/Program Files/Git/mingw64/bin/
 #   故两个候选都列上，靠 `[ -e ]` 实测是否存在来筛选，不存在的会被跳过。
-MINGW_DLLS=(libgcc_s_seh-1.dll libwinpthread-1.dll libssp-0.dll)
 mapfile -t BIN_DIRS < <(find "${SDK_HOME}" -type d -name bin 2>/dev/null)
 
-# 构造 MinGW 源候选目录（按优先级）
+# ① 先补 MinGW 运行时（libgcc/libwinpthread/libssp）：优先 SDK 内部，否则从
+#    Git for Windows 的 mingw64/bin 取（兼容 windows-latest runner 与本机两种布局）。
+MINGW_DLLS=(libgcc_s_seh-1.dll libwinpthread-1.dll libssp-0.dll)
 SRC_CANDIDATES=()
-if [ -n "${CANGJIE_MINGW_BIN:-}" ]; then
-    SRC_CANDIDATES+=("${CANGJIE_MINGW_BIN}")
-fi
+if [ -n "${CANGJIE_MINGW_BIN:-}" ]; then SRC_CANDIDATES+=("${CANGJIE_MINGW_BIN}"); fi
 _GIT_EXE="$(command -v git 2>/dev/null || true)"
 if [ -n "$_GIT_EXE" ]; then
     _GIT_BIN="$(dirname "$_GIT_EXE")"
-    SRC_CANDIDATES+=("$_GIT_BIN")                 # /mingw64/bin
-    SRC_CANDIDATES+=("$_GIT_BIN/../mingw64/bin") # C:/Program Files/Git/mingw64/bin
+    SRC_CANDIDATES+=("$_GIT_BIN" "$_GIT_BIN/../mingw64/bin")
 fi
 SRC_CANDIDATES+=("/mingw64/bin" "/c/Program Files/Git/mingw64/bin")
-
-FOUND=0
 for req in "${MINGW_DLLS[@]}"; do
-    # 优先复用 SDK 内部已有的副本（publish-toolchain.sh 已补齐时可直接复用）
     src="$(find "${SDK_HOME}" -name "$req" 2>/dev/null | head -1)"
     if [ -z "$src" ]; then
         for c in "${SRC_CANDIDATES[@]}"; do
             [ -e "$c/$req" ] || continue
-            src="$c/$req"
-            break
+            src="$c/$req"; break
         done
     fi
-    if [ -z "$src" ]; then
-        echo "[WARN] 找不到 $req 的源，跳过"
-        continue
+    if [ -n "$src" ]; then
+        for b in "${BIN_DIRS[@]:-}"; do
+            [ -e "$b/$req" ] || cp -f "$src" "$b/" 2>/dev/null
+        done
+    else
+        echo "[WARN] 找不到 MinGW 运行时 $req，opt.exe 可能报 DLL not found"
     fi
-    for b in "${BIN_DIRS[@]:-}"; do
-        if [ ! -e "$b/$req" ]; then
-            cp -f "$src" "$b/" && FOUND=1 && echo "[INFO] 补齐 $req -> $b"
-        fi
+done
+
+# ② 把 SDK 内现存的【全部】*.dll 互通到每一个 bin 目录。
+#    opt.exe / lld.exe 等子进程需在「自身所在目录」找到依赖 DLL；而发布包往往
+#    只在部分 bin 目录放了完整 DLL（如 libLLVM/libc++/libunwind 只在 bin/ 而
+#    不在 third_party/llvm/bin），导致 opt.exe 因缺 DLL 而 0xC0000135。
+#    做法：扫描 SDK 内所有 bin 目录的全部 DLL，去重后补齐到每个 bin 目录，
+#    使任意子进程都能在同目录命中其全部依赖（无论缺的是 MinGW 还是 LLVM 运行库）。
+declare -A _SEEN=()
+DLL_NAMES=()
+while IFS= read -r f; do
+    b="$(basename "$f")"
+    [ -n "${_SEEN[$b]:-}" ] && continue
+    _SEEN[$b]=1
+    DLL_NAMES+=("$b")
+done < <(find "${SDK_HOME}" -type f -name '*.dll' 2>/dev/null)
+for b in "${BIN_DIRS[@]:-}"; do
+    for d in "${DLL_NAMES[@]:-}"; do
+        [ -e "$b/$d" ] && continue
+        s="$(find "${SDK_HOME}" -name "$d" 2>/dev/null | head -1)"
+        [ -z "$s" ] && continue
+        cp -f "$s" "$b/" 2>/dev/null && echo "[INFO] 补齐 $d -> $b"
     done
 done
-if [ "$FOUND" = "0" ]; then
-    echo "[WARN] 未能自动补齐 MinGW 运行库，opt.exe 等第三方工具可能报 DLL not found。"
-    echo "      可设置 CANGJIE_MINGW_BIN 指向含这些 DLL 的目录。"
-fi
+echo "[INFO] DLL 互通完成（${#DLL_NAMES[@]} 种 DLL × ${#BIN_DIRS[@]} 个 bin 目录）"
 
 # ---- 2. stdx ----
 echo "[2/3] 准备 stdx ${STDX_VERSION}..."

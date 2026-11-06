@@ -182,7 +182,8 @@ EXCLUDE_EXACT = {
     "third_party/llvm/bin/libclang-cpp.dll",
     "third_party/llvm/bin/libclang.dll",
     "third_party/llvm/bin/liblldb.dll",
-    "third_party/llvm/bin/libunwind.dll",
+    # 注意：libunwind.dll 不再剔除——opt.exe 等 LLVM 工具在 MinGW 构建下会
+    # 依赖它，剔除后会导致 third_party/llvm/bin 缺该 DLL 而 0xC0000135。
     "third_party/llvm/bin/libLTO.dll",
     "third_party/llvm/bin/libcangjie-lsp.dll",
 }
