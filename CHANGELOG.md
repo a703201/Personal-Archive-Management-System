@@ -347,6 +347,23 @@ Chrome 在合成层上禁用 ClearType 子像素抗锯齿、改走灰度 AA。
 - 因 workflow 恢复二进制形态，与 `docs/09`、`README` 发布章节及 `scripts/release.sh` /
   `package.sh` / `verify-package.sh` 的二进制描述重新一致；此前「待同步」提醒作废。
 
+### 工程化 · CI 工具链修复（修复发布流水线编译失败）
+
+> 推送 `v1.2.0` 后 `release.yml` 的「构建」步骤失败（opt.exe 报
+> `0xC0000135` DLL not found），根因有二，均已修复：
+
+- **stdx 路径双重拼接**：`setup-toolchain.sh` 输出的 `CANGJIE_STDX` 已含
+  `/dynamic/stdx`，而 `build.sh` 又拼接一次，导致 `.../dynamic/stdx/dynamic/stdx`
+  目录无效（warning 且 stdx DLL 复制为空）。改为 `setup-toolchain.sh` 输出
+  **根目录**（`.../windows_x86_64_cjnative`），与 `build.sh` 契约一致。
+- **MinGW 运行库缺失 + PATH 未注入**：仓颉 SDK 的 `third_party/llvm/bin/`（opt.exe 所在）
+  缺 `libgcc_s_seh-1.dll`，且 CI runner 的 PATH 不含 SDK 目录，故 opt.exe 加载失败。
+  - `setup-toolchain.sh`：MinGW DLL 补齐从「仅 SDK 根 bin」扩展为「SDK 下
+    **所有 bin 目录**」（含 `third_party/llvm/bin`），并把 `${SDK_HOME}/bin` 与
+    `${SDK_HOME}/third_party/llvm/bin` 追加到 `GITHUB_PATH`。
+  - `publish-toolchain.sh`：打包前同样把 MinGW DLL 补齐到 SDK 源目录下所有 bin 目录，
+    使工具链 Release 资产自带完整运行时。
+
 ---
 
 ## [1.0.0] — 2026-10-31（首个正式版）

@@ -123,27 +123,33 @@ MINGW_CANDIDATES=(
     "/c/Program Files/Git/mingw64/bin"
 )
 ADDED=0
+# 找到 SDK 源目录下所有 bin 目录（含 third_party/llvm/bin 等），
+# 把 MinGW DLL 补到**每一个** bin 目录 —— opt.exe 等第三方工具才能找到运行时 DLL，
+# 否则 CI runner 上会报 0xC0000135 (DLL not found)。
+mapfile -t SDK_BIN_DIRS < <(find "${SDK_SRC}" -type d -name bin 2>/dev/null)
 for req in $MINGW_DLLS; do
-    if [ -e "${SDK_SRC}/bin/$req" ]; then
-        continue
-    fi
     for c in "${MINGW_CANDIDATES[@]}"; do
         [ -z "$c" ] && continue
-        if [ -e "$c/$req" ]; then
-            cp -f "$c/$req" "${SDK_SRC}/bin/" && ADDED=$((ADDED + 1))
-            echo "      补齐 MinGW 运行库: $req  (来自 $c)"
-            break
-        fi
+        [ -e "$c/$req" ] || continue
+        for b in "${SDK_BIN_DIRS[@]:-}"; do
+            if [ ! -e "$b/$req" ]; then
+                cp -f "$c/$req" "$b/" && ADDED=$((ADDED + 1))
+            fi
+        done
+        break
     done
 done
-# 只对**必需**的 DLL 做硬校验（可选的找不到不算错）
+echo "      已补齐 MinGW 运行库到 ${#SDK_BIN_DIRS[@]} 个 bin 目录"
+# 只对**必需**的 DLL 做硬校验（可选找不到不算错）：要求所有 bin 目录都具备
 MISSING=""
 for req in $MINGW_REQUIRED; do
-    [ -e "${SDK_SRC}/bin/$req" ] || MISSING="$MISSING $req"
+    for b in "${SDK_BIN_DIRS[@]:-}"; do
+        [ -e "$b/$req" ] || { MISSING="$MISSING $req($b)"; break; }
+    done
 done
 if [ -n "$MISSING" ]; then
-    echo "[ERROR] 找不到必需的 MinGW 运行库：$MISSING"
-    echo "       CI 上编译 @Test 用例会失败（RunCJTask 找不到）。"
+    echo "[ERROR] 找不到/未补齐必需的 MinGW 运行库：$MISSING"
+    echo "       CI 上 opt.exe 会因 DLL not found 失败（0xC0000135）。"
     echo "       请运行 bash scripts/install-sdk.sh 补齐，或手动放置。"
     exit 1
 fi

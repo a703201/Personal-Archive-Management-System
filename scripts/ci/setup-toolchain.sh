@@ -149,27 +149,29 @@ else
 fi
 
 # 补齐 MinGW 运行库（1.2.0 SDK 的已知缺件，见 scripts/install-sdk.sh）
-MINGW_MISSING=""
-for req in libgcc_s_seh-1.dll libwinpthread-1.dll; do
-    [ -e "${SDK_HOME}/bin/$req" ] || MINGW_MISSING="$MINGW_MISSING $req"
-done
-if [ -n "$MINGW_MISSING" ]; then
-    echo "      补齐 MinGW 运行库:$MINGW_MISSING"
-    SRC_CANDIDATES=(
-        "${CANGJIE_MINGW_BIN:-}"
-        "$(dirname "$(command -v git 2>/dev/null || echo /dev/null)")/../mingw64/bin"
-    )
-    FOUND=0
-    for c in "${SRC_CANDIDATES[@]}"; do
-        [ -z "$c" ] && continue
-        for req in libgcc_s_seh-1.dll libwinpthread-1.dll libssp-0.dll; do
-            [ -e "$c/$req" ] && cp -f "$c/$req" "${SDK_HOME}/bin/" && FOUND=1
+# cangjie 的 third_party/llvm/bin（opt.exe 等）同样需要 libgcc/libwinpthread，
+# 而 CI runner 的 PATH 不含这些目录，故需把 MinGW DLL 补到 SDK 下所有 bin 目录。
+SRC_CANDIDATES=(
+    "${CANGJIE_MINGW_BIN:-}"
+    "$(dirname "$(command -v git 2>/dev/null || echo /dev/null)")/../mingw64/bin"
+)
+MINGW_DLLS=(libgcc_s_seh-1.dll libwinpthread-1.dll libssp-0.dll)
+mapfile -t BIN_DIRS < <(find "${SDK_HOME}" -type d -name bin 2>/dev/null)
+FOUND=0
+for c in "${SRC_CANDIDATES[@]}"; do
+    [ -z "$c" ] && continue
+    for req in "${MINGW_DLLS[@]}"; do
+        [ -e "$c/$req" ] || continue
+        for b in "${BIN_DIRS[@]:-}"; do
+            if [ ! -e "$b/$req" ]; then
+                cp -f "$c/$req" "$b/" && FOUND=1
+            fi
         done
     done
-    if [ "$FOUND" = "0" ]; then
-        echo "[WARN] 未能自动补齐 MinGW 运行库，编译 @Test 用例可能失败。"
-        echo "      可设置 CANGJIE_MINGW_BIN 指向含这些 DLL 的目录。"
-    fi
+done
+if [ "$FOUND" = "0" ]; then
+    echo "[WARN] 未能自动补齐 MinGW 运行库，opt.exe 等第三方工具可能报 DLL not found。"
+    echo "      可设置 CANGJIE_MINGW_BIN 指向含这些 DLL 的目录。"
 fi
 
 # ---- 2. stdx ----
@@ -217,13 +219,18 @@ fi
 
 # ---- 输出环境变量供后续步骤使用 ----
 SDK_HOME_WIN="$(_ams_native_to_win "$SDK_HOME")"
-STDX_DIR_WIN="$(_ams_native_to_win "${STDX_TARGET}/dynamic/stdx")"
+STDX_DIR_WIN="$(_ams_native_to_win "${STDX_TARGET}")"
 
 cat > "${GITHUB_ENV:-/tmp/ams_ci_env}" <<ENVEOF
 CANGJIE_HOME=${SDK_HOME_WIN}
 CANGJIE_STDX=${STDX_DIR_WIN}
 CANGJIE_SDK_WIN=${SDK_HOME_WIN}
 ENVEOF
+
+# 把 SDK 的 bin 目录加入 PATH，使 opt.exe / cjc 等第三方工具能找到其运行时 DLL
+# （CI runner 的 PATH 不含 SDK 目录，本机则不报错，故必须显式追加）
+echo "${SDK_HOME_WIN}/bin" >> "${GITHUB_PATH:-/tmp/ams_ci_path}"
+echo "${SDK_HOME_WIN}/third_party/llvm/bin" >> "${GITHUB_PATH:-/tmp/ams_ci_path}"
 
 echo ""
 echo "=== 工具链就绪 ==="
