@@ -23,7 +23,7 @@ CangjieLibs/
 # ---- 第三方驱动源码（vendor，用 scripts/install-driver.sh 拉取）----
 # opengauss-driver 为 Cangjie-TPC 官方驱动，体积不大但属外部代码，
 # 由脚本按需拉取，不进版本库（避免与上游版本脱节）。
-tools/vendor/
+# tools/vendor/
 
 # ---- 工作区元数据 ----
 .workbuddy/
