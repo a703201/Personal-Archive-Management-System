@@ -3,7 +3,7 @@
 #
 # 触发：push 到 develop/main、PR、workflow_dispatch
 #
-# 流程：准备工具链 → 构建 → 单元测试 → 集成测试 → 源码包生成校验
+# 流程：准备工具链 → 构建 → 单元测试 → 集成测试 → 打包校验
 #
 # 关于 runner：
 #   默认用 **self-hosted Windows runner**（已装好仓颉 SDK 1.2.0 的机器）。
@@ -127,14 +127,10 @@ jobs:
             echo "未配置 AMS_DB_PASSWORD，跳过审计哈希链验证"
           fi
 
-      - name: 源码包生成校验（确保发布物可生成）
+      - name: 打包校验（确保发布物可独立运行）
         shell: bash
-        run: |
-          set -e
-          VER="0.0.0-ci"
-          mkdir -p dist
-          # 与 release.yml 同源：用 git archive 生成干净源码树（不含 .git / 忽略文件）。
-          # 发布流程将把此包作为 GitHub Release 资产上传，不再发布平台特定编译二进制。
-          git archive --format=tar --prefix="ams-${VER}/" HEAD | gzip -9 > "dist/ams-source-${VER}.tar.gz"
-          git archive --format=zip --prefix="ams-${VER}/" HEAD -o "dist/ams-source-${VER}.zip"
-          ls -lh dist/ams-source-*
+        run: bash scripts/package.sh --skip-build --version 0.0.0-ci
+
+      - name: 校验发布包可独立运行
+        shell: bash
+        run: bash scripts/ci/verify-package.sh dist/ams-release-0.0.0-ci-windows-x86_64 18099

@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # ============================================================
 # AMS · CI 工具链发布（把 SDK + stdx 做成 GitHub Release 资产）
 #
@@ -40,6 +40,10 @@ SDK_SRC="${CANGJIE_HOME:-${ROOT}/tools/cangjie}"
 STDX_SRC="${STDX_ROOT:-E:/CangjieLibs}/windows_x86_64_cjnative/dynamic/stdx"
 SDK_SRC="$(ams_path_norm "$SDK_SRC")"
 STDX_SRC="$(ams_path_norm "$STDX_SRC")"
+# Python 解释器（兼容 python3 / python；Git Bash 下可能只有 python）
+# 必须提前定义：当 SDK/stdx 包已存在被复用时，打包分支不会执行，
+# 否则后面的上传逻辑会因 $PY 未赋值而在 set -u 下崩溃。
+PY="$(command -v python3 || command -v python)"
 
 # 参数
 while [ $# -gt 0 ]; do
@@ -58,7 +62,7 @@ while [ $# -gt 0 ]; do
     shift
 done
 DRY_RUN="${DRY_RUN:-0}"
-AUTO_UPLOAD=0
+AUTO_UPLOAD="${AUTO_UPLOAD:-0}"
 
 echo "=== AMS · 发布 CI 工具链 ==="
 echo "  SDK  : ${SDK_SRC}  (${SDK_VERSION})"
@@ -238,7 +242,7 @@ if [ "$AUTO_UPLOAD" != "1" ]; then
     echo "[3/3] 跳过自动上传（加 --upload 可启用）"
     echo ""
     echo "=== Release 已创建，工具链资产请手动上传 ==="
-    echo "  Release: https://github.com/${ownerRepo}/releases/tag/${TAG}"
+    echo "  Release: https://github.com/${OWNER_REPO}/releases/tag/${TAG}"
     echo "  待上传  :"
     echo "    ${SDK_ZIP}"
     echo "    ${STDX_ZIP}"
@@ -248,7 +252,7 @@ if [ "$AUTO_UPLOAD" != "1" ]; then
     echo ""
     echo "方式 B：GitHub CLI（推荐，绕开 API 网关限制）"
     echo "  winget install GitHub.cli"
-    echo "  gh release upload ${TAG} \"${SDK_ZIP}\" \"${STDX_ZIP}\" --repo ${ownerRepo} --clobber"
+    echo "  gh release upload ${TAG} \"${SDK_ZIP}\" \"${STDX_ZIP}\" --repo ${OWNER_REPO} --clobber"
     echo ""
     echo "下一步："
     echo "  在仓库 Settings -> Secrets and variables -> Actions -> Variables"
@@ -260,7 +264,7 @@ echo "[3/3] 上传到 Release ${TAG}..."
 REL_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     "${API}/releases/tags/${TAG}" 2>/dev/null \
-    | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
+    | "$PY" -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
 
 if [ -z "$REL_ID" ]; then
     echo "      创建 Release..."
@@ -269,7 +273,7 @@ if [ -z "$REL_ID" ]; then
         -H "Accept: application/vnd.github+json" \
         -H "Content-Type: application/json" \
         "${API}/releases" \
-        -d "$(python3 - "$TAG" <<'PYEOF_BODY'
+        -d "$("$PY" - "$TAG" <<'PYEOF_BODY'
 import json, sys
 tag = sys.argv[1]
 print(json.dumps({
@@ -283,7 +287,7 @@ print(json.dumps({
     "prerelease": False,
 }, ensure_ascii=False))
 PYEOF_BODY
-)" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
+)" 2>/dev/null | "$PY" -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")"
     if [ -z "$REL_ID" ]; then
         echo "[ERROR] 创建 Release 失败。"
         exit 1
@@ -299,7 +303,7 @@ for ZIP in "$SDK_ZIP" "$STDX_ZIP"; do
     # 删掉同名旧资产（否则 422）
     AID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${TOKEN}" \
         -H "Accept: application/vnd.github+json" \
-        "${API}/releases/${REL_ID}/assets" 2>/dev/null | python3 -c "
+        "${API}/releases/${REL_ID}/assets" 2>/dev/null | "$PY" -c "
 import sys, json
 try:
     for a in json.load(sys.stdin):
