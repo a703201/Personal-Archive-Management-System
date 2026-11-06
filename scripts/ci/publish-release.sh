@@ -16,6 +16,12 @@
 # ============================================================
 set -euo pipefail
 
+# Windows runner 的 Python 默认 locale 编码是 cp1252：CHANGELOG 含中文时，
+# 任何经 stdout 重定向输出的中文都会 UnicodeEncodeError
+# （'charmap' codec can't encode characters ...）。强制所有 python I/O 用 UTF-8。
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
+
 PY="$(command -v python3 || command -v python)"
 [ -n "$PY" ] || { echo "::error:: 未找到 python3/python"; exit 1; }
 
@@ -46,23 +52,28 @@ echo "查询 Release ${TAG} ..."
 REL_ID="$(curl --ssl-no-revoke -sS -H "Authorization: Bearer ${GH_TOKEN}" \
   -H "Accept: application/vnd.github+json" \
   "${API}/releases/tags/${TAG}" \
-  | "$PY" -c "import sys,json; print(json.load(sys.stdin).get('id',''))")"
+  | "$PY" -c "import sys,json; print(json.loads(sys.stdin.buffer.read().decode('utf-8')).get('id',''))")"
 
 if [ -z "$REL_ID" ]; then
   echo "创建 Release ${TAG} ..."
-  # ③ 先写 body 到 JSON 文件，避免 -d 内联嵌套引号
+  # ③ 先写 body 到 JSON 文件，避免 -d 内联嵌套引号。
+  # ⚠️ 必须由 python 直接以 UTF-8 写文件，不能 print 到 stdout 重定向：
+  #    Windows runner 的 Python stdout 编码是 cp1252，中文会 UnicodeEncodeError。
   BODY="$(mktemp)"
-  "$PY" - "$TAG" "$VER" "$NOTES" <<'PY' > "$BODY"
+  "$PY" - "$TAG" "$VER" "$NOTES" "$BODY" <<'PY'
 import json, sys
-tag, ver, notes = sys.argv[1], sys.argv[2], sys.argv[3]
-body = open(notes, encoding='utf-8').read()
-print(json.dumps({
+tag, ver, notes, out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+with open(notes, encoding='utf-8') as f:
+    body = f.read()
+data = json.dumps({
     "tag_name": tag,
     "name": "AMS " + ver,
     "body": body,
     "draft": False,
     "prerelease": False,
-}, ensure_ascii=False))
+}, ensure_ascii=False)
+with open(out, 'wb') as f:
+    f.write(data.encode('utf-8'))
 PY
   REL_ID="$(curl --ssl-no-revoke -fsS -X POST \
     -H "Authorization: Bearer ${GH_TOKEN}" \
@@ -70,14 +81,14 @@ PY
     -H "Content-Type: application/json" \
     --data-binary "@${BODY}" \
     "${API}/releases" \
-    | "$PY" -c "import sys,json; print(json.load(sys.stdin).get('id',''))")"
+    | "$PY" -c "import sys,json; print(json.loads(sys.stdin.buffer.read().decode('utf-8')).get('id',''))")"
   echo "      已创建（id=${REL_ID}）"
 else
   echo "      Release 已存在（id=${REL_ID}），复用并清理同名旧资产"
   ASSET_ID="$(curl --ssl-no-revoke -fsS -H "Authorization: Bearer ${GH_TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     "${API}/releases/${REL_ID}/assets" \
-    | "$PY" -c "import sys,json; n=sys.argv[1]; print(next((a['id'] for a in json.load(sys.stdin) if a.get('name')==n),''))" "$(basename "$ZIP")")"
+    | "$PY" -c "import sys,json; n=sys.argv[1]; arr=json.loads(sys.stdin.buffer.read().decode('utf-8')); print(next((a['id'] for a in arr if a.get('name')==n),''))" "$(basename "$ZIP")")"
   if [ -n "$ASSET_ID" ]; then
     curl --ssl-no-revoke -fsS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" \
       "${API}/releases/assets/${ASSET_ID}" || true
