@@ -92,9 +92,13 @@ jobs:
         shell: bash
         run: bash scripts/test.sh
 
+      - name: 构建前端
+        shell: bash
+        run: cd web && npm ci && npm run build
+
       - name: 打包二进制发布包
         shell: bash
-        run: bash scripts/package.sh --skip-build --version "${{ steps.ver.outputs.version }}"
+        run: bash scripts/package.sh --skip-build --skip-web --version "${{ steps.ver.outputs.version }}"
 
       - name: 校验发布包可独立运行
         shell: bash

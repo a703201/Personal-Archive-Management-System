@@ -109,9 +109,13 @@ WEB_DIST="web/dist"
 if [ "$SKIP_WEB" = "0" ]; then
     echo "[2/6] 构建前端..."
     if [ ! -d "web/node_modules" ]; then
-        echo "[ERROR] web/node_modules 不存在，请先：cd web && npm install"
-        echo "        或加 --skip-web 复用已有的 ${WEB_DIST}/"
-        exit 1
+        echo "[INFO] 未找到 web/node_modules，自动安装前端依赖（cd web && npm ci）..."
+        ( cd web && npm ci ) > /tmp/ams_package_web_install.log 2>&1 || {
+            echo "[ERROR] 前端依赖安装失败，日志尾部："
+            tail -30 /tmp/ams_package_web_install.log | sed 's/^/  /'
+            echo "        也可手动：cd web && npm install"
+            exit 1
+        }
     fi
     # npm run build = vue-tsc --noEmit && vite build —— 类型错误会挡住打包，
     # 这是有意的：前端类型漂移不该被带进交付物。

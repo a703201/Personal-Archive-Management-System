@@ -127,9 +127,13 @@ jobs:
             echo "未配置 AMS_DB_PASSWORD，跳过审计哈希链验证"
           fi
 
+      - name: 构建前端
+        shell: bash
+        run: cd web && npm ci && npm run build
+
       - name: 打包校验（确保发布物可独立运行）
         shell: bash
-        run: bash scripts/package.sh --skip-build --version 0.0.0-ci
+        run: bash scripts/package.sh --skip-build --skip-web --version 0.0.0-ci
 
       - name: 校验发布包可独立运行
         shell: bash
