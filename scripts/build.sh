@@ -416,6 +416,23 @@ done
 [ -d "$RUNTIME_DIR" ] && cp "$RUNTIME_DIR"/*.dll "$BUILD_DIR/" 2>/dev/null
 [ -d "$STDX_DIR" ] && cp "$STDX_DIR"/*.dll "$BUILD_DIR/" 2>/dev/null
 
+# MinGW 运行库（③ 类，exe 启动必需）：仓颉 SDK 的 gcc 运行时**不**在
+# runtime/lib/windows_x86_64_cjnative，而是随 $CANGJIE_HOME/bin/ 分发；
+# CI 下载的 SDK 包也可能未把它放进 cjnative，故单独从 SDK bin 目录补齐
+# 到 build/（与 package.sh 的「三类运行时必须齐全」约定对齐）。
+SDK_BIN_DIR="$(win_path "${CANGJIE_HOME:-E:/Cangjie}")/bin"
+MINGW_SRCS=("$SDK_BIN_DIR")
+if command -v git >/dev/null 2>&1; then
+    _gb="$(dirname "$(command -v git)")"
+    MINGW_SRCS+=("$_gb" "$_gb/../mingw64/bin" "/mingw64/bin" "/c/Program Files/Git/mingw64/bin")
+fi
+for req in libgcc_s_seh-1.dll libwinpthread-1.dll libssp-0.dll libpcre2-8.dll; do
+    [ -e "$BUILD_DIR/$req" ] && continue
+    for c in "${MINGW_SRCS[@]}"; do
+        [ -e "$c/$req" ] && { cp -f "$c/$req" "$BUILD_DIR/" 2>/dev/null && echo "      运行时(MinGW): $req"; break; }
+    done
+done
+
 echo ""
 echo "=== 构建完成 ==="
 ls -lh "$BUILD_DIR"/ams-server.exe 2>/dev/null || true

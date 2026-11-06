@@ -188,6 +188,29 @@ if [ "$OS" = "windows" ]; then
     fi
     echo "      运行时 DLL：${DLL_COUNT} 个"
 
+    # ---- 兜底：若关键运行时 DLL 仍未就位，从 SDK bin 与 Git for Windows 补齐 ----
+    # 背景：CI 上下载的 SDK 可能未把 MinGW DLL 放入
+    #   runtime/lib/windows_x86_64_cjnative，上面两步（build/*.dll、
+    #   CJ_RUNTIME）都扫不到。这里再做一次兜底搜索，确保发布包必含
+    #   libgcc_s_seh-1.dll / libwinpthread-1.dll 等，否则 exe 启动即报
+    #   "error while loading shared libraries"。
+    _sdk_home="${CANGJIE_HOME:-E:/Cangjie}"
+    _cand_dirs=(
+        "${_sdk_home}/bin"
+        "${_sdk_home}/third_party/llvm/bin"
+        "${_sdk_home}/runtime/lib/windows_x86_64_cjnative"
+    )
+    if command -v git >/dev/null 2>&1; then
+        _gb="$(dirname "$(command -v git)")"
+        _cand_dirs+=("$_gb" "$_gb/../mingw64/bin" "/mingw64/bin" "/c/Program Files/Git/mingw64/bin")
+    fi
+    for req in libgcc_s_seh-1.dll libwinpthread-1.dll libpcre2-8.dll libcangjie-runtime.dll; do
+        [ -e "$STAGE/bin/$req" ] && continue
+        for c in "${_cand_dirs[@]}"; do
+            [ -e "$c/$req" ] && { cp -f "$c/$req" "$STAGE/bin/"; DLL_COUNT=$((DLL_COUNT + 1)); echo "      [兜底] 补齐 $req <- $c"; break; }
+        done
+    done
+
     # ---- 关键校验：MinGW 运行库必须齐全 ----
     MISSING=""
     for req in libgcc_s_seh-1.dll libwinpthread-1.dll libpcre2-8.dll libcangjie-runtime.dll; do
