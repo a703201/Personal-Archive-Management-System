@@ -151,22 +151,48 @@ fi
 # 补齐 MinGW 运行库（1.2.0 SDK 的已知缺件，见 scripts/install-sdk.sh）
 # cangjie 的 third_party/llvm/bin（opt.exe 等）同样需要 libgcc/libwinpthread，
 # 而 CI runner 的 PATH 不含这些目录，故需把 MinGW DLL 补到 SDK 下所有 bin 目录。
-SRC_CANDIDATES=(
-    "${CANGJIE_MINGW_BIN:-}"
-    "$(dirname "$(command -v git 2>/dev/null || echo /dev/null)")/../mingw64/bin"
-)
+#
+# ⚠️ 源候选路径必须兼容两种 git 安装形态：
+#   · Git Bash（含 GitHub windows-latest runner）：`command -v git` → /mingw64/bin/git
+#     → DLL 位于 /mingw64/bin/
+#   · Git CMD / 本机安装：git 在 C:/Program Files/Git/bin/git
+#     → DLL 位于 C:/Program Files/Git/mingw64/bin/
+#   故两个候选都列上，靠 `[ -e ]` 实测是否存在来筛选，不存在的会被跳过。
 MINGW_DLLS=(libgcc_s_seh-1.dll libwinpthread-1.dll libssp-0.dll)
 mapfile -t BIN_DIRS < <(find "${SDK_HOME}" -type d -name bin 2>/dev/null)
+
+# 构造 MinGW 源候选目录（按优先级）
+SRC_CANDIDATES=()
+if [ -n "${CANGJIE_MINGW_BIN:-}" ]; then
+    SRC_CANDIDATES+=("${CANGJIE_MINGW_BIN}")
+fi
+_GIT_EXE="$(command -v git 2>/dev/null || true)"
+if [ -n "$_GIT_EXE" ]; then
+    _GIT_BIN="$(dirname "$_GIT_EXE")"
+    SRC_CANDIDATES+=("$_GIT_BIN")                 # /mingw64/bin
+    SRC_CANDIDATES+=("$_GIT_BIN/../mingw64/bin") # C:/Program Files/Git/mingw64/bin
+fi
+SRC_CANDIDATES+=("/mingw64/bin" "/c/Program Files/Git/mingw64/bin")
+
 FOUND=0
-for c in "${SRC_CANDIDATES[@]}"; do
-    [ -z "$c" ] && continue
-    for req in "${MINGW_DLLS[@]}"; do
-        [ -e "$c/$req" ] || continue
-        for b in "${BIN_DIRS[@]:-}"; do
-            if [ ! -e "$b/$req" ]; then
-                cp -f "$c/$req" "$b/" && FOUND=1
-            fi
+for req in "${MINGW_DLLS[@]}"; do
+    # 优先复用 SDK 内部已有的副本（publish-toolchain.sh 已补齐时可直接复用）
+    src="$(find "${SDK_HOME}" -name "$req" 2>/dev/null | head -1)"
+    if [ -z "$src" ]; then
+        for c in "${SRC_CANDIDATES[@]}"; do
+            [ -e "$c/$req" ] || continue
+            src="$c/$req"
+            break
         done
+    fi
+    if [ -z "$src" ]; then
+        echo "[WARN] 找不到 $req 的源，跳过"
+        continue
+    fi
+    for b in "${BIN_DIRS[@]:-}"; do
+        if [ ! -e "$b/$req" ]; then
+            cp -f "$src" "$b/" && FOUND=1 && echo "[INFO] 补齐 $req -> $b"
+        fi
     done
 done
 if [ "$FOUND" = "0" ]; then
