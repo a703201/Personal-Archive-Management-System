@@ -36,6 +36,9 @@ import time
 import urllib.error
 import urllib.request
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from e2e_captcha import fetch_captcha
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PORT = os.environ.get("AMS_VERIFY_PORT", "18105")
 BASE = "http://127.0.0.1:%s" % PORT
@@ -88,6 +91,15 @@ def call(method, path, body=None, token=None, raw=False):
 
 def data_of(resp):
     return resp[2].get("data") if isinstance(resp[2], dict) else None
+
+
+def register(base_payload):
+    """先取图形验证码，再把 captchaId/captchaCode 合入注册请求体。"""
+    captcha_id, captcha_code = fetch_captcha(BASE)
+    payload = dict(base_payload)
+    payload["captchaId"] = captcha_id
+    payload["captchaCode"] = captcha_code
+    return call("POST", "/api/auth/register", payload)
 
 
 def db_exec(sql):
@@ -170,12 +182,10 @@ pwd = "Ams@2026#E2E"
 
 u1 = "tenant1_" + suffix
 u2 = "tenant2_" + suffix
-r = call("POST", "/api/auth/register",
-         {"username": u1, "password": pwd, "email": "%s@e2e.local" % u1, "nickname": u1})
+r = register({"username": u1, "password": pwd, "email": "%s@e2e.local" % u1, "nickname": u1})
 check("注册 租户1 用户", r[0] == 200, str(r[2])[:200])
 id1 = data_of(r).get("id") if data_of(r) else None
-r = call("POST", "/api/auth/register",
-         {"username": u2, "password": pwd, "email": "%s@e2e.local" % u2, "nickname": u2})
+r = register({"username": u2, "password": pwd, "email": "%s@e2e.local" % u2, "nickname": u2})
 check("注册 租户2 用户", r[0] == 200, str(r[2])[:200])
 id2 = data_of(r).get("id") if data_of(r) else None
 if not id1 or not id2:
@@ -303,8 +313,7 @@ check("租户1 克隆租户2 条目 → 非 200", r[0] != 200, "got %s" % r[0])
 print()
 print("[五] owner 跨租户详情探针（回归目标）")
 uo = "t1owner_" + suffix
-r = call("POST", "/api/auth/register",
-         {"username": uo, "password": pwd, "email": "%s@e2e.local" % uo, "nickname": uo})
+r = register({"username": uo, "password": pwd, "email": "%s@e2e.local" % uo, "nickname": uo})
 ido = data_of(r).get("id") if data_of(r) else None
 check("注册 owner 用户", r[0] == 200, str(r[2])[:200])
 rido = rid2 + 1
