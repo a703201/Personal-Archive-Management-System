@@ -112,10 +112,17 @@ fi
 # ---------------------------------------------------------------
 echo ""
 echo "=== B. 篡改检测（FR-AUD-003）==="
-# 篡改最后一条记录的内容字段 occurred_ms（+1），
+# ⚠️ verify-chain 接口每次调用自身都会写一条 action=audit.query 的新审计
+#    记录，因此「当前 MAX(chain_seq)」在 A/B/C 之间会不断后移。必须先把
+#    要篡改的 seq 固定下来，让 B 与 C 操作同一行；否则 C 会去改一条刚生成的
+#    无关记录，被篡改行永远恢复不了，C 必然误报 tampered。
+TAMPER_SEQ="$(max_seq)"
+[ -n "$TAMPER_SEQ" ] || { bad "无法确定待篡改的 chain_seq" "$(max_seq)"; exit 1; }
+echo "  篡改目标 chain_seq = ${TAMPER_SEQ}"
+# 篡改该条记录的内容字段 occurred_ms（+1），
 # 链路重算哈希时该字段变化 → 与存储哈希失配 → 应报非 ok。
 $DB_PY "UPDATE aud_logs SET occurred_ms = occurred_ms + 1 \
-        WHERE chain_seq = (SELECT MAX(chain_seq) FROM aud_logs);" >/dev/null 2>&1
+        WHERE chain_seq = ${TAMPER_SEQ};" >/dev/null 2>&1
 
 R=$(curl -s --max-time 20 "${BASE}/api/audit/verify-chain?from=${FROM_SEQ}&limit=1000" \
         -H "Authorization: Bearer ${AUDITOR_TOKEN}")
@@ -131,8 +138,9 @@ fi
 # ---------------------------------------------------------------
 echo ""
 echo "=== C. 篡改恢复后链路复原 ==="
+# 精确还原 B 篡改的那一行（不能用 MAX 重新定位，见 B 处说明）
 $DB_PY "UPDATE aud_logs SET occurred_ms = occurred_ms - 1 \
-        WHERE chain_seq = (SELECT MAX(chain_seq) FROM aud_logs);" >/dev/null 2>&1
+        WHERE chain_seq = ${TAMPER_SEQ};" >/dev/null 2>&1
 
 R=$(curl -s --max-time 20 "${BASE}/api/audit/verify-chain?from=${FROM_SEQ}&limit=1000" \
         -H "Authorization: Bearer ${AUDITOR_TOKEN}")

@@ -3,13 +3,17 @@
 #
 # 触发：push 到 develop/main、PR、workflow_dispatch
 #
-# 流程：准备工具链 → 构建 → 单元测试 → 集成测试 → 打包校验
+# 流程：静态一致性门禁 → 准备工具链 → 构建 → 单元测试 →
+#       端到端回归（需 DB） → 前端单测与构建 → 发布包校验
 #
-# 关于 runner：
-#   默认用 **self-hosted Windows runner**（已装好仓颉 SDK 1.2.0 的机器）。
-#   原因：SDK 压缩包 250 MB，每次 CI 都下载既慢又易失败；
-#         且 SDK 的 Windows 包缺少 MinGW 运行库，需额外补齐。
-#   若用 GitHub 托管 runner，需在仓库变量里配置 CANGJIE_SDK_URL。
+# 关于 E2E：
+#   GitHub 托管 Windows runner 无法起 openGauss service container，
+#   因此未配置 secrets.AMS_DB_PASSWORD 时 7 项端到端回归会「显式跳过」：
+#   输出 ::warning:: 并在 Job Summary 标注 SKIPPED，不再伪装成全绿。
+#   需要真跑时，在自托管 runner（有 openGauss）上执行：
+#       bash scripts/ci/verify-e2e.sh
+#
+# 工具链来源见 scripts/ci/setup-toolchain.sh（Release 资产 / SDK 直链 / 本机 SDK）。
 # ============================================================
 name: CI
 
@@ -20,17 +24,15 @@ on:
     branches: [develop, main, master]
   workflow_dispatch:
 
-# 取消同分支的旧运行
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-and-test:
-    # GitHub 托管 runner。工具链来源见 scripts/ci/setup-toolchain.sh：
-    #   ① 仓库变量 CANGJIE_TOOLCHAIN_TAG 指定的 GitHub Release 工具链资产（推荐）
-    #   ② 仓库变量 CANGJIE_SDK_URL 指定的 SDK 直链
-    #   ③ 本机已有 SDK（自托管 runner）
     runs-on: windows-latest
 
     steps:
@@ -38,6 +40,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0    # 需要 tag 信息
+
+      - name: 静态一致性门禁（无需数据库 / SDK）
+        shell: bash
+        run: python3 scripts/ci/check-consistency.py
 
       - name: 缓存工具链
         uses: actions/cache@v4
@@ -69,67 +75,22 @@ jobs:
         shell: bash
         run: bash scripts/test.sh
 
-      - name: 集成测试（需要 openGauss）
+      - name: 端到端回归（需 openGauss，共 7 组）
         shell: bash
         env:
           AMS_DB_PASSWORD: ${{ secrets.AMS_DB_PASSWORD }}
         run: |
-          # 集成测试连不上数据库时会整体跳过（不算失败），
-          # 故此步仅在配置了数据库口令时才跑。
           if [ -n "$AMS_DB_PASSWORD" ]; then
-            bash scripts/test.sh ams-data
+            bash scripts/ci/verify-e2e.sh
+            echo "- E2E: 7 groups executed" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "未配置 AMS_DB_PASSWORD，跳过集成测试"
+            echo "::warning::未配置 secrets.AMS_DB_PASSWORD，7 组端到端回归未执行（集成测试 / 授权链路 / 口令策略 / 审计哈希链 / 多租户隔离 / 家庭协作 / 审计链独立校验）"
+            echo "- E2E SKIPPED (7 groups): secrets.AMS_DB_PASSWORD not set; hosted runner has no openGauss service" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: 授权链路端到端验证（FR-ACL-005~009）
+      - name: 前端单测与构建
         shell: bash
-        env:
-          AMS_DB_PASSWORD: ${{ secrets.AMS_DB_PASSWORD }}
-        run: |
-          # 验证对象级鉴权链路：归属强制 / 敏感度分级 / 显式授权 / 授权到期与撤销。
-          # 这条链路横跨「中间件 → Authorizer → 仓储」，单靠单元测试覆盖不到
-          # （实测踩过：中间件在路由匹配前执行，pathParams 为空导致
-          #   guard 拿不到 :id → 对象级鉴权整体被跳过）。
-          if [ -n "$AMS_DB_PASSWORD" ]; then
-            bash scripts/ci/verify-authz.sh
-          else
-            echo "未配置 AMS_DB_PASSWORD，跳过授权链路验证"
-          fi
-
-      - name: 口令策略端到端验证（FR-AUTH-004）
-        shell: bash
-        env:
-          AMS_DB_PASSWORD: ${{ secrets.AMS_DB_PASSWORD }}
-        run: |
-          # 验证口令策略真的生效：弱口令字典 / 长度 / 字符类别 / 含用户名 /
-          # 重复字符 / 24 小时修改间隔。
-          # 这条链路横跨「路由 → PasswordValidator → 仓储」，
-          # 单靠单元测试覆盖不到（此前校验器从未被业务路径调用）。
-          if [ -n "$AMS_DB_PASSWORD" ]; then
-            bash scripts/ci/verify-password.sh
-          else
-            echo "未配置 AMS_DB_PASSWORD，跳过口令策略验证"
-          fi
-
-      - name: 审计哈希链端到端验证（FR-AUD-003）
-        shell: bash
-        env:
-          AMS_DB_PASSWORD: ${{ secrets.AMS_DB_PASSWORD }}
-        run: |
-          # 验证审计哈希链：新记录链路完整、篡改内容字段能被检出、改回后复原。
-          # 覆盖「落库 → 取链 → 规范化重算 → 比对」全链路，
-          # 单靠单元测试覆盖不到（此前 verifyChain 不支持子段校验，
-          # from>1 时首条记录的 prev_hash 锚点错误，会误判 Broken/Missing）。
-          if [ -n "$AMS_DB_PASSWORD" ]; then
-            bash scripts/ci/verify-audit.sh
-          else
-            echo "未配置 AMS_DB_PASSWORD，跳过审计哈希链验证"
-          fi
-
-      - name: 构建前端
-        shell: bash
-        run: cd web && npm ci && npm run build
+        run: cd web && npm ci && npm test && npm run build
 
       - name: 打包校验（确保发布物可独立运行）
         shell: bash
