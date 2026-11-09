@@ -10,7 +10,7 @@
  * 前端不缓存任何令牌到 localStorage：重置令牌只放在组件内存里，
  * 页面刷新即丢弃（重新走验证码），减少泄漏面。
  */
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { t } from '../i18n'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
@@ -29,6 +29,40 @@ const error = ref('')
 const notice = ref('')
 const masked = ref('')
 const busy = ref(false)
+
+/**
+ * 图形验证码（FR-AUTH-011）：第一步 /auth/password/forgot 强制要求，
+ * 第二步「重新发送」复用同一接口，故同样需要。SVG 用 <img :src>，
+ * 禁止 v-html 注入；captcha 状态在两步间共享。
+ */
+const captchaId = ref('')
+const captchaSvg = ref('')
+const captchaCode = ref('')
+const captchaSrc = computed(() =>
+  captchaSvg.value ? 'data:image/svg+xml,' + encodeURIComponent(captchaSvg.value) : '',
+)
+
+/** 拉取（或刷新）验证码；带 old=<旧 ID> 让后端作废旧挑战。 */
+async function refreshCaptcha(): Promise<void> {
+  const old = captchaId.value
+  try {
+    const q = old ? `?old=${encodeURIComponent(old)}` : ''
+    const res = await api<{ captchaId: string; svg: string; expiresAt: number }>(
+      `/auth/captcha${q}`,
+      { auth: false },
+    )
+    captchaId.value = res.captchaId
+    captchaSvg.value = res.svg
+    captchaCode.value = ''
+  } catch {
+    // 静默降级：用户可点图片/刷新按钮重试
+  }
+}
+
+// 进入第一步即加载一张验证码
+onMounted(() => {
+  void refreshCaptcha()
+})
 
 /** 重置令牌只存内存 */
 let resetToken = ''
@@ -86,7 +120,12 @@ async function sendCode(): Promise<void> {
     }>('/auth/password/forgot', {
       method: 'POST',
       auth: false,
-      body: { account: account.value.trim() },
+      body: {
+        account: account.value.trim(),
+        // FR-AUTH-011：第一步 / 重新发送均强制图形验证码
+        captchaId: captchaId.value,
+        captchaCode: captchaCode.value.trim(),
+      },
     })
     if (!res.sent) {
       // 后端已给出人话原因（账号不存在 / 未绑定邮箱 / 请求过频）
@@ -101,6 +140,8 @@ async function sendCode(): Promise<void> {
     error.value = (e as Error).message || t('viewsForgotPasswordView.644c16', '验证码发送失败')
   } finally {
     busy.value = false
+    // challenge 一次性消费 / 错误 / 过期后都换一张，供本步或第二步重发使用
+    void refreshCaptcha()
   }
 }
 
@@ -171,12 +212,12 @@ function goLogin(): void {
     <aside class="auth__hero stagger">
       <div class="auth__brand">AMS</div>
       <p class="auth__eyebrow">ACCOUNT RECOVERY</p>
-      <h1 class="auth__headline">忘记口令？<br />一步找回。</h1>
-      <p class="auth__tagline">验证身份后重设，全程无需联系人工。</p>
+      <h1 class="auth__headline">{{ t('ForgotPasswordView.heroHeadlineA', '忘记口令？') }}<br />{{ t('ForgotPasswordView.heroHeadlineB', '一步找回。') }}</h1>
+      <p class="auth__tagline">{{ t('ForgotPasswordView.heroTagline', '验证身份后重设，全程无需联系人工。') }}</p>
       <ul class="auth__points">
-        <li>邮箱验证码，10 分钟内有效</li>
-        <li>重置后自动下线全部会话</li>
-        <li>不改数据，档案原样保留</li>
+        <li>{{ t('ForgotPasswordView.heroPoint1', '邮箱验证码，10 分钟内有效') }}</li>
+        <li>{{ t('ForgotPasswordView.heroPoint2', '重置后自动下线全部会话') }}</li>
+        <li>{{ t('ForgotPasswordView.heroPoint3', '不改数据，档案原样保留') }}</li>
       </ul>
     </aside>
 
@@ -214,6 +255,29 @@ function goLogin(): void {
           <p class="hint-block">
             我们会向账号绑定的邮箱发送 6 位验证码。未绑定邮箱的账号需联系管理员重置。
           </p>
+          <div class="auth__field">
+            <span class="auth__label">{{ t('ForgotPasswordView.captchaLabel', '验证码') }}</span>
+            <div class="captcha-row">
+              <img
+                v-if="captchaSrc"
+                class="captcha-img"
+                :src="captchaSrc"
+                :alt="t('ForgotPasswordView.captchaAlt', '验证码，点击可刷新')"
+                @click="refreshCaptcha"
+              />
+              <button class="captcha-refresh" type="button" @click="refreshCaptcha">
+                {{ t('ForgotPasswordView.captchaRefresh', '刷新') }}
+              </button>
+            </div>
+            <input
+              v-model="captchaCode"
+              class="field-control"
+              type="text"
+              maxlength="6"
+              autocomplete="off"
+              :placeholder="t('ForgotPasswordView.captchaPlaceholder', '请输入上图中的字符')"
+            />
+          </div>
           <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
             {{ busy ? '发送中…' : '发送验证码' }}
@@ -239,6 +303,30 @@ function goLogin(): void {
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
             {{ busy ? '校验中…' : '下一步' }}
           </button>
+          <!-- 重新发送同样走 /password/forgot，需再填一次图形验证码 -->
+          <div class="auth__field">
+            <span class="auth__label">{{ t('ForgotPasswordView.captchaLabel', '验证码') }}</span>
+            <div class="captcha-row">
+              <img
+                v-if="captchaSrc"
+                class="captcha-img"
+                :src="captchaSrc"
+                :alt="t('ForgotPasswordView.captchaAlt', '验证码，点击可刷新')"
+                @click="refreshCaptcha"
+              />
+              <button class="captcha-refresh" type="button" @click="refreshCaptcha">
+                {{ t('ForgotPasswordView.captchaRefresh', '刷新') }}
+              </button>
+            </div>
+            <input
+              v-model="captchaCode"
+              class="field-control"
+              type="text"
+              maxlength="6"
+              autocomplete="off"
+              :placeholder="t('ForgotPasswordView.captchaPlaceholder', '重发前请输入上图中的字符')"
+            />
+          </div>
           <div class="fgt-row">
             <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
             <button
@@ -405,5 +493,27 @@ function goLogin(): void {
   text-align: center;
   font-size: 13px;
   color: var(--text-muted);
+}
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.captcha-img {
+  width: 180px;
+  height: 52px;
+  border: 1px solid var(--border, #d7dce3);
+  border-radius: var(--g3-sm);
+  cursor: pointer;
+  background: #fff;
+}
+.captcha-refresh {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px;
 }
 </style>

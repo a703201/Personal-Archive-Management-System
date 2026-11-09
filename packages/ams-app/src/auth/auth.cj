@@ -49,19 +49,28 @@ public class AuthConfig {
     public let delayBaseMillis: Int64
     /** 渐进延迟上限（毫秒） */
     public let delayMaxMillis: Int64
+    /**
+     * 触发图形验证码所需的连续登录失败次数（FR-AUTH-011）。
+     *
+     * 与「锁定阈值」maxFailedAttempts 解耦：先在较少的失败次数上叠加
+     * 图形验证码这道摩擦（默认 3），达到锁定阈值才真正锁账号（默认 5）。
+     */
+    public let captchaTriggerFailures: Int64
 
     public init(
         kdfIterations!: Int64 = 600000,
         lockSeconds!: Int64 = 900,
         maxFailedAttempts!: Int64 = 5,
         delayBaseMillis!: Int64 = 200,
-        delayMaxMillis!: Int64 = 3000
+        delayMaxMillis!: Int64 = 3000,
+        captchaTriggerFailures!: Int64 = 3
     ) {
         this.kdfIterations = kdfIterations
         this.lockSeconds = lockSeconds
         this.maxFailedAttempts = maxFailedAttempts
         this.delayBaseMillis = delayBaseMillis
         this.delayMaxMillis = delayMaxMillis
+        this.captchaTriggerFailures = captchaTriggerFailures
     }
 }
 
@@ -226,6 +235,9 @@ public class AuthService {
 
         // 4) 成功路径
         this.userRepo.recordLoginSuccess(u.id, ip)
+        // FR-AUTH-011：登录成功即清零「连续失败」内存计数，
+        // 保证验证码只在连续失败达到阈值后触发，成功一次后重新开始计。
+        this.resetFailureCount(username)
 
         // 5) 取角色与权限点
         let roleCodes = this.roleRepo.listUserRoleCodes(u.id)
@@ -329,18 +341,44 @@ public class AuthService {
      * 避免引入额外的持久化表；进程重启后计数归零（可接受）。
      */
     private func progressiveDelay(username: String): Int64 {
-        // 用简单字符串哈希做键（不存口令，只存用户名哈希）
-        var h: Int64 = 0
-        for (b in username.toArray().iterator()) {
-            h = (h * 31 + Int64(b)) & 0x7FFFFFFF
-        }
-        let key = "${h}"
+        // 用用户名的稳定哈希做键（不存口令，只存用户名哈希）
+        let key = AuthService.failureKey(username)
         // 注意：仓颉 HashMap 的 `[]` 在键不存在时抛 NoneValueException，
         // 故这里用 get() 取默认值。
         let n = AuthService.failureCounts.get(key) ?? 0
         AuthService.failureCounts[key] = n + 1
         let delay = this.config.delayBaseMillis * (n + 1)
         return if (delay > this.config.delayMaxMillis) { this.config.delayMaxMillis } else { delay }
+    }
+
+    /**
+     * 用户名 → 失败计数键（稳定哈希，避免把用户名本身放进内存表）。
+     */
+    private static func failureKey(username: String): String {
+        var h: Int64 = 0
+        for (b in username.toArray().iterator()) {
+            h = (h * 31 + Int64(b)) & 0x7FFFFFFF
+        }
+        return "${h}"
+    }
+
+    /**
+     * FR-AUTH-011：判断该账号是否已连续失败到需要图形验证码。
+     *
+     * 复用 progressiveDelay 的同一份内存计数（按用户名哈希），不新开表；
+     * 阈值来自 AuthConfig.captchaTriggerFailures（默认 3，可配置）。
+     * 该查询在「口令校验之前」由接口层调用，因此未命中时零回归。
+     */
+    public func captchaRequired(username: String): Bool {
+        let n = AuthService.failureCounts.get(AuthService.failureKey(username)) ?? 0
+        return n >= this.config.captchaTriggerFailures
+    }
+
+    /**
+     * 登录成功后清零连续失败计数（使「连续」语义正确）。
+     */
+    private func resetFailureCount(username: String): Unit {
+        AuthService.failureCounts.remove(AuthService.failureKey(username))
     }
 
     /**
