@@ -159,7 +159,7 @@ public class SearchRoutes {
             if (i > 0) {
                 sb.append(",")
             }
-            sb.append(SearchRoutes.toJson(r))
+            sb.append(SearchRoutes.toJson(r, keyword))
             i = i + 1
         }
         sb.append("],\"hasMore\":${hasMore},\"size\":${pageSize}")
@@ -371,22 +371,37 @@ public class SearchRoutes {
         }
     }
 
-    private static func toJson(r: RowData): String {
+    /**
+     * 单行结果序列化。
+     *
+     * 【FR-SRC-001 高亮片段】返回分段的 `highlight`，前端按段渲染 <mark>，
+     * 不使用 v-html。安全约束：敏感度 >= 2 的条目 **issuer 不生成高亮**
+     * （掩码前明文绝不能通过片段反推）；title 本就以明文返回，可安全高亮。
+     */
+    private static func toJson(r: RowData, keyword: String): String {
         // 敏感条目（>=2）不在此处返回任何扩展字段明文，仅给元信息
         let sens = r.i64("sensitivity")
         let issuerRaw = r.str("issuer")
         let issuer = if (sens >= 2) { Masker.mask(issuerRaw, sens) } else { issuerRaw }
+        let titleRaw = r.str("title")
+        let titleSegs = SearchHighlighter.toJson(titleRaw, keyword)
+        let issuerSegs = if (sens >= 2) {
+            "[]"
+        } else {
+            SearchHighlighter.toJson(issuerRaw, keyword)
+        }
         let sb = StringBuilder()
         sb.append("{\"id\":${r.i64("id")},")
         sb.append("\"category\":${r.i64("category")},")
-        sb.append("\"title\":\"${ApiResponse.escape(r.str("title"))}\",")
+        sb.append("\"title\":\"${ApiResponse.escape(titleRaw)}\",")
         sb.append("\"status\":${r.i64("status")},")
         sb.append("\"sensitivity\":${sens},")
         sb.append("\"issuer\":\"${ApiResponse.escape(issuer)}\",")
         sb.append("\"issuedDate\":\"${ApiResponse.escape(r.str("issued_date"))}\",")
         sb.append("\"expiresDate\":\"${ApiResponse.escape(r.str("expires_date"))}\",")
         sb.append("\"attachmentCount\":${r.i64("attachment_count")},")
-        sb.append("\"updatedAt\":${r.i64("updated_ms")}}")
+        sb.append("\"updatedAt\":${r.i64("updated_ms")},")
+        sb.append("\"highlight\":{\"title\":${titleSegs},\"issuer\":${issuerSegs}}}")
         return sb.toString()
     }
 
