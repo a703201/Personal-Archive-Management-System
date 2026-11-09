@@ -33,16 +33,24 @@
 package ams.storage
 
 import std.fs.*
+import std.env.*
+
 import ams.kernel.error.*
 
 /**
  * 存储后端抽象（对象存储的最小充分接口）。
+ *
+ * Q2 方案 A 补 `backendCode()`：让 `arc_attachments.storage_backend`
+ * 由**后端自己申报**，而不是 Repo 里硬编码 0。新增后端只需实现本方法，
+ * 落库逻辑无需改动。
  */
 public interface StorageBackend {
     /** 写入（覆盖）对象 */
     func put(key: String, data: Array<Byte>): Unit
     /** 读取对象；不存在返回 None */
     func get(key: String): Option<Array<Byte>>
+    /** 后端码：0 = 本地 FS，1 = S3 兼容对象存储（与 DB 列取值一致） */
+    func backendCode(): Int64
 }
 
 /**
@@ -77,6 +85,10 @@ public class LocalFileStorage <: StorageBackend {
         } catch (e: Exception) {
             return None
         }
+    }
+
+    public func backendCode(): Int64 {
+        return 0
     }
 
     /**
@@ -130,8 +142,69 @@ public class QuarantineStorage <: StorageBackend {
         return this.inner.get(QuarantineStorage.keyOf(key))
     }
 
+    /**
+     * 隔离区**恒定本地 FS**（后端码 0）：物理隔离是 FR-ATT-007 的安全兜底，
+     * 不随主存储后端切换。若也搬到对象存储，Normal/Quarantine 之间
+     * 「按不同键前缀、同一后端」的物理分离就退化为纯逻辑隔离。
+     */
+    public func backendCode(): Int64 {
+        return 0
+    }
+
     /** 隔离区键前缀，避免与正常区键冲突 */
     private static func keyOf(key: String): String {
         return "quarantine_${key}"
+    }
+}
+
+// ============================================================
+// Q2 方案 A · 存储后端工厂（唯一装配点）
+//
+// 目标：把「切换后端时必改的点」从 main.cj 的 3 处硬编码收敛到这一个类。
+// 默认 `fs`，行为与改造前完全一致（零回归）。
+//
+// 失败关闭：
+//   · 未知后端 → 直接抛 validationError；
+//   · 选 s3 但配置不全 → 抛 validationError（不静默回落 fs）；
+//   · 配置完整 → 构造**真实** HttpS3Transport（SigV4 + HTTP/HTTPS），
+//     真正的网络 I/O 在首次 put/get 时发生；连接/签名/响应失败一律抛
+//     AppError 失败关闭，绝不静默回落本地 FS 或明文写入。
+// ============================================================
+public class StorageBackends {
+    /** 与 arc_attachments.storage_backend 列取值一致 */
+    public static let BACKEND_FS: Int64 = 0
+    public static let BACKEND_S3: Int64 = 1
+
+    /**
+     * @param root     FS 后端的数据目录（S3 后端忽略）
+     * @param purpose  用途标识，用作 S3 键前缀隔离：attachments / exports / backups
+     * @param transport 真实 S3 传输层；不传则默认构造 HttpS3Transport（SigV4 + HTTP/HTTPS）。
+     *                仅测试时注入内存/桩实现。
+     */
+    public static func make(
+        root: String,
+        purpose: String,
+        transport!: ?S3Transport = None
+    ): StorageBackend {
+        // 平台选择统一经 StorageProviders：AMS_STORAGE_PROVIDER（新，多厂商）
+        // 优先，旧 AMS_STORAGE_BACKEND=fs/s3 兼容保留，默认 local。
+        // current() 对未知 code 失败关闭，不静默回落本地。
+        let profile = StorageProviders.current()
+        if (profile.isLocal()) {
+            return LocalFileStorage(root)
+        }
+        let cfg = match (S3StorageConfig.fromEnv(purpose, provider: profile.code)) {
+            case Some(c) => c
+            case None => throw validationError("AMS_S3_*",
+                "S3 配置不齐备：需要 AMS_S3_ENDPOINT / BUCKET / REGION / ACCESS_KEY / SECRET_KEY")
+        }
+        cfg.validate()
+        // 配置完整即构造**真实** HTTP 传输层（SigV4 签名 + std.net/stdx.net.tls）。
+        // 真正的网络 I/O 发生在首次 put/get 时，而非启动期；连接/签名/响应任一
+        // 失败都会抛 AppError 失败关闭，绝不静默回落本地 FS 或明文写入。
+        match (transport) {
+            case Some(t) => return S3ObjectStorage(cfg, transport: t)
+            case None => return S3ObjectStorage(cfg, transport: HttpS3Transport.forConfig(cfg))
+        }
     }
 }

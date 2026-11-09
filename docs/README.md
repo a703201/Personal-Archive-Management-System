@@ -1,7 +1,7 @@
 # 个人档案管理系统（Personal Archive Management System，代号 **AMS**）
 
 > 开发文档集 · 2026-10-29
-> 状态：**P0 已全量实装 · P1 收口 · P2 完成**（需求落地台账见 [10](./10-实现状态核对.md)）
+> 状态：**P0 已全量实装 · P1 收口 · P2 完成 · 能力边界项已于 2026-11-07 全部转正**（需求落地台账见 [10](./10-实现状态核对.md)）
 
 ---
 
@@ -18,12 +18,13 @@
 | 07 | [视觉与交互设计规范](./07-视觉与交互设计规范.md) | 前端、设计、研发 | 界面长什么样？动效怎么动？深浅色如何切换？ |
 | 08 | [SM4 方案变更说明](./08-SM4方案变更说明.md) | 安全、后端、运维 | 为什么不用 SM4-GCM？EtM 组合怎么构造？密钥如何分离？ |
 | 09 | [部署与发布指南](./09-部署与发布指南.md) | 运维、研发 | 怎么打包发布？交付物长什么样？部署踩坑怎么办？ |
-| 10 | [实现状态核对（P0/P1/P2）](./10-实现状态核对.md) | 项目、研发 | 各优先级需求落地到什么程度？证据在哪？ |
+| 10 | [实现状态核对（P0/P1/P2）](./10-实现状态核对.md) | 项目、研发 | 各优先级需求落地到什么程度？证据在哪？（含 2026-11-07 能力边界转正与仍保留的边界清单） |
 | 11 | [前端技术栈选型分析](./11-前端技术栈选型分析.md) | 前端、架构 | 为什么不用组件库？为什么不上 vue-i18n？依赖体积换来什么？ |
 | 12 | [家庭成员邀请（设计 + 方案评估）](./12-家庭成员邀请.md) | 安全、后端、产品、架构 | 邀请码还是二维码？授权粒度选哪档？要不要审批流？分几批做？**（含推荐结论）** |
 | 13 | [信创与国家密码标准参考](./13-信创与国家密码标准参考.md) | 安全、后端、运维、合规 | 国密 GM/T·GB/T 对齐、已落地/未实现能力、信创适配现状 |
-| 14 | [对外 API 规范（OpenAPI）](./14-对外API规范-OpenAPI.yaml) | 前端、后端、测试 | 156 个接口的 OpenAPI 3.1 基线规范（schema 待补全） |
-| 15 | [架构演进路线（方案候选）](./15-架构演进路线-方案候选.md) | 架构、技术负责人 | 提炼通用框架 / SaaS·微服务化的 A/B/C 候选方案（待拍板） |
+| 14 | [对外 API 规范（OpenAPI）](./14-对外API规范-OpenAPI.yaml) | 前端、后端、测试 | 156 个 method+path 的 OpenAPI 3.1 基线（核心 schema 已补）；与后端 185 条路由声明口径不同 |
+| 15 | [架构演进路线（方案候选）](./15-架构演进路线-方案候选.md) | 架构、技术负责人 | 提炼通用框架 / SaaS·微服务化的 A/B/C 候选方案（已拍板，见 §三；本轮能力转正未改变单体单进程形态） |
+| — | [运维执行手册](../deploy/RUNBOOK.md) | 运维、研发 | 备份与恢复、巡检、故障处置等运维操作（运维执行手册） |
 
 > **⚠️ 已验证事实基线（2026-10-24 实测）**
 > 基于本机 Cangjie SDK 1.0.5（`E://Program Files (x86)\Cangjie`）**实际编译与运行验证**得出的结论，改变了技术方案：
@@ -43,6 +44,10 @@
 > - 导出功能安全设计 → [安全 §6.5](./03-安全设计专章.md#65-导出功能安全设计专节)（四层管控 / 分级策略 / 产物保护 / 限流 / 告警 / 12 条测试用例）
 > - 导出任务执行模型 → [架构 §6.3.1](./02-架构设计说明.md#631-导出任务执行模型)（异步 / 流式 / 断点续做 / 崩溃恢复）
 > - 导入导出任务实体 → [数据模型 §10.5~§10.6](./06-数据模型设计.md#105-imp_export_tasks导入导出任务)
+
+> **媒体能力实现（2026-11-07 转正）**：运行时主链路为纯仓颉 `packages/ams-core/src/media/`（`png.cj` / `ocr.cj` / `pdftext.cj` / `media.cj`，全部在 `ams-server` 进程内完成，无独立 worker / 外部进程），单测见 `packages/ams-core/tests/media/media_test.cj`。`scripts/media_worker.py` 保留为**离线参考实现 / 可选外部引擎**（自带 `--selftest` 12/12），**不参与运行时主链路**，不是系统依赖。开关与能力边界见 [README.md](../README.md)「已知限制」与 [10](./10-实现状态核对.md) §4。
+
+> **构建期字模生成器（2026-11-08 第四批）**：`scripts/gen-media-glyphs.py` 在**构建期**用 Windows GDI 字体渲染生成 `packages/ams-core/src/media/glyphdata.cj`（220 个常用汉字 × 8 字体原型 + 10 个手写风格数字 × 9 原型），供 `cjk.cj` / `hand.cj` 运行时查表；运行时**不需要**字体 / GDI / Python / 外部进程，媒体主链路仍是纯仓颉进程内。媒体能力支持矩阵与剩余边界见 [README.md](../README.md)「已知限制」、[10](./10-实现状态核对.md) §4 与 [CHANGELOG.md](../CHANGELOG.md)。
 
 > 阅读顺序建议：**PRD → 数据模型 → 架构 → 安全 → 开发规范 → 排期 → 视觉规范**。
 > 数据模型先行，是因为后端分层、接口契约、权限粒度都强依赖实体边界；先定实体再谈框架能避免后期返工。
@@ -114,6 +119,21 @@
 | Q4 | 是否存在"家庭共享"跨账号授权需求 | 影响授权模型是否引入 ACL 扩展 | 产品/甲方 | M0 结束前 | 本期仅做"档案管理员代管"，不引入通用 ACL |
 | Q5 | 是否需要移动端 App（而非仅响应式 Web） | 影响排期与人力 | 甲方 | M0 结束前 | 仅响应式 Web（PWA 可选），移动端列为 P3 |
 | Q6 | 目标是否包含信创认证/等保三级测评 | 影响审计留痕、密钥托管与文档深度 | 甲方/合规 | M0 结束前 | 按等保三级"技术要求 + 管理要求"预留自评清单 |
+
+> **Q2 进展（2026-11-08 · 方案 A）**：最终选型（自建 MinIO / 华为云 OBS / 本地 FS）仍待运维·甲方确认，**Q2 未关闭**；但表中「兜底方案」已全量落地，并发现一个会影响 B/C 的硬前置。
+> - `StorageBackend` 接口与默认 FS 驱动：原有；接口补 `backendCode()`（0=fs / 1=s3）。
+> - **S3 驱动骨架**：新增 `packages/ams-storage/src/s3.cj` —— 配置模型、对象键消毒与 URL 组装、可注入 `S3Transport`、失败关闭。
+> - **唯一装配点**：`StorageBackends.make()`，`main.cj` 三处硬编码 `LocalFileStorage`（附件 / 导出 / 备份）已收敛；默认 `fs`，行为零回归。
+> - **落库真实后端**：`arc_attachments.storage_backend` 不再硬编码 `0`，由后端自报；隔离区恒定本地 FS（FR-ATT-007 物理隔离不随主后端切换）。
+> - **部署拓扑预留**：compose 加 `--profile s3` 可选 MinIO（默认 `up -d` 不创建容器）、两个 env 模板补全 `AMS_STORAGE_BACKEND` / `AMS_S3_*`。
+> - **扩展（同日晚，按用户要求）**：适配多个云服务商并补 HMAC-SHA256 ——
+>   - `StorageProviders` 注册表提供 **8 个平台**：`local`（本地 FS，默认且唯一完全可用）/ `minio` / `huawei`（华为云 OBS）/ `aliyun`（阿里云 OSS）/ `qiniu`（七牛 Kodo S3 兼容网关）/ `tencent`（腾讯云 COS）/ `aws` / `s3`；每家带 endpoint 模板、region 样例、桶命名约束、默认寻址风格与签名协议。
+>   - **平台选择接口**：`GET /api/admin/storage/providers`、`GET|PUT /api/admin/storage/config`（`cfg:read` / `cfg:manage`，写 `deployment.env`，重启生效，凭据脱敏）；切换时做**存量附件保护**，防旧 `storage_key` 失效。
+>   - **HMAC-SHA256 已补**：RFC 2104 + stdx SHA256 原语实现，RFC 4231 四个向量（含 131 字节长 key）验证；`ams.crypto.impl` 不再返回「暂未接入」。
+>   - **SigV4 签名计算已实现**：`sigv4.cj` 用 AWS 官方 GET Object 向量验证，供各家 S3 兼容接口共用；七牛自有 QiniuV2 / 阿里 OSS 自有 V1 签名明确标注「未实现」。
+>   - `arc_attachments` 新增 `storage_provider` 列（迁移 025），每行自述厂商，与 `storage_backend`(0/1) 互补；存量行回填 `local`。
+> - ✅ **`S3Transport`（HTTP 客户端）已补齐**：新增 `http_transport.cj` 的 `HttpS3Transport`，基于 `std.net`（TcpSocket）+ `stdx.net.tls`（TlsSocket）自实现 HTTP/1.1 客户端，PUT/GET/DELETE 真正发出；**404 → None、其余失败关闭**（连接/签名/响应失败一律 `StorageFailure`，绝不静默回落 FS 或明文写入）。选择非 `local` 平台在配置完整时即构建真实传输层（不再仅因缺 transport 启动即失败关闭）。`StorageAdminRoutes` 的 `transportReady` 改为按平台能力返回 `true`。详见 `docs/10` 第六/七批与「真实 S3/OBS HTTP 传输层落地」章节、`CHANGELOG.md [Unreleased]`、`http_transport.cj` 头注释。
+> - 详见 `docs/10` 第六/七批、`CHANGELOG.md [Unreleased]`、`http_transport.cj` / `providers.cj` / `sigv4.cj` 头注释。
 
 ---
 
