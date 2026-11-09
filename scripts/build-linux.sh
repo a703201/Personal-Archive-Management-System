@@ -288,6 +288,41 @@ if [ -d "$STDX_DIR" ]; then
     STDX_LIBS_ALL="-L${STDX_DIR} $STDX_LIBS_ALL"
 fi
 
+# ---- 外部 PP-OCRv5 桥接层（C）----
+# Linux 构建必须产出 build/<...>/libams_ocr.so（ams.server 链接需要其符号）。
+#   · 若已就绪 onnxruntime（由 fetch-ocr-assets.sh 落地），编译「真推理」桥接；
+#   · 否则编译零依赖桩（init 返回 -1，运行期自动回退内置三路），
+#     保证无论资产是否齐备，ams.server 都能链接成功。
+OCR_EXT_DIR="$ROOT/packages/ams-core/native/ocr_ext"
+OCR_LINK=""
+if [ -f "$BUILD_DIR/libonnxruntime.so" ]; then
+    echo "--- ocr_bridge (real · 链接 onnxruntime) ---"
+    gcc -O2 -fPIC -shared \
+        "$OCR_EXT_DIR/ocr_bridge.c" -o "$BUILD_DIR/libams_ocr.so" \
+        -I"$BUILD_DIR/include" -L"$BUILD_DIR" -lonnxruntime \
+        > /tmp/ams_ocr_build.log 2>&1 || {
+        echo "FAILED building ocr_bridge (real)"
+        tail -30 /tmp/ams_ocr_build.log | sed 's/^/           /'
+        exit 1
+    }
+    echo "OK -> $(basename "$BUILD_DIR")/libams_ocr.so"
+    # 必须显式 -l:libonnxruntime.so：libams_ocr.so 以 NEEDED 方式依赖 onnxruntime，
+    # 但 Cangjie 生成的链接参数未带 --no-as-needed，ld 不会自动解析该 NEEDED，
+    # 导致 OrtGetApiBase@VERS_1.19.2 在链接 ams-server 时 undefined。显式列出即可。
+    OCR_LINK="-L$BUILD_DIR -l:libams_ocr.so -l:libonnxruntime.so"
+else
+    echo "--- ocr_bridge (stub · onnxruntime 缺失，运行期回退内置 OCR) ---"
+    gcc -O2 -fPIC -shared \
+        "$OCR_EXT_DIR/ocr_bridge_stub.c" -o "$BUILD_DIR/libams_ocr.so" \
+        > /tmp/ams_ocr_build.log 2>&1 || {
+        echo "FAILED building ocr_bridge (stub)"
+        tail -30 /tmp/ams_ocr_build.log | sed 's/^/           /'
+        exit 1
+    }
+    echo "OK -> $(basename "$BUILD_DIR")/libams_ocr.so (stub)"
+    OCR_LINK="-L$BUILD_DIR -l:libams_ocr.so"
+fi
+
 echo "=== AMS 构建（cjc · Linux · 子包粒度）==="
 echo "  CANGJIE_HOME : ${CANGJIE_HOME}"
 echo "  CANGJIE_STDX : ${STDX_DIR}"
@@ -318,7 +353,7 @@ for top in "${TOPS[@]}"; do
             #      单遍 ld 同样会漏解析（如 ams.api.routes 引用 ams.core.search）。
             #   Windows 的 link.exe 是多遍扫描、容忍该顺序；GNU ld/lld 不是，
             #   故此处显式用分组让 ld 反复扫描直到全部解析。
-            _link="--start-group $LINK_LIBS $DRV_LIBS --end-group $STDX_LIBS_ALL"
+            _link="--start-group $LINK_LIBS $DRV_LIBS --end-group $STDX_LIBS_ALL $OCR_LINK"
             "$CJC" -O2 -p "$subdir" \
                   --import-path "$BUILD_DIR" \
                   --import-path "$STDX_DIR" \

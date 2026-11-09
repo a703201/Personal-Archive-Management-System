@@ -97,6 +97,19 @@ public class AttachmentRoutes {
         router.get("/api/attachments/:id/watermark",
                    { req: ApiRequest => this.watermark(req) },
                    requiredPerm: "attachment:read:own")
+        // ---- 纯仓颉媒体引擎：缩略图 / 像素水印图 / OCR / 手动处理 ----
+        router.get("/api/attachments/:id/thumbnail",
+                   { req: ApiRequest => this.thumbnail(req) },
+                   requiredPerm: "attachment:read:own")
+        router.get("/api/attachments/:id/watermarked",
+                   { req: ApiRequest => this.watermarked(req) },
+                   requiredPerm: "attachment:read:own")
+        router.get("/api/attachments/:id/ocr",
+                   { req: ApiRequest => this.ocr(req) },
+                   requiredPerm: "attachment:read:own")
+        router.post("/api/attachments/:id/media",
+                    { req: ApiRequest => this.media(req) },
+                    requiredPerm: "attachment:upload:own")
         // ---- FR-ATT-010 批量操作 ----
         router.post("/api/attachments/batch/download",
                     { req: ApiRequest => this.batchDownload(req) },
@@ -107,6 +120,24 @@ public class AttachmentRoutes {
         router.post("/api/attachments/batch/delete",
                     { req: ApiRequest => this.batchDelete(req) },
                     requiredPerm: "attachment:delete:any")
+        // ---- FR-ATT-001 分片上传 / 断点续传 ----
+        // 路径前缀刻意用 4 段以上的 `/upload/sessions`，避开
+        // `/api/attachments/:id`（3 段）在 ParamDistributor 里的模式歧义。
+        router.post("/api/attachments/upload/sessions",
+                    { req: ApiRequest => this.createUploadSession(req) },
+                    requiredPerm: "attachment:upload:own")
+        router.get("/api/attachments/upload/sessions/:id",
+                   { req: ApiRequest => this.uploadSessionStatus(req) },
+                   requiredPerm: "attachment:upload:own")
+        router.put("/api/attachments/upload/sessions/:id/chunks/:index",
+                   { req: ApiRequest => this.putUploadChunk(req) },
+                   requiredPerm: "attachment:upload:own")
+        router.post("/api/attachments/upload/sessions/:id/complete",
+                    { req: ApiRequest => this.completeUploadSession(req) },
+                    requiredPerm: "attachment:upload:own")
+        router.delete("/api/attachments/upload/sessions/:id",
+                      { req: ApiRequest => this.cancelUploadSession(req) },
+                      requiredPerm: "attachment:upload:own")
     }
 
     // ---------------------------------------------------------
@@ -153,6 +184,142 @@ public class AttachmentRoutes {
             "{\"id\":${result.attachmentId},\"dedupHit\":${result.dedupHit},\"status\":${result.status}}",
             req.requestId
         )
+    }
+
+    // ==========================================================
+    // FR-ATT-001 · 分片上传 / 断点续传
+    //
+    // 会话与分片都在 `ChunkUploadStore`（单实例内存态，Mutex 串行化）。
+    // 合并后的明文原样交给 `service.upload()`，因此指纹 / 去重 / DEK /
+    // 加密 / 落库 / 媒体处理与单次上传**完全同一条链路**，零回归。
+    // ==========================================================
+
+    /**
+     * POST /api/attachments/upload/sessions —— 创建上传会话。
+     * 请求体（扁平 JSON）：
+     *   {"fileName":"a.jpg","title":"...","subjectId":123,"itemId":0,
+     *    "category":10,"totalSize":1234567,"summary":"","keywords":""}
+     */
+    /**
+     * 分片会话创建阶段的主体归属预检。
+     *
+     * 最终落库前 `AttachmentService.upload()` 还会再校验一次（含 itemId 反查
+     * 修正后的 owner），这里提前拒绝是为了不让无权请求占用会话 / 缓存配额。
+     * subjectId 为 0（仅靠 itemId 反查归属）时交给 service 在 complete 阶段判定。
+     */
+    private func assertSubjectAccessible(subjectId: Int64, req: ApiRequest): Unit {
+        if (subjectId <= 0) {
+            return
+        }
+        match (this.userRepo) {
+            case Some(ur) =>
+                let uid = UserRepo.parseId(req.subjectId)
+                if (!ur.listAccessibleSubjectIds(uid).contains("${subjectId}")) {
+                    throw AppError(AppErrorKind.Forbidden, "无权向该主体上传附件")
+                }
+            case None => ()
+        }
+    }
+
+    private func createUploadSession(req: ApiRequest): ApiResponse {
+        let json = match (SimpleJson.parse(req.bodyText())) {
+            case Some(j) => j
+            case None => throw validationError("body", "请求体不是合法的 JSON 对象")
+        }
+        let fileName = json.get("fileName") ?? ""
+        let titleRaw = json.get("title") ?? ""
+        let title = if (titleRaw.isEmpty()) { fileName } else { titleRaw }
+        let category = RowData.toI64(json.get("category") ?? "10")
+        let subjectId = RowData.toI64(json.get("subjectId") ?? "0")
+        let itemRaw = json.get("itemId") ?? ""
+        let itemId: Option<Int64> = if (itemRaw.isEmpty() || itemRaw == "0") {
+            None
+        } else {
+            Some<Int64>(RowData.toI64(itemRaw))
+        }
+        let summary = json.get("summary") ?? ""
+        let keywords = json.get("keywords") ?? ""
+        let totalSize = RowData.toI64(json.get("totalSize") ?? "0")
+        let operatorId = UserRepo.parseId(req.subjectId)
+        this.assertSubjectAccessible(subjectId, req)
+        let now = Times.nowMillis()
+        let id = ChunkUploadStore.create(
+            operatorId, subjectId, itemId, category, title, fileName,
+            summary, keywords, totalSize, now
+        )
+        let totalChunks = (totalSize + ChunkUploadStore.CHUNK_SIZE - 1) / ChunkUploadStore.CHUNK_SIZE
+        return ApiResponse.ok(
+            "{\"uploadId\":\"${id}\",\"chunkSize\":${ChunkUploadStore.CHUNK_SIZE}," +
+            "\"totalChunks\":${totalChunks},\"totalSize\":${totalSize}}",
+            req.requestId
+        )
+    }
+
+    /**
+     * PUT /api/attachments/upload/sessions/:id/chunks/:index —— 上传一片（原始字节）。
+     * 重复上传同一 index 幂等覆盖，前端可据此重传失败片。
+     */
+    private func putUploadChunk(req: ApiRequest): ApiResponse {
+        let id = req.pathParam("id") ?? ""
+        let index = RowData.toI64(req.pathParam("index") ?? "-1")
+        let operatorId = UserRepo.parseId(req.subjectId)
+        let received = ChunkUploadStore.putChunk(
+            operatorId, id, index, req.bodyBytes, Times.nowMillis()
+        )
+        return ApiResponse.ok(
+            "{\"uploadId\":\"${id}\",\"index\":${index},\"received\":${received}}",
+            req.requestId
+        )
+    }
+
+    /**
+     * GET /api/attachments/upload/sessions/:id —— 查询已收分片（续传起点）。
+     */
+    private func uploadSessionStatus(req: ApiRequest): ApiResponse {
+        let id = req.pathParam("id") ?? ""
+        let operatorId = UserRepo.parseId(req.subjectId)
+        let (total, indexes, totalSize, chunkSize) = ChunkUploadStore.status(
+            operatorId, id, Times.nowMillis()
+        )
+        let sb = StringBuilder()
+        sb.append("{\"uploadId\":\"${id}\",\"totalChunks\":${total},")
+        sb.append("\"totalSize\":${totalSize},\"chunkSize\":${chunkSize},\"received\":[")
+        var i: Int64 = 0
+        while (i < indexes.size) {
+            if (i > 0) {
+                sb.append(",")
+            }
+            sb.append("${indexes[i]}")
+            i = i + 1
+        }
+        sb.append("]}")
+        return ApiResponse.ok(sb.toString(), req.requestId)
+    }
+
+    /**
+     * POST /api/attachments/upload/sessions/:id/complete —— 收齐后合并落成正式附件。
+     */
+    private func completeUploadSession(req: ApiRequest): ApiResponse {
+        let id = req.pathParam("id") ?? ""
+        let operatorId = UserRepo.parseId(req.subjectId)
+        let c = ChunkUploadStore.complete(operatorId, id, Times.nowMillis())
+        let result = this.service.upload(
+            c.subjectId, c.itemId, c.category, c.title, c.fileName, c.plain, operatorId,
+            summary: c.summary, keywords: c.keywords
+        )
+        return ApiResponse.ok(
+            "{\"id\":${result.attachmentId},\"dedupHit\":${result.dedupHit}," +
+            "\"status\":${result.status},\"bytes\":${c.plain.size}}",
+            req.requestId
+        )
+    }
+
+    /** DELETE /api/attachments/upload/sessions/:id —— 取消上传。 */
+    private func cancelUploadSession(req: ApiRequest): ApiResponse {
+        let id = req.pathParam("id") ?? ""
+        let operatorId = UserRepo.parseId(req.subjectId)
+        let ok = ChunkUploadStore.cancel(operatorId, id, Times.nowMillis())
+        return ApiResponse.ok("{\"cancelled\":${ok}}", req.requestId)
     }
 
     /**
@@ -523,6 +690,89 @@ public class AttachmentRoutes {
     }
 
     /**
+     * GET /api/attachments/:id/thumbnail —— 服务端缩略图（PNG / base64）。
+     * 命中返回 download 同款 {"id","size","base64"} 契约；未生成返回 404，
+     * 前端据此回落原图 CSS 缩放（零回归）。
+     */
+    private func thumbnail(req: ApiRequest): ApiResponse {
+        let id = RowData.toI64(req.pathParam("id") ?? "")
+        this.owned(id, req)
+        return AttachmentRoutes.mediaBytes(id, this.service.mediaThumbnail(id), req)
+    }
+
+    /** GET /api/attachments/:id/watermarked —— 烧写水印后的 PNG。 */
+    private func watermarked(req: ApiRequest): ApiResponse {
+        let id = RowData.toI64(req.pathParam("id") ?? "")
+        this.owned(id, req)
+        return AttachmentRoutes.mediaBytes(id, this.service.mediaWatermarked(id), req)
+    }
+
+    /** GET /api/attachments/:id/ocr —— OCR 结果与状态。 */
+    private func ocr(req: ApiRequest): ApiResponse {
+        let id = RowData.toI64(req.pathParam("id") ?? "")
+        let rec = this.owned(id, req)
+        return ApiResponse.ok(
+            "{\"ocrText\":\"${ApiResponse.escape(rec.ocrText)}\"," +
+            "\"ocrStatus\":${rec.ocrStatus}," +
+            "\"ocrEngine\":\"${ApiResponse.escape(rec.ocrEngine)}\"}",
+            req.requestId)
+    }
+
+    /**
+     * POST /api/attachments/:id/media —— 手动触发一次媒体处理。
+     * 水印文本沿用 FR-ATT-008 口径（访问者 + 服务端时间 + 8 位追踪号）。
+     */
+    private func media(req: ApiRequest): ApiResponse {
+        let id = RowData.toI64(req.pathParam("id") ?? "")
+        this.owned(id, req)
+        let uid = UserRepo.parseId(req.subjectId)
+        var who = req.subjectId
+        match (this.userRepo) {
+            case Some(ur) =>
+                match (ur.findById(uid)) {
+                    case Some(u) =>
+                        if (!u.nickname.isEmpty()) {
+                            who = u.nickname
+                        } else {
+                            who = u.username
+                        }
+                    case None => ()
+                }
+            case None => ()
+        }
+        let now = Times.nowMillis()
+        let trace = AttachmentRoutes.traceNo(id, uid, now)
+        let stamp = Times.toIso8601(now)
+        var shown = stamp
+        if (stamp.size >= 16) {
+            shown = stamp[0..10] + " " + stamp[11..16]
+        }
+        let text = "${who} · ${shown} · #${trace}"
+        let r = this.service.processMedia(id, text)
+        return ApiResponse.ok(
+            "{\"id\":${id},\"ocrStatus\":${r.ocrStatus}," +
+            "\"ocrEngine\":\"${ApiResponse.escape(r.ocrEngine)}\"," +
+            "\"ocrText\":\"${ApiResponse.escape(r.ocrText)}\"," +
+            "\"thumbnail\":${r.thumbnail.size > 0}," +
+            "\"watermarked\":${r.watermarked.size > 0}," +
+            "\"error\":\"${ApiResponse.escape(r.error)}\"}",
+            req.requestId)
+    }
+
+    /** 媒体产物统一以 base64 内嵌 JSON 返回（HTTP 层不支持裸二进制）。 */
+    private static func mediaBytes(
+        id: Int64, data: Option<Array<Byte>>, req: ApiRequest
+    ): ApiResponse {
+        match (data) {
+            case Some(bytes) =>
+                return ApiResponse.ok(
+                    "{\"id\":${id},\"size\":${bytes.size},\"base64\":\"${toBase64String(bytes)}\"}",
+                    req.requestId)
+            case None => throw notFound("媒体产物")
+        }
+    }
+
+    /**
      * GET /api/attachments/:id/watermark —— 预览水印票据（FR-ATT-008）。
      *
      * 【为什么是「票据 + 前端叠加」而不是服务端烧进水印】
@@ -687,7 +937,11 @@ public class AttachmentRoutes {
         sb.append("\"status\":${a.status},")
         sb.append("\"downloadCount\":${a.downloadCount},")
         sb.append("\"summary\":\"${ApiResponse.escape(a.summary)}\",")
-        sb.append("\"keywords\":\"${ApiResponse.escape(a.keywords)}\"}")
+        sb.append("\"keywords\":\"${ApiResponse.escape(a.keywords)}\",")
+        sb.append("\"ocrText\":\"${ApiResponse.escape(a.ocrText)}\",")
+        sb.append("\"ocrStatus\":${a.ocrStatus},")
+        sb.append("\"ocrEngine\":\"${ApiResponse.escape(a.ocrEngine)}\",")
+        sb.append("\"mediaError\":\"${ApiResponse.escape(a.mediaError)}\"}")
         return sb.toString()
     }
 }

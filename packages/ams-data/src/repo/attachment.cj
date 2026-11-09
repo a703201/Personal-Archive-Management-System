@@ -49,13 +49,23 @@ public class AttachmentRecord {
     public let summary: String
     /** 手动录入关键词（逗号分隔，随条目检索索引） */
     public let keywords: String
+    /** OCR 识别文本（PRD FR-ATT-013，需隐私显式同意后才自动填充） */
+    public let ocrText: String
+    /** 0 待处理 / 2 完成 / 3 失败或不支持 */
+    public let ocrStatus: Int64
+    /** 产出 OCR 的引擎标识（builtin-5x7 / pdf-text） */
+    public let ocrEngine: String
+    /** 媒体处理错误说明（空串表示无错误） */
+    public let mediaError: String
 
     public init(
         id: Int64, subjectId: Int64, itemId: Int64, category: Int64, title: String,
         currentVersionId: Int64, versionCount: Int64, storageKey: String,
         keyVersion: Int64, wrappedDek: String, fileSize: Int64, fileExt: String,
         mimeType: String, status: Int64, downloadCount: Int64, dedupKey: String,
-        summary!: String = "", keywords!: String = ""
+        summary!: String = "", keywords!: String = "",
+        ocrText!: String = "", ocrStatus!: Int64 = 0,
+        ocrEngine!: String = "", mediaError!: String = ""
     ) {
         this.id = id
         this.subjectId = subjectId
@@ -75,6 +85,10 @@ public class AttachmentRecord {
         this.dedupKey = dedupKey
         this.summary = summary
         this.keywords = keywords
+        this.ocrText = ocrText
+        this.ocrStatus = ocrStatus
+        this.ocrEngine = ocrEngine
+        this.mediaError = mediaError
     }
 }
 
@@ -95,7 +109,10 @@ public class AttachmentRepo {
         "COALESCE(file_size, 0) AS file_size, COALESCE(file_ext, '') AS file_ext, " +
         "COALESCE(mime_type, '') AS mime_type, status, download_count, " +
         "COALESCE(dedup_key, '') AS dedup_key, " +
-        "COALESCE(summary, '') AS summary, COALESCE(keywords, '') AS keywords"
+        "COALESCE(summary, '') AS summary, COALESCE(keywords, '') AS keywords, " +
+        "COALESCE(ocr_text, '') AS ocr_text, COALESCE(ocr_status, 0) AS ocr_status, " +
+        "COALESCE(ocr_engine, '') AS ocr_engine, " +
+        "COALESCE(media_error, '') AS media_error"
 
     /**
      * 新建附件主记录（初始状态由调用方给定，通常为 scanning）。
@@ -115,17 +132,21 @@ public class AttachmentRepo {
         status: Int64,
         operatorId: Int64,
         summary!: String = "",
-        keywords!: String = ""
+        keywords!: String = "",
+        // Q2 方案 A：后端码由 StorageBackend 自报，默认 0(=fs) 保证零回归
+        storageBackend!: Int64 = 0,
+        // Q2 多厂商：平台 code 由服务注入，默认 local 保证零回归
+        storageProvider!: String = "local"
     ): Int64 {
         let id = Ids.next()
         let sql = "INSERT INTO arc_attachments (" +
                   "id, subject_id, item_id, category, title, current_version_id, version_count, " +
-                  "storage_key, storage_backend, encryption_alg, key_version, file_size, " +
+                  "storage_key, storage_backend, storage_provider, encryption_alg, key_version, file_size, " +
                   "file_ext, mime_type, sm3_fingerprint, dedup_key, status, " +
                   "is_current_deleted, watermark_enabled, download_count, " +
                   "summary, keywords, " +
                   "created_at, created_by, updated_at, updated_by, version" +
-                  ") VALUES (?, ?, ?, ?, ?, 0, 0, ?, 0, 'SM4-CBC', ?, ?, ?, ?, ?, ?, ?, " +
+                  ") VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 'SM4-CBC', ?, ?, ?, ?, ?, ?, ?, " +
                   "FALSE, TRUE, 0, ?, ?, " +
                   "CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP, ?, 1)"
         let c = this.db.connect()
@@ -140,17 +161,19 @@ public class AttachmentRepo {
             st.set(3, category)
             st.set(4, title)
             st.set(5, storageKey)
-            st.set(6, keyVersion)
-            st.set(7, fileSize)
-            st.set(8, fileExt)
-            st.set(9, mimeType)
-            st.set(10, fingerprint)
-            st.set(11, dedupKey)
-            st.set(12, status)
-            st.set(13, summary)
-            st.set(14, keywords)
-            st.set(15, operatorId)
-            st.set(16, operatorId)
+            st.set(6, storageBackend)
+            st.set(7, storageProvider)
+            st.set(8, keyVersion)
+            st.set(9, fileSize)
+            st.set(10, fileExt)
+            st.set(11, mimeType)
+            st.set(12, fingerprint)
+            st.set(13, dedupKey)
+            st.set(14, status)
+            st.set(15, summary)
+            st.set(16, keywords)
+            st.set(17, operatorId)
+            st.set(18, operatorId)
             st.update()
             return id
         } catch (e: Exception) {
@@ -649,7 +672,11 @@ public class AttachmentRepo {
             r.i64("download_count"),
             r.str("dedup_key"),
             summary: r.str("summary"),
-            keywords: r.str("keywords")
+            keywords: r.str("keywords"),
+            ocrText: r.str("ocr_text"),
+            ocrStatus: r.i64("ocr_status"),
+            ocrEngine: r.str("ocr_engine"),
+            mediaError: r.str("media_error")
         )
     }
 
@@ -669,6 +696,59 @@ public class AttachmentRepo {
             st.set(3, id)
             st.update()
             return true
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 写入媒体处理结果（OCR 文本 / 状态 / 引擎 / 错误）。
+     * 仿 updateMeta：参数化 SQL，同时 version = version + 1。
+     */
+    public func updateOcr(
+        id: Int64, text: String, status: Int64, engine: String, err: String
+    ): Bool {
+        let sql = "UPDATE arc_attachments SET ocr_text = ?, ocr_status = ?, " +
+                  "ocr_engine = ?, media_error = ?, " +
+                  "updated_at = CURRENT_TIMESTAMP, version = version + 1 " +
+                  "WHERE id = ? AND deleted_at IS NULL"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, text)
+            st.set(1, status)
+            st.set(2, engine)
+            st.set(3, err)
+            st.set(4, id)
+            st.update()
+            return true
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 附件总数（含软删除行）。
+     *
+     * 用途：Q2 多厂商平台切换的**存量保护** —— 只要库里已有附件，
+     * 改变 provider / endpoint / bucket 都会让旧 `storage_key` 在新后端
+     * 找不到对象，属于静默数据丢失。接口层据此拒绝切换，要求先迁移。
+     * 软删除行也计入：回收站里的附件仍可能需要恢复读取。
+     */
+    public func countAll(): Int64 {
+        let sql = "SELECT COUNT(*) AS n FROM arc_attachments"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            let rows = readRows(st.query()).all()
+            if (rows.size == 0) {
+                return 0
+            }
+            return rows[0].i64("n")
         } catch (e: Exception) {
             throw toDbError(e)
         } finally {

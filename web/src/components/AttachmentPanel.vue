@@ -16,6 +16,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { t as tr } from '../i18n'
 import { api, getToken } from '../api/client'
+import { shouldUseChunked, uploadChunked } from '../api/chunkedUpload'
 
 interface Att {
   id: number
@@ -34,6 +35,14 @@ interface Att {
   summary: string
   /** 手动录入关键词（逗号分隔，随条目检索索引） */
   keywords: string
+  /** OCR 识别文本（媒体引擎开启且处理完成后由服务端回填） */
+  ocrText?: string
+  /** 0 待处理 / 2 完成 / 3 失败或不支持 */
+  ocrStatus?: number
+  /** 产出 OCR 的引擎标识 */
+  ocrEngine?: string
+  /** 媒体处理错误说明 */
+  mediaError?: string
 }
 
 interface Ver {
@@ -114,14 +123,22 @@ function isImageAtt(a: Att): boolean {
   )
 }
 
-/** 为图片附件预拉取一次 blob 并生成 ObjectURL（列表缩略图用，按 CSS 缩放） */
+/**
+ * 为图片附件预拉取一次 blob 并生成 ObjectURL（列表缩略图用，按 CSS 缩放）。
+ * 优先用服务端 /thumbnail（媒体引擎产物）；未开启 / 404 时回落 /download 原图。
+ */
 async function ensureThumb(a: Att): Promise<void> {
   if (thumbs.value[a.id] || !isImageAtt(a)) return
   try {
-    const url = await fetchBlob(a.id)
+    const url = await fetchMediaBlob(a.id, 'thumbnail')
     thumbs.value = { ...thumbs.value, [a.id]: url }
   } catch {
-    /* 缩略图失败不影响列表，留空即可 */
+    try {
+      const url = await fetchBlob(a.id)
+      thumbs.value = { ...thumbs.value, [a.id]: url }
+    } catch {
+      /* 缩略图失败不影响列表，留空即可 */
+    }
   }
 }
 
@@ -199,6 +216,28 @@ async function upload(ev: Event): Promise<void> {
   busy.value = true
   error.value = ''
   try {
+    // 大文件走分片上传（支持断点续传）；小文件保持原来的单次 raw-body 上传，
+    // 保证零回归，也避免为几 KB 的图多打 3 次请求。
+    if (shouldUseChunked(file)) {
+      await uploadChunked(
+        file,
+        {
+          itemId: Number(props.itemId),
+          fileName: file.name,
+          title: file.name.replace(/\.[^.]+$/, ''),
+          category: 10,
+        },
+        (done, total) => {
+          notice.value = tr('componentsAttachmentPanel.uploadProgress', `上传中 ${done}/${total}`, {
+            done,
+            total,
+          })
+        },
+      )
+      notice.value = tr('componentsAttachmentPanel.uploaded', `已上传 ${file.name}`, { name: file.name })
+      await load()
+      return
+    }
     // 元数据走 query，内容走原始字节体（与后端约定一致）
     const q = new URLSearchParams({
       itemId: String(props.itemId),
@@ -216,9 +255,9 @@ async function upload(ev: Event): Promise<void> {
     })
     if (!res.ok) {
       const j = await res.json().catch(() => ({}))
-      throw new Error(j.message || tr('componentsAttachmentPanel.c39493', `上传失败（${res.status}）`))
+      throw new Error(j.message || tr('componentsAttachmentPanel.c39493', `上传失败（${res.status}）`, { status: res.status }))
     }
-    notice.value = `已上传 ${file.name}`
+    notice.value = tr('componentsAttachmentPanel.uploaded', `已上传 ${file.name}`, { name: file.name })
     await load()
   } catch (e) {
     error.value = (e as Error).message || tr('componentsAttachmentPanel.a6f805', '上传失败')
@@ -228,13 +267,23 @@ async function upload(ev: Event): Promise<void> {
   }
 }
 
-async function fetchBlob(id: number): Promise<string> {
-  const res = await api<{ base64: string }>(`/attachments/${id}/download`)
-  // base64 → 二进制 → Blob URL（后端正文是 String，只能走 base64）
-  const bin = atob(res.base64)
+/** base64 → 二进制 → Blob URL（后端正文是 String，只能走 base64） */
+function b64ToUrl(b64: string): string {
+  const bin = atob(b64)
   const bytes = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
   return URL.createObjectURL(new Blob([bytes]))
+}
+
+async function fetchBlob(id: number): Promise<string> {
+  const res = await api<{ base64: string }>(`/attachments/${id}/download`)
+  return b64ToUrl(res.base64)
+}
+
+/** 读取媒体引擎产物（缩略图 / 烧写水印图），契约与 /download 一致 */
+async function fetchMediaBlob(id: number, kind: 'thumbnail' | 'watermarked'): Promise<string> {
+  const res = await api<{ base64: string }>(`/attachments/${id}/${kind}`)
+  return b64ToUrl(res.base64)
 }
 
 async function openPreview(a: Att): Promise<void> {
@@ -244,6 +293,15 @@ async function openPreview(a: Att): Promise<void> {
     if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
     previewAtt.value = a
     previewUrl.value = await fetchBlob(a.id)
+    // 优先用服务端烧写的像素水印图；失败（开关未开 / 非 PNG / 未处理）保持原图。
+    // 无论是否用烧写图，下面的 CSS 票据水印层都保留（双保险 + 可反查）。
+    try {
+      const wmUrl = await fetchMediaBlob(a.id, 'watermarked')
+      URL.revokeObjectURL(previewUrl.value)
+      previewUrl.value = wmUrl
+    } catch {
+      /* 无烧写图：保持原图 + 票据水印层 */
+    }
     // 水印由服务端签发：访问者 + 服务端时间 + 追踪号，并在审计里留痕
     const wm = await api<{ text: string }>(`/attachments/${a.id}/watermark`)
     watermark.value = wm.text
@@ -329,7 +387,7 @@ async function uploadVersion(ev: Event): Promise<void> {
     })
     if (!res.ok) {
       const j = await res.json().catch(() => ({}))
-      throw new Error(j.message || tr('componentsAttachmentPanel.c39493', `上传失败（${res.status}）`))
+      throw new Error(j.message || tr('componentsAttachmentPanel.c39493', `上传失败（${res.status}）`, { status: res.status }))
     }
     notice.value = `已上传新版本 ${file.name}`
     verNote.value = ''
@@ -423,7 +481,7 @@ async function applyTags(mode: 'add' | 'remove'): Promise<void> {
 
 async function batchDelete(): Promise<void> {
   if (picked.value.size === 0) return
-  if (!window.confirm(tr('componentsAttachmentPanel.4f2479', `确认删除所选 ${picked.value.size} 个附件？（软删除，可在后台恢复）`))) return
+  if (!window.confirm(tr('componentsAttachmentPanel.4f2479', `确认删除所选 ${picked.value.size} 个附件？（软删除，可在后台恢复）`, { count: picked.value.size }))) return
   busy.value = true
   try {
     await api('/attachments/batch/delete', {
@@ -483,11 +541,11 @@ onMounted(load)
           <input
             type="checkbox"
             :checked="picked.has(a.id)"
-            :aria-label="tr('AttachmentPanel.855d64', '`选择 ${a.title}`')"
+            :aria-label="tr('AttachmentPanel.855d64', `选择 ${a.title}`, { title: a.title })"
             @change="toggle(a.id)"
           />
           <div v-if="thumbs[a.id]" class="att-thumb">
-            <img :src="thumbs[a.id]" class="att-thumb__img" ::alt="tr('AttachmentPanel.2267d7', '`${a.title} 缩略图`')" />
+            <img :src="thumbs[a.id]" class="att-thumb__img" :alt="tr('AttachmentPanel.2267d7', `${a.title} 缩略图`, { title: a.title })" />
           </div>
           <div class="att-item__main">
             <div class="att-item__title">
@@ -498,9 +556,10 @@ onMounted(load)
             <div class="att-item__sub">
               {{ fmtSize(a.fileSize) }} · 下载 {{ a.downloadCount }} 次
             </div>
-            <div v-if="a.summary || a.keywords" class="att-item__meta">
+            <div v-if="a.summary || a.keywords || a.ocrText" class="att-item__meta">
               <span v-if="a.summary" class="att-item__metaline">{{ tr('AttachmentPanel.79a6bb', '摘要：') }}{{ a.summary }}</span>
               <span v-if="a.keywords" class="att-item__metaline">{{ tr('AttachmentPanel.2f8344', '关键词：') }}{{ a.keywords }}</span>
+              <span v-if="a.ocrText" class="att-item__metaline">{{ tr('AttachmentPanel.7c1e02', 'OCR：') }}{{ a.ocrText }}</span>
             </div>
           </div>
           <div class="att-item__ops">

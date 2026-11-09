@@ -597,6 +597,7 @@ main(): Int64 {
         keyManager,
         provider,
         itemRepo: itemRepo,
+        userRepo: userRepo,
         storageProvider: StorageProviders.currentCode()
     )
     AttachmentRoutes(
