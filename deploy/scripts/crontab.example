@@ -1,0 +1,37 @@
+# ============================================================
+# AMS · 定时调度示例（crontab）
+#
+# [!!] 仅为样例，默认未启用。需运维按实际环境改好后自行安装：
+#        crontab deploy/scripts/crontab.example
+#      或改用 systemd timer 方案（deploy/systemd/ams-backup.timer），
+#      二选一，不要同时启用，以免重复备份 / 重复异地复制。
+# [!!] 行尾：本文件按仓库 Windows 工作区风格为 CRLF；拷到 Linux 前
+#      请先转成 LF（dos2unix），否则 cron 可能把行尾 CR 读进命令。
+#
+# 需要替换的内容：
+#   /ABS/REPO         → 仓库在宿主机上的绝对路径（如 /opt/ams/Archive_manager）
+#   /etc/ams/ams.env  → 变量文件（chmod 600），含 AMS_DB_PASSWORD 等必填凭据
+#                       以及异地后端变量（RCLONE_REMOTE 或 OFFSITE_HOST +
+#                       OFFSITE_PATH、OFFSITE_KEEP）；格式 KEY=VALUE，不写 export
+#   /var/log/ams      → 日志目录（需事先创建且可写）
+#   crontab 默认 SHELL=/bin/sh，故每行用 /bin/bash -lc 包一层以 source 变量。
+#
+# 时序：02:30 备份（backup.sh）→ 03:00 异地复制（backup-offsite.sh，取最新
+#       备份，先 sha256 校验后复制）→ 每月 1 日 04:00 恢复演练
+#       （restore-drill.sh，独立临时容器，绝不碰生产数据）。
+# 说明：异地后端未配置时 backup-offsite.sh 会明确报错退出 1，不会静默成功；
+#       演练用的备份路径请按实际产物替换，或改成先取最新 ams-*.sql 再传入。
+# 启用动作清单见 deploy/RUNBOOK.md §9「自动化启用清单」。
+# ============================================================
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# 每日 02:30 —— 数据库全量逻辑备份（AMS_BACKUP_KEEP 清理旧备份）
+30 2 * * * /bin/bash -lc 'cd /ABS/REPO && set -a && . /etc/ams/ams.env && set +a && bash deploy/scripts/backup.sh' >> /var/log/ams/backup.log 2>&1
+
+# 每日 03:00 —— 把最新备份复制到异地（后端由环境变量配置，见脚本头注释）
+0 3 * * * /bin/bash -lc 'cd /ABS/REPO && set -a && . /etc/ams/ams.env && set +a && bash deploy/scripts/backup-offsite.sh' >> /var/log/ams/backup-offsite.log 2>&1
+
+# 每月 1 日 04:00 —— 恢复演练（独立临时容器，不碰生产数据；备份路径需替换）
+0 4 1 * * /bin/bash -lc 'cd /ABS/REPO && set -a && . /etc/ams/ams.env && set +a && bash deploy/scripts/restore-drill.sh /ABS/REPO/backups/ams-LATEST.sql' >> /var/log/ams/restore-drill.log 2>&1

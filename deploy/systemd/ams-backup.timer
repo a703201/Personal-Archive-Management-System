@@ -1,0 +1,33 @@
+# ============================================================
+# AMS · 每日备份定时器「示例」（默认未启用）
+#
+# 触发 ams-backup.service（ExecStartPre=backup.sh → ExecStart=backup-offsite.sh）。
+# OnCalendar=*-*-* 02:30:00 每日 02:30；Persistent=true：错过时间点
+# （如主机关机）后在下次开机补跑一次。
+#
+# [!!] 这是样例，未实机验证；与 deploy/scripts/crontab.example 二选一，
+#      不要同时启用，以免重复备份 / 重复异地复制。
+# [!!] 行尾：本文件按仓库 Windows 工作区风格为 CRLF；拷到 Linux 前
+#      请先转成 LF（dos2unix /etc/systemd/system/ams-backup.timer）。
+#
+# 启用：
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ams-backup.timer
+#   systemctl list-timers ams-backup.timer
+#   systemctl status ams-backup.timer
+# 停用：
+#   sudo systemctl disable --now ams-backup.timer
+# 查看一次备份结果：journalctl -u ams-backup.service
+# 启用动作清单见 deploy/RUNBOOK.md §9「自动化启用清单」。
+# ============================================================
+
+[Unit]
+Description=AMS 每日 02:30 备份 + 异地副本（timer 示例，默认未启用）
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+Unit=ams-backup.service
+
+[Install]
+WantedBy=timers.target

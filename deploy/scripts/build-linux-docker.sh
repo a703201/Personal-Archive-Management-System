@@ -33,6 +33,13 @@ fi
 
 mkdir -p "$ROOT/build/linux"
 
+# 先把外部 PP-OCRv5 引擎的原生资产（onnxruntime + 模型）落到 build/linux/，
+# 随后由 Docker 把该目录读写挂载进容器，build-linux.sh 才能编译真推理桥接层。
+echo "--- 准备外部 OCR 资产 ---"
+bash "$ROOT/scripts/fetch-ocr-assets.sh" || {
+    echo "[WARN] fetch-ocr-assets.sh 未齐备资产：build-linux.sh 将编入「桩」桥接（运行期回退内置 OCR）"
+}
+
 echo "=== 容器内编译 Linux 产物 ==="
 echo "  镜像 : $IMAGE"
 echo "  源码 : $ROOT"
