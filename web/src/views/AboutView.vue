@@ -18,6 +18,16 @@ function valueOrPlaceholder(v: string): string {
   return v && v.trim() ? v : ABOUT_PLACEHOLDER.text
 }
 
+/** 外链 aria-label：静态结构走 t()，动态字段用 vars 注入，避免 en/fr 残留中文括号 */
+function linkAriaLabel(label: string, description: string): string {
+  const newWindow = t('about.opensNewWindow', '在新窗口打开')
+  return t('about.linkAria', `${label} · ${description}（${newWindow}）`, {
+    label,
+    description,
+    newWindow,
+  })
+}
+
 /** 仍有未提供的内容时，才显示「如何替换」的说明 */
 const hasPending = computed(
   () =>
@@ -84,7 +94,7 @@ const hasPending = computed(
             :href="link.href"
             target="_blank"
             rel="noopener noreferrer"
-            :aria-label="`${link.label} · ${link.description}（${t('about.opensNewWindow', '在新窗口打开')}）`"
+            :aria-label="linkAriaLabel(link.label, link.description)"
           >
             <span class="about__link-text">
               <span class="about__link-label">{{ link.label }}</span>

@@ -274,8 +274,13 @@ async function batchEdit(): Promise<void> {
     )
     const skipped = res.requested - res.updated
     toast.success(
-      tr('viewsArchiveView.9fead2', `已更新 ${res.updated} 条${res.tagged ? `，打标 ${res.tagged} 次` : ''}`) +
-        (skipped > 0 ? `；${skipped} 条未变更（可能无权限或已删除）` : ''),
+      tr('viewsArchiveView.9fead2', `已更新 ${res.updated} 条`, { count: res.updated }) +
+        (res.tagged
+          ? tr('viewsArchiveView.batchTagged', `，打标 ${res.tagged} 次`, { count: res.tagged })
+          : '') +
+        (skipped > 0
+          ? tr('viewsArchiveView.batchUnchanged', `；${skipped} 条未变更（可能无权限或已删除）`, { count: skipped })
+          : ''),
     )
     selected.value = new Set()
     editCategory.value = null
@@ -307,7 +312,7 @@ async function batchDelete(): Promise<void> {
         // 单条失败不阻断其余已选项
       }
     }
-    toast.success(tr('viewsArchiveView.f36211', `已删除 ${ok} 条（移入回收站）`))
+    toast.success(tr('viewsArchiveView.f36211', `已删除 ${ok} 条（移入回收站）`, { count: ok }))
     selected.value = new Set()
     await loadItems()
   } catch (e) {
@@ -856,7 +861,7 @@ function inputType(t: number | string): string {
             type="checkbox"
             class="item__checkbox"
             :checked="selected.has(String(it.id))"
-            :aria-label="tr('ArchiveView.888021', '`选择 ${it.title}`')"
+            :aria-label="tr('ArchiveView.888021', `选择 ${it.title}`, { title: it.title })"
             @change="toggleSelect(String(it.id))"
           />
         </label>

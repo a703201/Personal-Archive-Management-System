@@ -254,8 +254,8 @@ async function csvPrecheck(): Promise<void> {
     )
     csvPlan.value = plan
     const dupTip = plan.duplicate > 0 ? `，${plan.duplicate} 行重复将跳过` : ''
-    if (plan.invalid === 0) success(tr('viewsImportView.cb6f6a', `预检通过：${plan.valid} 行可导入${dupTip}`))
-    else toastError(tr('viewsImportView.b3d888', `预检发现 ${plan.invalid} 行有问题${dupTip}，详见下方清单`))
+    if (plan.invalid === 0) success(tr('viewsImportView.cb6f6a', `预检通过：${plan.valid} 行可导入${dupTip}`, { count: plan.valid, note: dupTip }))
+    else toastError(tr('viewsImportView.b3d888', `预检发现 ${plan.invalid} 行有问题${dupTip}，详见下方清单`, { count: plan.invalid, note: dupTip }))
   } catch (e) {
     toastError((e as Error).message)
   } finally {
@@ -273,7 +273,7 @@ async function csvSubmit(): Promise<void> {
       new Blob([csvText.value], { type: 'text/csv' }),
       'text/csv; charset=utf-8',
     )
-    success(tr('viewsImportView.0ebe65', `已提交导入任务 ${r.taskNo}`))
+    success(tr('viewsImportView.0ebe65', `已提交导入任务 ${r.taskNo}`, { taskNo: r.taskNo }))
     csvPlan.value = null
     csvText.value = ''
     csvName.value = ''
@@ -313,8 +313,8 @@ async function bundlePrecheck(): Promise<void> {
     )
     bundlePlan.value = plan
     const dupTip = plan.duplicate > 0 ? `，${plan.duplicate} 行重复将跳过` : ''
-    if (plan.invalid === 0) success(tr('viewsImportView.e1baab', `验签通过：${plan.valid} 行可回导${dupTip}`))
-    else toastError(tr('viewsImportView.3881bc', `验签通过，但有 ${plan.invalid} 行有问题${dupTip}`))
+    if (plan.invalid === 0) success(tr('viewsImportView.e1baab', `验签通过：${plan.valid} 行可回导${dupTip}`, { count: plan.valid, note: dupTip }))
+    else toastError(tr('viewsImportView.3881bc', `验签通过，但有 ${plan.invalid} 行有问题${dupTip}`, { count: plan.invalid, note: dupTip }))
   } catch (e) {
     toastError((e as Error).message)
   } finally {
@@ -331,7 +331,7 @@ async function bundleSubmit(): Promise<void> {
       new Blob([bundleText.value], { type: 'application/json' }),
       'application/json',
     )
-    success(tr('viewsImportView.09f9d7', `已提交回导任务 ${r.taskNo}`))
+    success(tr('viewsImportView.09f9d7', `已提交回导任务 ${r.taskNo}`, { taskNo: r.taskNo }))
     bundlePlan.value = null
     bundleText.value = ''
     bundleName.value = ''
@@ -364,7 +364,7 @@ async function pickZip(ev: Event): Promise<void> {
   const f = input.files?.[0]
   if (!f) return
   if (f.size > MAX_ZIP_BYTES) {
-    toastError(tr('viewsImportView.0dea00', `压缩包 ${fmtSize(f.size)}，超过单包 ${fmtSize(MAX_ZIP_BYTES)} 上限，请拆分后分批导入`))
+    toastError(tr('viewsImportView.0dea00', `压缩包 ${fmtSize(f.size)}，超过单包 ${fmtSize(MAX_ZIP_BYTES)} 上限，请拆分后分批导入`, { size: fmtSize(f.size), limit: fmtSize(MAX_ZIP_BYTES) }))
     input.value = ''
     zipFile.value = null
     zipName.value = ''
@@ -398,9 +398,9 @@ async function zipPrecheck(): Promise<void> {
     attachPlan.value = plan
     resolutions.value = {}
     if (plan.conflicts.length > 0) {
-      info(tr('viewsImportView.943768', `有 ${plan.conflicts.length} 个目录重名，需手动指定目标条目`))
+      info(tr('viewsImportView.943768', `有 ${plan.conflicts.length} 个目录重名，需手动指定目标条目`, { count: plan.conflicts.length }))
     } else {
-      success(tr('viewsImportView.497cfe', `预检完成：${plan.match + plan.create} 个文件待导入`))
+      success(tr('viewsImportView.497cfe', `预检完成：${plan.match + plan.create} 个文件待导入`, { count: plan.match + plan.create }))
     }
   } catch (e) {
     toastError((e as Error).message)
@@ -424,7 +424,7 @@ async function zipSubmit(): Promise<void> {
   const plan = attachPlan.value
   if (!f || !plan) return
   if (unresolvedCount.value > 0) {
-    { toastError(tr('viewsImportView.dff0d9', `还有 ${unresolvedCount.value} 个重名目录未指定目标条目`)); return }
+    { toastError(tr('viewsImportView.dff0d9', `还有 ${unresolvedCount.value} 个重名目录未指定目标条目`, { count: unresolvedCount.value })); return }
   }
   busy.value = true
   try {
@@ -440,7 +440,7 @@ async function zipSubmit(): Promise<void> {
       frameBody(payload, await f.arrayBuffer()),
       'application/octet-stream',
     )
-    success(tr('viewsImportView.ce4780', `已提交附件导入任务 ${r.taskNo}`))
+    success(tr('viewsImportView.ce4780', `已提交附件导入任务 ${r.taskNo}`, { taskNo: r.taskNo }))
     attachPlan.value = null
     zipFile.value = null
     zipName.value = ''
@@ -461,7 +461,7 @@ async function zipSubmit(): Promise<void> {
 async function downloadReport(t: TaskRow): Promise<void> {
   try {
     const blob = await apiBlob(`/import/tasks/${encodeURIComponent(t.taskNo)}/report`)
-    triggerDownload(blob, tr('viewsImportView.c38ff1', `导入报告-${t.taskNo}.csv`))
+    triggerDownload(blob, tr('viewsImportView.c38ff1', `导入报告-${t.taskNo}.csv`, { taskNo: t.taskNo }))
   } catch (e) {
     toastError((e as Error).message)
   }
@@ -478,7 +478,7 @@ async function retryTask(t: TaskRow): Promise<void> {
       `/import/attachments/tasks/${encodeURIComponent(t.taskNo)}/retry`,
       { method: 'POST' },
     )
-    success(tr('viewsImportView.ac4290', `已提交重试任务 ${r.taskNo}（${r.total} 个文件）`))
+    success(tr('viewsImportView.ac4290', `已提交重试任务 ${r.taskNo}（${r.total} 个文件）`, { taskNo: r.taskNo, count: r.total }))
     await loadTasks()
   } catch (e) {
     toastError((e as Error).message)
@@ -596,7 +596,7 @@ async function applyTemplate(id: string): Promise<void> {
   tplDefaultCategory.value = t.defaults.category ?? ''
   tplDefaultStatus.value = t.defaults.status ?? ''
   tplDefaultSensitivity.value = t.defaults.sensitivity ?? ''
-  success(tr('viewsImportView.820dcf', `已套用模板「${t.name}」`))
+  success(tr('viewsImportView.820dcf', `已套用模板「${t.name}」`, { name: t.name }))
 }
 
 async function deleteTemplate(id: string): Promise<void> {
@@ -755,7 +755,7 @@ async function cloneTemplate(): Promise<void> {
   try {
     const r = await api<{ id: string }>('/import-templates', {
       method: 'POST',
-      body: { cloneFrom: Number(t.id), name: tr('viewsImportView.ad40e5', `${t.name} 副本`) },
+      body: { cloneFrom: Number(t.id), name: tr('viewsImportView.ad40e5', `${t.name} 副本`, { name: t.name }) },
     })
     await loadTemplates()
     activeTemplateId.value = String(r.id)

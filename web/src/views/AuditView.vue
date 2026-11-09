@@ -98,7 +98,7 @@ async function verifyChain(): Promise<void> {
     const data = await api<{ status: string; message: string }>('/audit/verify-chain?from=1&limit=1000')
     chainStatus.value = { ok: data.status === 'ok', message: data.message }
     if (data.status === 'ok') success(t('viewsAuditView.189220', '审计链完整，未被篡改'))
-    else toastError(t('viewsAuditView.9b8a5b', `链校验异常：${data.message}`))
+    else toastError(t('viewsAuditView.9b8a5b', `链校验异常：${data.message}`, { message: data.message }))
   } catch (e) {
     toastError((e as Error).message)
   } finally {

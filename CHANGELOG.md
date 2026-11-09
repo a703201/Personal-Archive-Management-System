@@ -100,6 +100,16 @@
 - **R2 · 短信失败关闭**：`SpoolSmsProvider.send` 此前吞掉 spool 写异常仅记日志、绝不抛错，使短信投递故障对用户与运维不可见（fail-open）。修复：写失败改抛 `AppError(AppErrorKind.StorageFailure)`，交由 `Mailer.sendAlert` 以 best-effort 方式捕获并记 ERROR 日志（`sms.failed`，含原因），邮件 / 站内信不受影响 —— 故障可见、不静默降级；`SmsProvider` 接口契约改为「投递失败应抛错」。Noop/Console 后端不受影响。
 - **R3 · i18n 三语覆盖收口**：补齐源码用到、但三语 catalog 与 `index.ts` 基线均缺的遗漏词条（含 10 个两段点键、4 个带 `{name}` 占位符的键如 `api.chunkedUploadFailed` / `componentsAttachmentPanel.uploaded` / `viewsArchiveView.batchTagged` / `componentsAttachmentPanel.uploadProgress`，以及 fr 缺的 `dp.today`），0 缺键、0 重复键；修正此前 catalog 生成器误插导致的漂移，zh-CN / en / fr 键集重新对齐（各约 1053–1055 键）。
 
+### 审查 🟡 全量收口（1.3.0 发布前）
+- **i18n 死词条根治（方案 A）**：HEAD 遗留的 46 条 codemod 死词条（模板字符串被原样抽成词条）中，42 条源码真在用的按调用点 `vars` 键名改成 `{name}` 命名占位符并保留 zh/en/fr **真实译文**（不再靠 `t()` 回退中文），另 4 条孤儿键从三语删除。静态门禁 `check-consistency.py` 由 **FAIL (3)** 转 **PASS**；复跑覆盖检查 0 缺键 / 0 残留占位符 / 0 死标记。
+- **OpenAPI 补齐 + 覆盖率门禁**：`docs/14` 补入 37 个此前未收录的代码路径（46 个 operation，含 captcha、5 个分片上传、4 个媒体端点、3 个租户运维），修正 5 处 method 级历史漂移（补 `GET /api/users/:id`、`POST /api/roles`，`PATCH→PUT /api/attachments/:id`，删过时的 `DELETE /api/field-defs`），文件头自述由「156 个 method+path」订正为 203。`check-consistency.py` 新增 **operation 级覆盖断言**（代码 `(method,path)` ⊆ 文档），现 **203/203**，杜绝再次漂移。
+- **分片上传内存与锁粒度**：`ChunkUploadStore` 新增 `MAX_BUFFER_BYTES = 256 MiB` 全局字节预算（按实际缓存增量核算，超额显式拒绝，堵住 128 会话 × 50 MB = 6.4 GB 的 OOM 面）；`complete()` 改为「锁内校验 + 收集分片引用 + 摘除会话」、逐字节合并移到**锁外**，一次 50 MB 合并不再阻塞其它上传。`cancel` / 过期清理 / `sweep` 同步回收缓存计数，新增 `buffered()` 观测水位。
+- **附件上传归属校验**：`AttachmentService.upload()` 在按 `itemId` 反查修正 `owner` 后，用注入的 `UserRepo.listAccessibleSubjectIds(operatorId)` 强制校验目标主体属于操作者，堵住「传任意 `subjectId` 即可往他人主体挂附件」的越权面；单次上传 / 分片上传 / ZIP 批量导入共用同一链路，一处收口。`main.cj` 生产装配注入 `userRepo`，分片会话创建阶段另加预检，避免无权请求占用会话配额。
+- **验证码签发限流**：`CaptchaStore.issueForIp()` 增加单 IP 固定窗口限流（60 秒 / 30 次）与全局挑战总量上限（10000），超额抛 `RateLimited(429)`；匿名 `GET /api/auth/captcha` 不再能无限堆积内存。原 `issue()` 保留供单测使用，过期 IP 窗口在惰性清理中一并回收。
+- **短信网关投递加固**：`sms-spool.sh` 强制 `SMS_GATEWAY_URL` 使用 `https://`（loopback http 仅允许本机网关），非合规配置 FATAL 退出，绝不把含 `appSecret` 的 JSON 发往明文端点；投递失败除移入 `failed/` 外，另写脱敏 `*.reason`（HTTP 码 / 时间）并输出 `[sms-spool] ERROR`。`SECURITY.md` 如实标注「后端写完 `.job` 即返回，**无法同步感知**异步网关投递结果，告警须监控该日志 / 目录」的架构边界。
+- **分片上传失败清理**：`chunkedUpload.ts` 按 `ApiError.status` 区分可恢复（网络 / 超时 / 408 / 429 / 5xx，保留会话供续传）与不可恢复（其余 4xx，调用 `cancelChunkedUpload()` 释放服务端会话并清 `sessionStorage`）；`status` 查询遇 401 不再误开新会话。`cancelChunkedUpload` 从死代码变为实际接线，会话不再残留至 24h TTL。
+- **文档与仓库卫生**：`SECURITY.md` 支持范围由 `1.2.x` 更新为 `1.3.x`；`docs/10` / `docs/15` / `docs/README.md` 共 6 处 `[Unreleased]` 引用改为 `[1.3.0]`；`.gitignore` 忽略 `ams_deploy_test_*/`（`deployment_test.cj` 运行时生成的临时目录，含测试假值键名，非真实凭据），并清理重复行。
+
 ---
 
 ## [1.2.1] — 2026-11-08（OCR 扩展 + 验证码加固 + 媒体水印修复 + 容器部署）

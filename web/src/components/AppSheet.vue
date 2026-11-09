@@ -48,7 +48,8 @@ function onKeydown(e: KeyboardEvent): void {
     close()
     return
   }
-  if (e.key !== 'Tab' || !panel.value) return
+  // root 同时作为「浮层仍挂载」的守卫，避免关闭过程中残留的 keydown 误处理。
+  if (e.key !== 'Tab' || !root.value || !panel.value) return
   const focusables = panel.value.querySelectorAll<HTMLElement>(
     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
   )

@@ -132,8 +132,8 @@
 >   - **HMAC-SHA256 已补**：RFC 2104 + stdx SHA256 原语实现，RFC 4231 四个向量（含 131 字节长 key）验证；`ams.crypto.impl` 不再返回「暂未接入」。
 >   - **SigV4 签名计算已实现**：`sigv4.cj` 用 AWS 官方 GET Object 向量验证，供各家 S3 兼容接口共用；七牛自有 QiniuV2 / 阿里 OSS 自有 V1 签名明确标注「未实现」。
 >   - `arc_attachments` 新增 `storage_provider` 列（迁移 025），每行自述厂商，与 `storage_backend`(0/1) 互补；存量行回填 `local`。
-> - ✅ **`S3Transport`（HTTP 客户端）已补齐**：新增 `http_transport.cj` 的 `HttpS3Transport`，基于 `std.net`（TcpSocket）+ `stdx.net.tls`（TlsSocket）自实现 HTTP/1.1 客户端，PUT/GET/DELETE 真正发出；**404 → None、其余失败关闭**（连接/签名/响应失败一律 `StorageFailure`，绝不静默回落 FS 或明文写入）。选择非 `local` 平台在配置完整时即构建真实传输层（不再仅因缺 transport 启动即失败关闭）。`StorageAdminRoutes` 的 `transportReady` 改为按平台能力返回 `true`。详见 `docs/10` 第六/七批与「真实 S3/OBS HTTP 传输层落地」章节、`CHANGELOG.md [Unreleased]`、`http_transport.cj` 头注释。
-> - 详见 `docs/10` 第六/七批、`CHANGELOG.md [Unreleased]`、`http_transport.cj` / `providers.cj` / `sigv4.cj` 头注释。
+> - ✅ **`S3Transport`（HTTP 客户端）已补齐**：新增 `http_transport.cj` 的 `HttpS3Transport`，基于 `std.net`（TcpSocket）+ `stdx.net.tls`（TlsSocket）自实现 HTTP/1.1 客户端，PUT/GET/DELETE 真正发出；**404 → None、其余失败关闭**（连接/签名/响应失败一律 `StorageFailure`，绝不静默回落 FS 或明文写入）。选择非 `local` 平台在配置完整时即构建真实传输层（不再仅因缺 transport 启动即失败关闭）。`StorageAdminRoutes` 的 `transportReady` 改为按平台能力返回 `true`。详见 `docs/10` 第六/七批与「真实 S3/OBS HTTP 传输层落地」章节、`CHANGELOG.md [1.3.0]`、`http_transport.cj` 头注释。
+> - 详见 `docs/10` 第六/七批、`CHANGELOG.md [1.3.0]`、`http_transport.cj` / `providers.cj` / `sigv4.cj` 头注释。
 
 ---
 

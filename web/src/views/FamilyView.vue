@@ -164,8 +164,8 @@ function inviteStateLabel(code: string): string {
 
 /** 授权范围的一句话描述（与后端 resourceTypeOf 的判定同序） */
 function grantScopeText(g: Grant): string {
-  if (g.resourceType === 'item') return t('viewsFamilyView.da0bb5', `单条条目 #${g.itemId}`)
-  if (g.resourceType === 'category') return t('viewsFamilyView.be189d', `分类：${categoryName(g.category)}`)
+  if (g.resourceType === 'item') return t('viewsFamilyView.da0bb5', `单条条目 #${g.itemId}`, { id: g.itemId })
+  if (g.resourceType === 'category') return t('viewsFamilyView.be189d', `分类：${categoryName(g.category)}`, { category: categoryName(g.category) })
   return t('viewsFamilyView.ef996c', '整个主体')
 }
 
@@ -265,7 +265,7 @@ const invites = ref<Invite[]>([])
 const memberName = computed<Record<string, string>>(() => {
   const map: Record<string, string> = {}
   for (const m of members.value) {
-    map[m.userId] = m.nickname || m.username || t('viewsFamilyView.8aa5b4', `用户 ${m.userId}`)
+    map[m.userId] = m.nickname || m.username || t('viewsFamilyView.8aa5b4', `用户 ${m.userId}`, { id: m.userId })
   }
   return map
 })
@@ -348,12 +348,12 @@ function closeDetail(): void {
 async function dissolve(): Promise<void> {
   const g = detail.value
   if (!g) return
-  if (!window.confirm(t('viewsFamilyView.93c22b', `解散「${g.name}」？组内成员将立即失去所有由此组授出的访问权。`))) return
+  if (!window.confirm(t('viewsFamilyView.93c22b', `解散「${g.name}」？组内成员将立即失去所有由此组授出的访问权。`, { name: g.name }))) return
   try {
     const r = await api<{ revokedGrants: number }>(`/family/groups/${g.groupId}`, {
       method: 'DELETE',
     })
-    success(t('viewsFamilyView.1aa133', `已解散，撤销 ${r.revokedGrants} 条授权`))
+    success(t('viewsFamilyView.1aa133', `已解散，撤销 ${r.revokedGrants} 条授权`, { count: r.revokedGrants }))
     closeDetail()
   } catch (e) {
     toastError((e as ApiError).message || t('viewsFamilyView.5f28be', '解散失败'))
@@ -365,14 +365,14 @@ async function dissolve(): Promise<void> {
 async function removeMember(m: Member): Promise<void> {
   const g = detail.value
   if (!g) return
-  const name = m.nickname || m.username || t('viewsFamilyView.8aa5b4', `用户 ${m.userId}`)
-  if (!window.confirm(t('viewsFamilyView.ee8187', `把「${name}」移出家庭组？该成员由此组获得的授权会一并撤销。`))) return
+  const name = m.nickname || m.username || t('viewsFamilyView.8aa5b4', `用户 ${m.userId}`, { id: m.userId })
+  if (!window.confirm(t('viewsFamilyView.ee8187', `把「${name}」移出家庭组？该成员由此组获得的授权会一并撤销。`, { name: name }))) return
   try {
     const r = await api<{ revokedGrants: number }>(
       `/family/groups/${g.groupId}/members/${m.userId}`,
       { method: 'DELETE' },
     )
-    success(t('viewsFamilyView.49e17d', `已移除，撤销 ${r.revokedGrants} 条授权`))
+    success(t('viewsFamilyView.49e17d', `已移除，撤销 ${r.revokedGrants} 条授权`, { count: r.revokedGrants }))
     await refreshDetail()
     await load()
   } catch (e) {
@@ -544,7 +544,13 @@ async function submitGrant(): Promise<void> {
         expiresInHours: Number(grantHours.value) || 0,
       },
     })
-    success(t('viewsFamilyView.5da210', `已授权（${r.resourceType === 'item' ? '单条条目' : r.resourceType === 'category' ? '某分类' : '整个主体'}）`))
+    const granted =
+      r.resourceType === 'item'
+        ? { key: 'viewsFamilyView.grantCreatedItem', text: '已授权（单条条目）' }
+        : r.resourceType === 'category'
+          ? { key: 'viewsFamilyView.grantCreatedCategory', text: '已授权（某分类）' }
+          : { key: 'viewsFamilyView.grantCreatedSubject', text: '已授权（整个主体）' }
+    success(t(granted.key, granted.text))
     showGrantForm.value = false
     await loadGrants(g.groupId)
   } catch (e) {
@@ -555,8 +561,8 @@ async function submitGrant(): Promise<void> {
 }
 
 async function revokeGrant(g: Grant): Promise<void> {
-  const who = memberName.value[g.granteeId] ?? t('viewsFamilyView.c5187a', `用户 ${g.granteeId}`)
-  if (!window.confirm(t('viewsFamilyView.a5d9b2', `撤销「${who}」的这条授权？对方将立即无法再访问。`))) return
+  const who = memberName.value[g.granteeId] ?? t('viewsFamilyView.c5187a', `用户 ${g.granteeId}`, { id: g.granteeId })
+  if (!window.confirm(t('viewsFamilyView.a5d9b2', `撤销「${who}」的这条授权？对方将立即无法再访问。`, { name: who }))) return
   try {
     await api(`/family/grants/${g.grantId}`, { method: 'DELETE' })
     success(t('viewsFamilyView.5b3056', '授权已撤销'))

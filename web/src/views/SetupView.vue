@@ -199,12 +199,12 @@ function goLogin(): void {
     <aside class="auth__hero stagger">
       <div class="auth__brand">AMS</div>
       <p class="auth__eyebrow">FIRST RUN SETUP</p>
-      <h1 class="auth__headline">几步完成，<br />开始使用。</h1>
-      <p class="auth__tagline">配置数据库、创建管理员、接入邮件服务。全部信息只保存在你自己的服务器上。</p>
+      <h1 class="auth__headline">{{ t('SetupView.heroHeadlineA', '几步完成，') }}<br />{{ t('SetupView.heroHeadlineB', '开始使用。') }}</h1>
+      <p class="auth__tagline">{{ t('SetupView.heroTagline', '配置数据库、创建管理员、接入邮件服务。全部信息只保存在你自己的服务器上。') }}</p>
       <ul class="auth__points">
-        <li>数据库默认与项目同服务器，也可指向外部</li>
-        <li>首个账号自动成为管理员，无需手动授权</li>
-        <li>邮件服务可稍后在系统运维中修改</li>
+        <li>{{ t('SetupView.heroPoint1', '数据库默认与项目同服务器，也可指向外部') }}</li>
+        <li>{{ t('SetupView.heroPoint2', '首个账号自动成为管理员，无需手动授权') }}</li>
+        <li>{{ t('SetupView.heroPoint3', '邮件服务可稍后在系统运维中修改') }}</li>
       </ul>
     </aside>
 

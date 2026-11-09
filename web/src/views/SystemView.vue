@@ -64,16 +64,12 @@ function fmtUptime(ms: number | string): string {
   const s = Math.floor(total / 1000)
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
-  // i18n 目录是静态字符串，词条不能写 ${...}（会被原样显示）；
-  // 用 {h}/{m}/{s} 占位符 + 调用点 replace 完成插值，三语均可用。
+  // 词条含 {h}/{m}/{s} 占位符，由 t() 用 vars 统一替换（三语均生效）；
+  // 中文输出仍为「2 小时 5 分」「5 分 30 秒」，格式不变。
   if (h > 0) {
-    return tr('viewsSystemView.uptimeHours', `${h} 小时 ${m} 分`)
-      .replace('{h}', String(h))
-      .replace('{m}', String(m))
+    return tr('viewsSystemView.uptimeHours', `${h} 小时 ${m} 分`, { h, m })
   }
-  return tr('viewsSystemView.b0ec90', `${m} 分 ${s % 60} 秒`)
-    .replace('{m}', String(m))
-    .replace('{s}', String(s % 60))
+  return tr('viewsSystemView.b0ec90', `${m} 分 ${s % 60} 秒`, { m, s: s % 60 })
 }
 
 const errorRateText = computed(() => {
@@ -149,7 +145,7 @@ async function saveSetting(): Promise<void> {
 async function removeSetting(s: Setting): Promise<void> {
   try {
     await api(`/admin/config?scope=system&key=${encodeURIComponent(s.key)}`, { method: 'DELETE' })
-    toast.success(tr('viewsSystemView.20c4d9', `已删除 ${s.key}`))
+    toast.success(tr('viewsSystemView.20c4d9', `已删除 ${s.key}`, { key: s.key }))
     await loadConfig()
   } catch (e) {
     toast.error((e as Error).message)
@@ -180,7 +176,7 @@ async function runJob(j: Job): Promise<void> {
       `/admin/jobs/${encodeURIComponent(j.name)}/run`,
       { method: 'POST', body: {} },
     )
-    toast.success(tr('viewsSystemView.20eed4', `${j.name} 执行完成，影响 ${res.affected} 条`))
+    toast.success(tr('viewsSystemView.20eed4', `${j.name} 执行完成，影响 ${res.affected} 条`, { name: j.name, count: res.affected }))
     await loadJobs()
   } catch (e) {
     toast.error((e as Error).message)
@@ -226,7 +222,7 @@ async function rotateKey(): Promise<void> {
       method: 'POST',
       body: { keyId: 'ams-data', purpose: 'data', note: tr('viewsSystemView.2648f1', '管理界面手动轮换') },
     })
-    toast.success(tr('viewsSystemView.26ff29', `已登记新版本 v${res.version}`))
+    toast.success(tr('viewsSystemView.26ff29', `已登记新版本 v${res.version}`, { version: res.version }))
     await loadKeys()
   } catch (e) {
     toast.error((e as Error).message)
@@ -285,7 +281,7 @@ async function restoreBackup(b: BackupMeta): Promise<void> {
       method: 'POST',
       body: { file: b.file },
     })
-    toast.success(tr('viewsSystemView.a82657', `已恢复 ${res.restored} 项配置`))
+    toast.success(tr('viewsSystemView.a82657', `已恢复 ${res.restored} 项配置`, { count: res.restored }))
     await loadConfig()
   } catch (e) {
     toast.error((e as Error).message)
@@ -311,27 +307,27 @@ async function loadAll(): Promise<void> {
   try {
     await loadConfig()
   } catch {
-    /* 忽略：配置面板单独提示 */
+    toast.warning(tr('SystemView.configLoadFailed', '配置中心加载失败'))
   }
   try {
     await loadJobs()
   } catch {
-    /* 忽略 */
+    toast.warning(tr('SystemView.jobsLoadFailed', '定时任务加载失败'))
   }
   try {
     await loadKeys()
   } catch {
-    /* 忽略 */
+    toast.warning(tr('SystemView.keysLoadFailed', '密钥信息加载失败'))
   }
   try {
     await loadBackups()
   } catch {
-    /* 忽略 */
+    toast.warning(tr('SystemView.backupsLoadFailed', '备份列表加载失败'))
   }
   try {
     await loadDeployment()
   } catch {
-    /* 忽略：部署配置面板单独提示 */
+    toast.warning(tr('SystemView.deployLoadFailed', '部署配置加载失败'))
   }
   loading.value = false
 }

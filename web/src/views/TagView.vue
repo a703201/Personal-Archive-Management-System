@@ -239,7 +239,7 @@ async function confirmMerge(t: TagNode): Promise<void> {
   busy.value = true
   try {
     const r = await api<{ moved: number }>(`/tags/${t.id}/merge`, { method: 'POST', body: { targetId } })
-    success(tr('viewsTagView.b6fae7', `已合并，迁移 ${r.moved} 条关联`))
+    success(tr('viewsTagView.b6fae7', `已合并，迁移 ${r.moved} 条关联`, { count: r.moved }))
     mergeId.value = ''
     await load()
   } catch (e) {

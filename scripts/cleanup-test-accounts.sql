@@ -18,7 +18,7 @@ DELETE FROM cleanup_targets;
 
 INSERT INTO cleanup_targets (id)
 SELECT id FROM sys_users
- WHERE username ~ '^(e2e|it|t1owner|tenant|bench|tester|apitest|familyuser|gooduser|testadmin)';
+ WHERE username ~ '^(e2e|it|t1owner|tenant|bench|tester|apitest|familyuser|gooduser|testadmin|captchaprobe|probe)';
 
 -- 1) 测试主体下的共享链接与条目（无 FK 级联，先于主体删除）
 DELETE FROM arc_share_links

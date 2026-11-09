@@ -234,7 +234,7 @@ async function apply(): Promise<void> {
       },
     )
     showApply.value = false
-    success(tr('viewsTemplateView.408fdc', `已按模板创建 ${r.created} 条档案`))
+    success(tr('viewsTemplateView.408fdc', `已按模板创建 ${r.created} 条档案`, { count: r.created }))
   } catch (e) {
     toastError((e as Error).message)
   } finally {
@@ -345,7 +345,7 @@ onMounted(load)
             class="field-control"
             type="text"
             maxlength="200"
-            :placeholder="tr('TemplateView.a339e5', '如 身份证-{n}，{n} 会替换为序号')"
+            :placeholder="tr('TemplateView.a339e5', '如 身份证-{n}，{n} 会替换为序号', { n: '{n}' })"
           />
           <span v-if="titlePreview" class="field__hint">{{ tr('TemplateView.ad5aba', '预览：') }}{{ titlePreview }}</span>
         </label>
@@ -421,7 +421,7 @@ onMounted(load)
     <!-- 套用 -->
     <AppSheet
       v-model="showApply"
-      :title="tr('TemplateView.f8231a', '`套用模板 · ${applyTarget?.name ?? \'\'}`')"
+      :title="tr('TemplateView.f8231a', `套用模板 · ${applyTarget?.name ?? ''}`, { name: applyTarget?.name ?? '' })"
       size="sm"
       :dismissible="!applying"
     >

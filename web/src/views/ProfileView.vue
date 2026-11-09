@@ -209,7 +209,7 @@ async function kickOthers(): Promise<void> {
   sessionBusy.value = '__others'
   try {
     const res = await api<{ revoked: number }>('/me/sessions', { method: 'DELETE' })
-    toast.success(t('viewsProfileView.8ea73b', `已登出其他 ${res.revoked} 台设备`))
+    toast.success(t('viewsProfileView.8ea73b', `已登出其他 ${res.revoked} 台设备`, { count: res.revoked }))
     await loadSessions()
   } catch (e) {
     toast.error((e as Error).message)
