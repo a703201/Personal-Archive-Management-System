@@ -48,8 +48,13 @@ else
     tgz="$SRC/onnxruntime-linux-x64-1.19.2.tgz"
     if [ -f "$tgz" ]; then
         echo "--- 解压 onnxruntime（本地 $tgz）---"
-        tmpd="$(mktemp -d)"
-        tar -xzf "$tgz" -C "$tmpd" || { echo "[ERROR] 解压 $tgz 失败"; rm -rf "$tmpd"; exit 1; }
+        # 不使用 mktemp -d：Git Bash 下 TMPDIR 常是 Windows 路径
+        # （C:\Users\...\AppData\Local\Temp），返回值传给 tar -C 会被 MSYS
+        # 二次转换成 "C\:\\Users\\..." 而报 Cannot open。改用仓库内 POSIX 路径，
+        # .tmp/ 已被 .gitignore 忽略，解压目录保留不会污染版本库。
+        tmpd="$ROOT/.tmp/ort-extract"
+        mkdir -p "$tmpd"
+        tar -xzf "$tgz" -C "$tmpd" || { echo "[ERROR] 解压 $tgz 失败"; exit 1; }
         ortdir="$(find "$tmpd" -maxdepth 2 -type d -name 'onnxruntime-linux-x64-*' | head -1)"
         [ -z "$ortdir" ] && ortdir="$(find "$tmpd" -maxdepth 1 -type d -name 'onnxruntime*' | head -1)"
         # 优先官方真实文件，退而求其次拷贝 lib 下的 .so（均 cp -L 解引用，避免拷成悬空链接）
@@ -59,21 +64,22 @@ else
             cp -L "$ortdir/lib/libonnxruntime.so" "$DEST/libonnxruntime.so.1.19.2"
         else
             echo "[ERROR] $tgz 内未找到 onnxruntime 动态库"
-            rm -rf "$tmpd"; exit 1
+            exit 1
         fi
         ln -sf libonnxruntime.so.1.19.2 "$DEST/libonnxruntime.so.1"
         ln -sf libonnxruntime.so.1 "$DEST/libonnxruntime.so"
         cp "$ortdir/include/onnxruntime_c_api.h" "$DEST/include/" 2>/dev/null || \
             cp "$ortdir"/include/*.h "$DEST/include/" 2>/dev/null
         echo "OK -> lib + 头文件"
-        rm -rf "$tmpd"
     else
         echo "[INFO] 本地未找到 onnxruntime 压缩包，尝试网络下载..."
         url="https://github.com/microsoft/onnxruntime/releases/download/v1.19.2/onnxruntime-linux-x64-1.19.2.tgz"
         if command -v curl >/dev/null 2>&1; then
-            curl -fSL "$url" -o /tmp/ort.tgz || { echo "[ERROR] 下载 onnxruntime 失败"; exit 1; }
-            tmpd="$(mktemp -d)"
-            tar -xzf /tmp/ort.tgz -C "$tmpd"
+            ort_tgz="$ROOT/.tmp/ort.tgz"
+            curl -fSL "$url" -o "$ort_tgz" || { echo "[ERROR] 下载 onnxruntime 失败"; exit 1; }
+            tmpd="$ROOT/.tmp/ort-extract"
+            mkdir -p "$tmpd"
+            tar -xzf "$ort_tgz" -C "$tmpd"
             ortdir="$(find "$tmpd" -maxdepth 2 -type d -name 'onnxruntime-linux-x64-*' | head -1)"
             if [ -e "$ortdir/lib/libonnxruntime.so.1.19.2" ]; then
                 cp -L "$ortdir/lib/libonnxruntime.so.1.19.2" "$DEST/libonnxruntime.so.1.19.2"
@@ -83,7 +89,6 @@ else
             ln -sf libonnxruntime.so.1.19.2 "$DEST/libonnxruntime.so.1"
             ln -sf libonnxruntime.so.1 "$DEST/libonnxruntime.so"
             cp "$ortdir/include/onnxruntime_c_api.h" "$DEST/include/"
-            rm -rf "$tmpd" /tmp/ort.tgz
             echo "OK -> lib + 头文件（已下载）"
         else
             echo "[ERROR] 未找到 curl，无法下载 onnxruntime。请手动放置："
