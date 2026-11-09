@@ -16,7 +16,7 @@
 #   bash deploy/scripts/build-linux-docker.sh     # 产出 build/linux/
 #
 # 构建镜像：
-#   docker build -t ams:1.0.0 -f deploy/docker/Dockerfile.prebuilt .
+#   docker build -t ams:1.3.0 -f deploy/docker/Dockerfile.prebuilt .
 #
 # 说明：web/dist 为平台无关的静态产物，直接复用宿主的 `npm run build`
 #       结果，容器内不再装 Node（省 ~200MB 与一次网络安装）。
@@ -61,16 +61,26 @@ ENV AMS_HTTP_HOST=0.0.0.0 \
     AMS_DB_NAME=ams \
     AMS_DB_USER=gaussdb \
     AMS_WEB_DIR=/app/web \
-    LD_LIBRARY_PATH=/app/bin
+    LD_LIBRARY_PATH=/app/bin \
+    AMS_OCR_ENGINE=external \
+    AMS_OCR_DET=/app/bin/ocr_models/PP-OCRv5_mobile_det.onnx \
+    AMS_OCR_REC=/app/bin/ocr_models/PP-OCRv5_mobile_rec.onnx \
+    AMS_OCR_DICT=/app/bin/ocr_models/PP-OCRv5_mobile_rec.dict.json \
+    AMS_OCR_DET_QUAD=1 \
+    AMS_OCR_UNCLIP_RATIO=1.6 \
+    AMS_OCR_CHANNEL_ORDER=rgb
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -fSs http://127.0.0.1:8080/api/health || exit 1
 
-# SMTP 投递循环：随镜像分发，未启用邮件时脚本低频等待、不产生任何网络请求。
-# 后台拉起后再 exec 后端主进程，保证 PID 1 仍是 ams-server（信号/健康检查正常）。
+# 投递循环（SMTP + 短信）：随镜像分发；未启用时脚本低频等待、不产生任何
+# 网络请求。两个 spool 均后台拉起，最后再 exec 后端主进程，保证 PID 1 仍是
+# ams-server（信号 / 健康检查正常）。sms-spool.sh 为 bash + curl，不引入
+# 不引入 apt / python；媒体处理由 ams-server 进程内的仓颉引擎完成。
 COPY deploy/scripts/mail-spool.sh /app/scripts/mail-spool.sh
-RUN chmod +x /app/scripts/mail-spool.sh && mkdir -p /app/data-mail/spool
+COPY deploy/scripts/sms-spool.sh /app/scripts/sms-spool.sh
+RUN chmod +x /app/scripts/mail-spool.sh /app/scripts/sms-spool.sh && mkdir -p /app/data-mail/spool /app/data-sms/spool
 
-CMD ["/bin/bash", "-c", "/app/scripts/mail-spool.sh & exec /app/bin/ams-server"]
+CMD ["/bin/bash", "-c", "/app/scripts/mail-spool.sh & /app/scripts/sms-spool.sh & exec /app/bin/ams-server"]

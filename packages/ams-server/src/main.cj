@@ -13,9 +13,18 @@
 //   优先环境变量（生产），其次默认值（本地开发）：
 //     AMS_HTTP_HOST / AMS_HTTP_PORT
 //     AMS_DB_HOST / AMS_DB_PORT / AMS_DB_NAME / AMS_DB_USER / AMS_DB_PASSWORD
+//     AMS_ENV            运行环境：dev（默认）/ production
 //     AMS_TOKEN_SECRET   令牌签名密钥（≥ 32 字节，**生产必填**）
+//     AMS_KEK            密钥加密密钥（**生产必填**，派生盲索引 / 包裹 DEK）
+//     AMS_DB_PASSWORD    数据库口令（**生产必填**）
 //     AMS_AUTH_MAX_FAILS   账号锁定阈值：连续失败次数达到即锁定（默认 5）
 //     AMS_AUTH_LOCK_SECONDS  账号锁定时长（秒，默认 900）
+//
+// [SEC-001 生产凭据门禁]
+//   AMS_ENV=production（或 prod）时，上述三个密钥/口令必须全部由环境变量或
+//   部署配置文件显式提供；任何一项仍在使用内置开发默认值，一律抛错拒绝启动。
+//   这是「失败关闭」：宁可拒绝服务，也不让生产实例跑在可预测的密钥上。
+//   本地开发（未设 AMS_ENV）沿用既有默认值，行为零回归。
 // ============================================================
 package ams.server
 
@@ -52,6 +61,15 @@ import ams.security.totp.*
 import ams.security.authz.*
 import ams.security.ratelimit.*
 import ams.storage.*
+
+/**
+ * 是否为生产环境。判定只依赖显式开关 AMS_ENV，不猜测主机 / 端口，
+ * 避免把容器或内网部署误判成生产而阻断开发。
+ */
+func isProductionEnv(): Bool {
+    let env = getVariable("AMS_ENV") ?? "dev"
+    return env == "production" || env == "prod"
+}
 
 /**
  * 应用配置。
@@ -101,6 +119,25 @@ public class ServerConfig {
         // 部署配置（/app/config/deployment.env）优先于环境变量；文件里没有的键
         // 继续走环境变量，保证既有部署零回归。
         let store = DeploymentStore()
+        // [SEC-001] 生产模式：关键凭据必须显式配置，禁止回退到开发默认值。
+        // store.resolve 的优先级是「部署配置文件 > 环境变量 > 空串」，
+        // 因此向导/部署配置页写下的密钥同样算「显式提供」。
+        if (isProductionEnv()) {
+            var missing = ""
+            if ((store.resolve("TOKEN_SECRET", "AMS_TOKEN_SECRET", "")).isEmpty()) {
+                missing = missing + " AMS_TOKEN_SECRET"
+            }
+            if ((store.resolve("KEK", "AMS_KEK", "")).isEmpty()) {
+                missing = missing + " AMS_KEK"
+            }
+            if ((store.resolve("DB_PASSWORD", "AMS_DB_PASSWORD", "")).isEmpty()) {
+                missing = missing + " AMS_DB_PASSWORD"
+            }
+            if (!missing.isEmpty()) {
+                throw AppError(AppErrorKind.Internal,
+                    "生产模式拒绝启动：以下凭据必须由环境变量或部署配置显式提供，禁止使用内置开发默认值：" + missing)
+            }
+        }
         let host = store.resolve("HTTP_HOST", "AMS_HTTP_HOST", "127.0.0.1")
         let portStr = store.resolve("HTTP_PORT", "AMS_HTTP_PORT", "8080")
         // 端口解析：先校验全为数字，再累加
@@ -118,8 +155,13 @@ public class ServerConfig {
             port = 8080
         }
 
-        // 口令：优先环境变量，其次本地默认值
-        let dbPass = store.resolve("DB_PASSWORD", "AMS_DB_PASSWORD", "Ams@Gauss2026")
+        // 口令：部署配置文件 > 环境变量 > 本地开发默认值。
+        // 生产模式在 load() 开头已强制校验显式配置，走不到默认值分支（SEC-001）。
+        let dbPassExplicit = store.resolve("DB_PASSWORD", "AMS_DB_PASSWORD", "")
+        var dbPass = dbPassExplicit
+        if (dbPass.isEmpty()) {
+            dbPass = "Ams@Gauss2026"
+        }
         // [FR-AUD-006] 受限运行时账号：
         //   生产应通过 AMS_DB_APP_USER / AMS_DB_APP_PASSWORD 让应用以「受限角色」连接，
         //   该角色业务表全 DML、审计表仅 SELECT/INSERT（见 006_audit_restricted_role.sql）。
@@ -144,10 +186,10 @@ public class ServerConfig {
             sslMode: "disable"
         )
 
-        // 令牌签名密钥：生产必须显式配置
-        // 默认值仅供本地开发（长度 ≥ 32 字节）
-        let secretStr = getVariable("AMS_TOKEN_SECRET") ??
-            "ams-dev-token-secret-change-me-in-production-2026"
+        // 令牌签名密钥：与 DB 口令同源（部署配置文件 > 环境变量 > 开发默认值）。
+        // 默认值仅供本地开发（长度 ≥ 32 字节）；生产模式由 SEC-001 拦截。
+        let secretStr = store.resolve("TOKEN_SECRET", "AMS_TOKEN_SECRET",
+            "ams-dev-token-secret-change-me-in-production-2026")
         let secret = secretStr.toArray()
         if (secret.size < 32) {
             throw AppError(AppErrorKind.Internal, "AMS_TOKEN_SECRET 至少需要 32 字节")
@@ -183,6 +225,26 @@ main(): Int64 {
 
     // ---- 2.1 部署期配置（初始化向导 / 部署配置管理页共用同一份持久文件）----
     let deployStore = DeploymentStore()
+    // Q2 多厂商：把 deployment.env 里**显式选择**的存储平台同步到进程环境变量。
+    // ams-storage 按分层约束只读环境变量（不能反向依赖配置文件 / DB），
+    // 故启动时做一次性同步；管理接口改配置后需重启生效。
+    // 只在文件里确实有该键时才覆盖环境变量 —— 否则保留环境变量优先级，
+    // 兼容旧的 AMS_STORAGE_BACKEND=fs/s3 与纯环境变量部署（零回归）。
+    let storageEnvKeys = [
+        ("STORAGE_PROVIDER", "AMS_STORAGE_PROVIDER"),
+        ("S3_ENDPOINT", "AMS_S3_ENDPOINT"),
+        ("S3_BUCKET", "AMS_S3_BUCKET"),
+        ("S3_REGION", "AMS_S3_REGION"),
+        ("S3_ACCESS_KEY", "AMS_S3_ACCESS_KEY"),
+        ("S3_SECRET_KEY", "AMS_S3_SECRET_KEY"),
+        ("S3_PATH_STYLE", "AMS_S3_PATH_STYLE")
+    ]
+    for ((fileKey, envName) in storageEnvKeys) {
+        match (deployStore.get(fileKey)) {
+            case Some(v) => setVariable(envName, v)
+            case None => ()
+        }
+    }
     let mailSpool = MailSpool(
         getVariable("AMS_MAIL_SPOOL_DIR") ?? "./data-mail/spool",
         deployStore.resolve("MAIL_ENABLED", "AMS_MAIL_ENABLED", "false") == "true",
@@ -201,11 +263,16 @@ main(): Int64 {
     let provider: CryptoProvider = StdxCryptoProvider()
 
     // 盲索引密钥：由 KEK 派生（与附件 DEK 包裹密钥同源），写读两侧一致（FR-SRC-005）
-    let kek = (getVariable("AMS_KEK") ?? "ams-dev-kek-change-me-in-production").toArray()
+    // 与 token secret / DB 口令一致，优先读部署配置文件；生产模式由 SEC-001 拦截。
+    let kek = deployStore.resolve("KEK", "AMS_KEK",
+        "ams-dev-kek-change-me-in-production").toArray()
     let blindIndexService = BlindIndexService(provider, kek)
 
+    // 版本号与 web/package.json、CHANGELOG 保持一致（唯一口径；此前硬编码 0.1.0）
+    let envLabel = if (isProductionEnv()) { "production" } else { "dev" }
     log.info("server.boot", None, [
-        ("version", "0.1.0"),
+        ("version", "1.3.0"),
+        ("env", envLabel),
         ("httpHost", config.httpHost),
         ("httpPort", "${config.httpPort}"),
         ("db", config.db.redactedUrl())
@@ -324,6 +391,8 @@ main(): Int64 {
         passwordValidator: passwordValidator,
         passwordPolicy: policy
     ).register(router)
+    // 租户运营（SaaS 方案 A · 阶段 3）：配额 / 配置 / 审计聚合视图
+    TenantOpsRoutes(TenantOpsRepo(db)).register(router)
     // 条目接口（FR-ARCH-001~008）：带资源守卫，对象级鉴权在此生效
     let itemRepo = ItemRepo(db)
     let itemFieldRepo = ItemFieldRepo(db)
@@ -373,7 +442,9 @@ main(): Int64 {
     // ---- 异步导出（FR-EXP-001/002/003/006）----
     // 产物与附件分目录存放：附件是加密块（.enc），导出是明文 CSV/JSON，
     // 混在一处会让「按目录做备份/清理」的运维动作变得危险。
-    let exportStorage = LocalFileStorage(getVariable("AMS_EXPORT_DIR") ?? "./data-exports")
+    // Q2 方案 A：统一走存储工厂（默认 fs，零回归；S3 骨架见 ams-storage/s3.cj）
+    let exportStorage = StorageBackends.make(
+        getVariable("AMS_EXPORT_DIR") ?? "./data-exports", "exports")
     let exportTaskRepo = ExportTaskRepo(db)
     // 可携带导出的签名密钥（FR-EXP-003）：独立密钥优先，回落到令牌密钥
     //
@@ -520,11 +591,13 @@ main(): Int64 {
     let attachmentRepo = AttachmentRepo(db)
     let attachmentService = AttachmentService(
         attachmentRepo,
-        LocalFileStorage(storageRoot),
+        StorageBackends.make(storageRoot, "attachments"),
+        // 隔离区恒定本地 FS：物理隔离是 FR-ATT-007 的兜底，不随主后端切换
         QuarantineStorage("./data-quarantine"),
         keyManager,
         provider,
-        itemRepo: itemRepo
+        itemRepo: itemRepo,
+        storageProvider: StorageProviders.currentCode()
     )
     AttachmentRoutes(
         attachmentService,
@@ -574,12 +647,15 @@ main(): Int64 {
         SystemRepo(db),
         scheduler: scheduler,
         keyManager: keyManager,
-        backupStorage: LocalFileStorage(
-            getVariable("AMS_BACKUP_DIR") ?? "./data-backups"
+        backupStorage: StorageBackends.make(
+            getVariable("AMS_BACKUP_DIR") ?? "./data-backups", "backups"
         ),
         recorder: auditRecorder,
         sessions: sessions
     ).register(router)
+
+    // ---- Q2 多厂商存储平台选择（cfg:read / cfg:manage）----
+    StorageAdminRoutes(deployStore, attachmentRepo, recorder: auditRecorder).register(router)
 
     // ---- 审计查询接口（FR-AUD-003/004）----
     // auditRecorder 已在上面创建（供 AuthService 记录登录/登出）

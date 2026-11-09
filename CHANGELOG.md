@@ -15,10 +15,97 @@
 
 ---
 
-## [未发布] — 工程化与交付增强（Linux / 容器 / 对外 API / 信创）
+## [1.3.0] — 2026-11-09（功能小缺口收口 + external OCR 生产化 + 架构演进阶段 3 + 安全收口）
+
+> 本批不改动业务功能完成度口径（P0 54 / P1 34 / P2 23 不变），属能力补强 + 安全收口。
+> 版本号提升至 **1.3.0**（语义化 minor：多新功能模块 + 安全加固）。
+
+### 新增（检索 / 授权 / 上传 / 国际化 · 真实小缺口收口）
+- **搜索高亮片段**（FR-SRC-001 补遗）：新增 `ams.core.search.SearchHighlighter`，按 **UTF-8 字符边界**把命中切成 `[{text,hit}]` 分段（含长文本以首命中为中心开窗 + 省略号、ASCII 大小写折叠、对齐后端「单字回退 LIKE」）。`GET /api/search` 每行返回 `highlight.title` / `highlight.issuer`；**敏感度 ≥ 2 的条目 issuer 不生成高亮**，避免通过片段反推掩码前明文。前端 `GlobalSearch.vue` 用 `v-for` + `<mark>` 渲染，**不用 v-html**（零 XSS 面）。单测 11 例。
+- **分片上传 / 断点续传**（FR-ATT-001 补齐）：新增 `ChunkUploadStore`（单实例内存态 + Mutex，1 MiB 分片、50 MB 上限、24h TTL、归属绑定、非末片长度强校验、重传幂等）与 5 个端点 `POST/GET/PUT/POST/DELETE /api/attachments/upload/sessions...`。合并后的明文**原样交给 `AttachmentService.upload()`**，加密 / 去重 / 审计 / 媒体链路零回归。前端 `web/src/api/chunkedUpload.ts` 在文件 > 1 MiB 时启用，会话 ID 存 sessionStorage 支持刷新后续传；小文件仍走原单次上传。单测 9 例。
+- **i18n 动态文案**：`viewsArchiveView.9fead2` 原为静态「已更新条目」，导致批量编辑提示丢失数量且 en/fr 回退中文；改为三语 `{count}` 占位符 + 新增 `batchTagged` / `uploadProgress` / `uploaded` / `api.chunkedUploadFailed` 三语词条。三语 catalog 键数保持一致。
+- **核查结论（自纠正）**：`docs/10` 历史章节中「FR-ACL-009 撤销接口仍待补」「FR-ATT-001 分片上传未实现」「前端导入页模板套用 UI 待补」均为 2026-10-26 的**陈旧标注** —— 实际已由后续批次落地（`DELETE /api/grants/:id`、`DELETE /api/family/grants/:id`、`ImportView.vue` 模板 CRUD）。历史逐行标记按分层约定保留不改，现状以本文与 `docs/10` 新增章节为准。
+
+### 新增（external PP-OCRv5 生产化）
+- **DB 后处理升级**：`ocr_bridge.c` 从「8 连通域 + 轴对齐框」升级为「凸包 + 旋转卡壳最小面积外接四边形 → Unclip 边偏移求交 → 单应矩阵透视变换 + 双线性采样」，覆盖**倾斜文本**。rec 推理抽成 `run_rec_crop()` 供旋转框与轴对齐两条路径共用，避免漂移。
+- **零回归开关**：`AMS_OCR_DET_QUAD=0` 回退旧轴对齐路径；`AMS_OCR_UNCLIP_RATIO`（默认 1.6）可调。
+- **通道序校准**（B2）：`AMS_OCR_CHANNEL_ORDER=bgr` 可切换，默认 `rgb`（web 导出版实测灰度/彩色 RGB 正确），det 与 rec 共用同一开关；不做隐式猜测。
+- **如实边界**：对凸四边形，边偏移求交与通用 Vatti 多边形等距外扩结果一致；**任意凹多边形 / 粘连文本行仍不支持**（未引入 Vatti 库）。倾斜 > 45° 与竖排文本未做方向规整。
+- **方向规整（实测发现并修复）**：旋转卡壳枚举的是凸包**边**，朝向任意；初版直接做透视变换会把文本左右镜像 / 上下颠倒，B3 倾斜 12° 夹具上 QUAD=1 三个框全空、QUAD=0 反而全中。新增 `orient_quad()`（枚举 4 起点 × 2 绕序，保留「长边在 p0→p1」，取 p0→p1 最水平向右、p1→p2 最竖直向下）后修复。
+- **B3 泛化实测（直连 C ABI，不走 HTTP/DB）**：`.tmp/ocr_selftest.c` + 三张夹具（倾斜 12° / 彩色浅蓝底 / 复杂排版）。
+  - 倾斜 12°：QUAD=1 `档案管理系统 / 文字识别测试ABC123 / 倾斜文本12度`（**完整**）；QUAD=0 `文字识别测A123`（丢「试」「BC」）—— 旋转框路径明显更优。
+  - 彩色图：rgb 与 bgr 输出一致，三行均正确；说明该 web 导出模型对通道序不敏感，默认 rgb 保持，开关留给其它导出版本。
+  - 复杂排版：`UNCLIP_RATIO=1.6` 出 4 行、`1.2` 只出 3 行且第 3 行变差 → 默认 1.6 合理。末行小字号（28px）识别仍有瑕疵（`大务月250110-...`），属识别质量而非引擎失败，如实保留。
+  - C 桥接已在 `ams-cj` 容器 `gcc -O2 -fPIC -shared` 实编 0 error；Linux 全量构建 `LINUX_BUILD_EXIT=0`。
+
+### 新增（架构演进 · 阶段 3 / docs/15）
+- **ams-kit 阶段 3**：纳入审计哈希链（`newAuditChain` / `auditGenesisHash`）、检索纯逻辑（`tokenizeForSearch` / `maskValue` / `highlightJson`）、导入模板纯字符串内核 `CsvColumnTemplate`（在框架层独立实现，**不 import ams.app**，保持单向分层）。单测 6 例。
+- **多租户阶段 3**：迁移 `024_tenant_ops.sql`（`sys_tenant_quota` / `sys_tenant_settings` / `v_tenant_audit_summary`，侧表幂等）；`TenantOpsRepo` + `TenantOpsRoutes`（`acl:manage`，配额读写 / 配置读写 / 审计聚合）；`main.cj` 注册。配额纯逻辑单测 7 例。
+- **配额边界如实标注**：本阶段配额是「运营上限声明」，**尚未在创建用户 / 条目 / 附件的写路径强制拦截** —— 未经压测不改写入语义。
+- **cjpm 发布化 — 已拍板方案 A（静态库分发，不做全仓改名）**：包名点号分层（`ams.kit`）与 cjpm 扁平 `name` 不兼容，`cjpm check` 实测报错；全仓改名波及所有 import、风险高收益低，故维持 `build/*.a` 静态库形态并做成正式分发链路：
+  - 新增 `scripts/package-kit.sh`：从 `ams.kit` 的 `import` 出发**实时递归推导依赖闭包**（当前 8 个包，不写死白名单），校验每个包的 `.a` / `.cjo` 齐全后打包 `lib/` + `cjo/` + `LICENSE`（缺失即拒绝出包）+ `README.md` + `VERSION` + `MANIFEST.txt`（闭包/逐文件 sha256）+ `CHECKSUMS.sha256`；版本号**唯一来源**为 `kit.cj` 的 `KIT_VERSION`，支持 `--build-dir build/linux`、`--print-closure`、`--version`。
+  - 新增 `packages/ams-kit/README.md`（**发布用途**文档，随包分发）：分发形态、8 包闭包、`cjc --import-path ./cjo` 接入示例、最小示例、能力清单、Apache-2.0 与安全边界、自行打包命令。
+  - 三个 `cjpm.toml` 加注释明确「仅元数据文档、不参与构建、勿跑 cjpm build/check/publish」；**不改 `name` / `version` 数值**。
+  - **事实核查订正**：`docs/15` 原记三个 toml 版本为「0.1.0 / 0.1.0-alpha」，实际均为模板值 `"1.0.0"`；因不参与构建而无实际含义，已在 `docs/15` §4.1 订正。
+  - **接入验证闸门 `scripts/ci/verify-kit-package.sh`**：模拟外部接入方，只用发布包里的 `.cjo` / `.a`（不引用仓库 `build/` 下任何其它产物），用 `cjc` 编译链接并运行最小程序；断言 `KIT_VERSION`、`SM3_BYTES=32`、分词 / 高亮 / 掩码 / 导入模板 / 审计链可用。**实测 `VERIFY_EXIT=0`**：8 库链接成功、`SM3_BYTES=32`、`TOKENS=5`、`HIGHLIGHT_LEN=102`、`MASK_LEN=8`、`GENESIS=32`、`TPL_HAS_TITLE=true` —— 依赖闭包完整、接口快照可消费、静态库真实可用。
+  - **双平台产物实跑**：`dist/ams-kit-0.1.0-alpha-windows-x86_64.zip`（185K）与 `dist/ams-kit-0.1.0-alpha-linux-x86_64.zip`（191K）均生成成功；`--build-dir build/linux` 自动推断 `platform=linux-x86_64`。三个 `cjpm.toml` 经 Python `tomllib` 解析语法有效，`name` / `version` 数值未改动。
+  - 决策记录与「何时重新评估 B/C」的触发条件见 `docs/15` §4.1 阶段 2。
+
+### 新增（Q2 产品决策 · 用户拍板方案 A：存储可插拔骨架）
+
+> **Q2 未关闭**：最终选型（自建 MinIO / 华为云 OBS / 本地 FS）仍待运维·甲方确认；本批落地的是 `docs/README.md` §六 Q2 表格写明的兜底方案，**不替业务方选后端**。
+
+- **核查结论**：`StorageBackend` 接口 / 默认 FS 驱动 / `storage_backend` 列早已存在，但 `AMS_STORAGE_BACKEND` 与 `AMS_S3_*` 只在 `docs/02` 的示例 compose 里出现（代码零命中）、S3 驱动完全没有、`main.cj` 三处硬编码 `LocalFileStorage`、写入侧把 `storage_backend` 硬编码为 `0`。
+- 新增 `packages/ams-storage/src/s3.cj`：`S3StorageConfig`（配置模型 + `fromEnv` / `validate` / `objectUrl`，支持 pathStyle 与 virtual-host）、`S3Transport` 注入接口、`UnavailableS3Transport`（失败关闭）、`S3ObjectStorage`（实现 `StorageBackend`，`backendCode()=1`）。对象键消毒按 **UTF-8 字符边界**处理，中文文件名不被切碎；阻断 `..` / 反斜杠 / 控制字符。
+- `storage.cj`：`StorageBackend` 加 `backendCode()`（0=fs / 1=s3）；新增 `StorageBackends.make(root, purpose, transport?)` **唯一装配点**，默认 `fs` 行为零回归。`main.cj` 附件 / 导出 / 备份三处硬编码全部收敛；隔离区恒定本地 FS（保留 FR-ATT-007 物理分离）。
+- `AttachmentRepo.create()` 加具名参数 `storageBackend!: Int64 = 0`（零回归），SQL 字面量 `0` 改 `?` 并调整索引；`AttachmentService` 落库传 `this.storage.backendCode()`。
+- `docker-compose.yml` 加 `minio` 服务（`profiles: ["s3"]`）+ `ams-minio-data` 卷，**默认 `up -d` 不创建容器**；MinIO 凭据用 `:-` 默认值而非 `:?`，避免未启用 profile 时 compose 插值打断默认起栈。两个 env 模板补全 `AMS_STORAGE_BACKEND` / `AMS_S3_*` 注释示例。
+- 新增 `packages/ams-storage/tests/storage/s3_test.cj` **16 例**：默认 fs 零回归、未知后端 / 缺配置 / 缺传输层失败关闭、配置与 URL 组装、键消毒（穿越 / 中文 / 控制字符）、注入内存 transport 的读写往返、工厂 s3 路径。`bash scripts/test.sh ams-storage` **28 通过 / 0 失败**。
+- ⚠️ **如实边界**：这是骨架，不是可用驱动。AWS SigV4 / OBS 兼容签名依赖 **HMAC-SHA256**，而 `ams.crypto.impl` 明确返回「HMAC-SHA256 暂未接入」（SHA256 摘要可用），stdx HTTP 客户端在本仓只用过服务端 API。故设 `s3` 且未注入真实 transport 会**启动即失败关闭**（`StorageFailure`），不静默回落 FS、不以明文写入；注入 transport 后骨架可读写（单测验证）。选 B/C 前必须先补 HMAC-SHA256 + SigV4 传输层。
+- **验证（全绿）**：`bash scripts/build.sh` **0 error** · `bash scripts/test.sh` **469 通过 / 0 失败**（较上轮 +16 = 新 `s3_test.cj`）· `npm run build` **EXIT 0** · Linux 全量构建 **0 error**（21M）· 镜像 `ams:1.2.1` 重建 **EXIT 0** · 默认栈 `up -d --force-recreate` **EXIT 0**：容器仅 `ams-server` + `ams_opengauss`（**无 minio**）、`/api/health` **200**、`routes="200"` 不变、无存储报错 → **默认 fs 零回归**。
+  - `docker compose config --services`：默认 `ams/db/init`，`--profile s3` 才多 `minio`。
+  - **失败关闭实测**（独立 `docker run` 连同一网络）：① 设 `s3` 但缺配置 → `RUN_EXIT=1`，抛「S3 配置不齐备…」，栈帧 `StorageBackends::make ← main.cj:426`；② 配置齐全但未注入传输层 → `RUN_EXIT=1`，抛「Q2 方案 A 仅提供 S3 驱动骨架：SigV4 依赖的 HMAC-SHA256 尚未接入…」。两道守卫均真实生效，无静默回落。
+
+### 新增（Q2 扩展 · 多厂商 OBS 选择 + HMAC-SHA256）
+
+> 用户要求：适配华为云 / 阿里云 / 七牛云等多家 OBS、提供平台选择接口、保留本地选项、补 HMAC-SHA256。**最终选型仍待运维·甲方确认，Q2 未关闭**。
+
+- **HMAC-SHA256 落地**：`ams.crypto.impl` 原对 `DigestAlgorithm.Sha256` 的 HMAC 返回「暂未接入」；现按 **RFC 2104** 用已验证可用的 stdx `SHA256` 摘要原语自行构造（不赌 SDK `HashType.SHA256` 枚举是否存在），含 `key > 64B` 先哈希的分支。`impl_test.cj` 新增 **RFC 4231 四个标准向量**（Case 1/2/6/7）+ 长度 / 空 key / 算法隔离共 7 例，`ams-crypto` **33/33 通过**。
+- **多厂商注册 `providers.cj`**：`StorageProviderProfile` + 8 个平台 —— `local`（默认、唯一完全可用）、`minio`、`huawei`（华为云 OBS）、`aliyun`（阿里云 OSS）、`qiniu`（七牛 Kodo S3 兼容网关）、`tencent`（腾讯云 COS）、`aws`、`s3`（通用）。每家带 endpoint 模板、region 样例、桶命名约束、默认寻址风格、签名协议、说明与文档链接。`AMS_STORAGE_PROVIDER` 优先，旧 `AMS_STORAGE_BACKEND=fs/s3` 兼容保留；MinIO 默认 path-style、其余云默认 virtual-host，profile 真的影响 URL（单测验证）。
+- **SigV4 签名计算 `sigv4.cj`**：canonical request → string-to-sign → HMAC 链派生签名密钥 → Authorization 头，基于新补的 HMAC-SHA256；header 名自动小写 + 字典序排序 + 值 trim。`sigv4_test.cj` 用 **AWS 官方 GET Object 向量**验证（`Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41`），中间值（canonical hash / string-to-sign hash / signing key hex）由独立 Python `hashlib`+`hmac` 实现交叉生成；另测 PUT 场景与「SK 不进入任何结果」。`ams-storage` **51/51 通过**。
+- **平台选择接口 `storageadmin.cj`**：`GET /api/admin/storage/providers`（8 平台清单 + 当前 / 已配置 / 是否需重启 + `ready` 标记）、`GET /api/admin/storage/config`（凭据脱敏）、`PUT /api/admin/storage/config`（`cfg:manage`，写 `deployment.env`，记 `ConfigChange` 审计且 detail 不含凭据）。**存量保护**：`AttachmentRepo.countAll() > 0` 时，改变 `provider`/`endpoint`/`bucket` 一律 `Conflict` 拒绝（旧 `storage_key` 会在新后端失效 = 静默数据丢失）；仅改凭据 / region / 寻址风格允许。配置写入后**需重启生效**，响应明确 `requiresRestart`。
+- **配置同步**：`main.cj` 启动时只把 `deployment.env` 里**显式存在**的存储键同步到进程环境变量（`ams-storage` 按分层不能读配置文件/DB）；文件无该键时不覆盖，保留旧变量兼容与纯 env 部署（零回归）。
+- **迁移 `025_storage_provider.sql`**：`arc_attachments` 加 `storage_provider VARCHAR(32) NOT NULL DEFAULT 'local'` + 索引（DO 块幂等，同 022）；不改 `storage_backend`(0/1) 语义，存量行回填 `local`。`create()` 与服务构造注入平台 code，每行附件自述厂商。
+- **安全**：`DeploymentStore.SECRET_KEYS` 增加 `S3_SECRET_KEY` / `S3_ACCESS_KEY`，`redactedJson()` 不会泄漏对象存储凭据。
+- ⚠️ **如实边界**：HMAC-SHA256 与 SigV4 **签名计算真实可用、有官方向量**；七牛自有 QiniuV2 / 阿里 OSS 自有 V1（HMAC-SHA1）明确标注「未实现」，本期只走各家 S3 兼容 + SigV4。平台选择目前是 HTTP API，尚无管理页 UI。
+  - （补遗）`S3Transport` 的 **HTTP 客户端已于后续批次落地**：用 `std.net`（TcpSocket）+ `stdx.net.tls`（TlsSocket）自实现 HTTP/1.1 客户端，PUT/GET/DELETE 真正发出，404 → None、其余失败关闭。选非 `local` 平台在配置完整时即构建真实传输层（不再仅因缺 transport 启动即失败关闭），连接/签名/响应失败仍一律失败关闭。详见下方「真实 S3/OBS HTTP 传输层落地」。
+
+### 新增（Q2 扩展 · 真实 S3/OBS HTTP 传输层落地）
+
+> 把「只能签名、不能发请求」补成「选某家 OBS 即可真实读写」。SigV4 签名计算（前批次已具备）与真实 HTTP 传输层在此汇合为完整可用的对象存储驱动。
+
+- **新增 `packages/ams-storage/src/http_transport.cj`**：`HttpS3Transport <: S3Transport`，基于 **`std.net`（TcpSocket / StreamingSocket）+ `stdx.net.tls`（TlsSocket）** 自实现 HTTP/1.1 客户端（http/https 均可用），不依赖对 `stdx.net.http` 的猜测。`request()` 组装请求 → SigV4 签名 → 建连（https 走 TLS 默认校验证书）→ 发送 → `readAll`（按 Content-Length / chunked / EOF 三种结束判定）→ `parseResponse`。
+- **语义映射（失败关闭）**：GET 收到真实 **HTTP 404 → `None`**（对象不存在）；**200/204/206 → `Some(body)`**；其它状态码、连接失败、响应不完整一律抛 `AppError(StorageFailure)`，**绝不静默回落本地 FS 或明文写入、绝不把故障伪装成「对象不存在」**。`putObject` / `deleteObject` 也走同一守卫。
+- **安全**：SK 只参与 HMAC 派生，不进日志 / 异常 / 任何非 Authorization 字段；TLS 不降级为明文。
+- **`StorageBackends.make` 收敛**：非 `local` 平台且配置完整时构造 `HttpS3Transport.forConfig(cfg)`（不再仅因缺 transport 启动即失败关闭）；`s3.cj` / `providers.cj` 的历史「骨架 / 未发请求」注释同步修正，`UnavailableS3Transport` 收敛为「直接构造 `S3ObjectStorage` 不带 transport 时的失败关闭桩」。
+- **`storageadmin.cj` 对齐**：`transportReady` 由硬编码 `false` 改为按平台能力计算（本地与对象存储平台均为 `true`），PUT/GET 配置接口提示改为「重启后按配置装配真实传输层、失败关闭而非静默回落」。
+- **测试（两层）**：
+  - `s3_transport_test.cj` **纯逻辑 11 例**（默认跑，不依赖外部）：URL 解析（http/https/默认端口/显式端口/virtual-host/中文编码）、RFC 3986 路径编码（保留 `/`、中文逐字节 `%XX`）、SigV4 `amzDate` 格式（`YYYYMMDDTHHMMSSZ` = 16 字符）、响应解析（200 取体 / 404→None / chunked 解码 / 非预期码失败关闭 / PUT 收 404 是错误不是 None）、连接被拒（`127.0.0.1:1`）失败关闭。
+  - `s3_integration_test.cj` **可选端到端 1 例**：默认 `println("[SKIP]")` 跳过；设 `AMS_IT_MINIO=1` 且 `127.0.0.1:9000` 可达时真连 MinIO 做「建桶 → PUT（含中文/二进制）→ GET 原样 → GET 不存在→None → DELETE → 删桶」往返，证明签名 + HTTP + 响应解析真实可用。
+  - `ams-storage` 单测 **64 通过 / 0 失败**（含集成测试跳过用例）。
+  - ⚠️ **如实边界**：本会话内 Docker 镜像代理（xuanyuan.cloud）繁忙，**未能拉取 `minio/minio` 跑真实端到端往返**；该往返由 `s3_integration_test.cj` 实现并默认跳过，待镜像代理恢复后可用 `AMS_IT_MINIO=1 bash scripts/test.sh ams-storage`（或 `AMS_IT_MINIO=1 docker compose --profile s3 up -d` 起 MinIO 后）验证。其余纯逻辑用例已全绿，URL 解析 / 编码 / 响应解析 / 失败关闭语义均有覆盖。
+
+### 安全收口（审查 🔴 修复 · 1.3.0 收口）
+- **R1 · 租户配置机密泄漏面**：`TenantOpsRoutes.putSetting` 此前不接受 `isSecret`，导致经 API 写入的机密项 `is_secret` 恒为 FALSE，`listSettings` 的 SQL 掩码（`CASE WHEN is_secret THEN '***'`）对 API 写入的机密失效、明文回显。修复：`TenantOpsRepo.setSetting` 新增 `isSecret: Bool` 形参，INSERT 路径按调用方落库；UPDATE 路径保持不改 `is_secret`（避免更新值时误降级机密项）。路由解析 `isSecret` 字段（缺省 false），响应回显 `isSecret`。
+- **R2 · 短信失败关闭**：`SpoolSmsProvider.send` 此前吞掉 spool 写异常仅记日志、绝不抛错，使短信投递故障对用户与运维不可见（fail-open）。修复：写失败改抛 `AppError(AppErrorKind.StorageFailure)`，交由 `Mailer.sendAlert` 以 best-effort 方式捕获并记 ERROR 日志（`sms.failed`，含原因），邮件 / 站内信不受影响 —— 故障可见、不静默降级；`SmsProvider` 接口契约改为「投递失败应抛错」。Noop/Console 后端不受影响。
+- **R3 · i18n 三语覆盖收口**：补齐源码用到、但三语 catalog 与 `index.ts` 基线均缺的遗漏词条（含 10 个两段点键、4 个带 `{name}` 占位符的键如 `api.chunkedUploadFailed` / `componentsAttachmentPanel.uploaded` / `viewsArchiveView.batchTagged` / `componentsAttachmentPanel.uploadProgress`，以及 fr 缺的 `dp.today`），0 缺键、0 重复键；修正此前 catalog 生成器误插导致的漂移，zh-CN / en / fr 键集重新对齐（各约 1053–1055 键）。
+
+---
+
+## [1.2.1] — 2026-11-08（OCR 扩展 + 验证码加固 + 媒体水印修复 + 容器部署）
 
 > 本批次属**工程化与交付能力**补强，不改动业务功能（FR 完成度仍为 P1 34 条 / P2 23 条）。
-> 架构级两项（提炼通用框架、SaaS/微服务化）已在 `docs/15 §三` 拍板，并落地 **Phase 1**（见下方「新增（架构演进 · Phase 1）」）；Phase 2 待办见 #87 / #89。
+> 架构级两项（提炼通用框架、SaaS/微服务化）已在 `docs/15 §三` 拍板，并落地 **Phase 1**（见下方「新增（架构演进 · Phase 1）」）；Phase 2 已落地（见下方「新增（架构演进 · Phase 2 落地）」）。
 
 ### 新增（Linux 构建链路）
 - `scripts/build-linux.sh`：`build.sh` 的 Linux 移植（去 cygpath/`.exe`/`.dll`，运行时与 stdx 改 `linux_x86_64_cjnative`，产物 `ams-server` 无扩展名，SDK 探测 `/opt/cangjie` 或 `tools/cangjie`），驱动构建改调 `build-driver-linux.sh`。
@@ -75,12 +162,103 @@
   - `packages/ams-security/tests/authz/authz_test.cj` 新增 **3 条**断言（29→32）：已知租户+调用者 any → 拒绝；同租户 any → 放行；tenantId=0 哨兵跳过强制。
   - 复验：e2e 22/23→23/23、authz 32/32、全量 338/338、build 0 error、web build OK。
 
-### 候选（待拍板，未落地）
+### 架构演进候选方案（已拍板，见 docs/15 §三）
 - `docs/15-架构演进路线-方案候选.md`：提炼通用开发框架（A 独立框架库 / B 仓内 shared / C 脚手架）与 SaaS/微服务化（A 多租户单体 / B 模块化单体 / C 完整微服务）的 A/B/C 方案与权衡；**Phase 1、Phase 2 均已落地（见上方 #87 框架发布化 / #89 跨租户回归）**。
 
 ### 修复
 
 - **标签合并前端入口缺失（FR-TAG-003）**：后端 `POST /api/tags/:id/merge`（`mergeTag`，含「防合并到自身」校验）早已具备，但 `TagView.vue` 一直只有「改名 / 移动 / 删除」，没有合并 UI —— FR-TAG-003 此前实际只完成后端一半。现补「合并」按钮 + 目标标签下拉（排除自身与子孙，复用 `parentOptions`）+「确认合并」，与服务端环路/深度校验形成双保险。`cd web && npm run build` 类型检查 + 构建通过。
+
+### 新增（A 方向 · 生产就绪收口）
+
+> 本批次聚焦「生产就绪」收口：凭据安全、运维可操作性、回归覆盖与文档口径对齐。
+> 以下列出工作方向，具体交付与验证结果以各文件与 CI 记录为准。
+
+- **生产凭据门禁与 compose 必填变量**：引入 `AMS_ENV`（`dev` 默认 / `production`）；`production` 下
+  `AMS_TOKEN_SECRET` / `AMS_KEK` / `AMS_DB_PASSWORD` 须由环境变量或部署配置显式提供，
+  否则后端拒绝启动（SEC-001）；compose 中这三项改为必填（`:?` 语法），本地开发复制
+  `deploy/compose/.env.example` 为 `.env`。
+- **备份卷与运维手册**：备份卷与备份脚本，以及 `deploy/RUNBOOK.md` 运维执行手册。
+- **CI 显式标注 E2E 跳过并接入更多回归**。
+- **测试覆盖补齐** / **前端错误兜底** / **OpenAPI schema 补全** / **i18n 清理**。
+- **文档与版本号对齐**：README / CHANGELOG / docs 索引中的工程数字、状态与版本口径。
+
+#### 本批实际交付（2026-11-07）
+
+- **SEC-001 凭据门禁**：`packages/ams-server/src/main.cj` 新增 `isProductionEnv()` 与启动期必填校验；
+  `TOKEN_SECRET` / `KEK` / `DB_PASSWORD` 统一走 `DeploymentStore.resolve`（部署配置文件 > 环境变量 > 开发默认值）；
+  compose 三个变量改 `:?` 必填并默认 `AMS_ENV=production`，新增 `deploy/compose/.env.example` 供本地开发；
+  `server.boot` 版本号由硬编码 `0.1.0` 修正为 `1.2.0`，并输出 `env` 字段。
+- **部署生产化**：compose 补 `ams-backups` 卷（db 与 ams 共用）、`mem_limit` / `cpus` / `json-file` 日志轮转；
+  新增 `deploy/scripts/backup.sh` / `restore.sh`（gs_dump + sha256 + 二次确认恢复）、
+  `deploy/RUNBOOK.md`（备份 / 恢复 / 升级回滚 / 监控 / 排障 / 已知生产缺口）、
+  systemd 与 Windows 启动样例；`Dockerfile*` 版本统一到 `ams:1.2.1`。
+- **CI 去假绿**：`ci.yml` 把 4 个静默跳过的 E2E 收口到 `scripts/ci/verify-e2e.sh`（7 组，含此前未接入的
+  多租户隔离 / 家庭协作 / 审计链独立校验），未配 DB 时输出 `::warning::` 并在 Job Summary 标注 SKIPPED；
+  新增 `scripts/ci/check-consistency.py` 静态门禁（迁移编号 / 路由前缀 / 分层方向 / i18n 死词条 /
+  OpenAPI / 版本号 / compose 凭据 / workflow YAML），三个 workflow 均接入；
+  `ci-linux.yml` 的占位 job 改为真实 preflight 门禁；前端 `npm test` 接入 CI。
+- **测试覆盖**：新增 `ams-storage` 部署配置 12 例、`ams-api` 路由契约 4 例；前端引入 Vitest 并新增
+  16 例（i18n / catalog / api client），`npm test` 纳入三件套门禁。
+- **前端健壮性**：`main.ts` 新增全局 `errorHandler` 与 `unhandledrejection` 提示；
+  19 条懒加载路由加 chunk 失败兜底 `LoadFailedView.vue`；新增 404 页 `NotFoundView.vue`；
+  `SystemView` 五处静默 catch 改为可见提示；修 `::alt` 笔误与反引号 fallback；
+  文档标题改走 `t()` 并补三语词条，切换语言后同步刷新。
+- **OpenAPI 与 i18n**：`docs/14` 的 235 处 `UntypedObject` 占位全部清除，定义 16 个核心 schema
+  （176 处转 `$ref`、57 处转结构化 object），新增 `scripts/ci/check-openapi.py` 校验；
+  三语 catalog 清理 `${` / 反引号 / JS 表达式死词条、键集合对齐、补 zh-CN 缺失键、修 fr 自动探测，
+  47 处动态文案调用点中 44 处改造成 `{name}` + vars（3 处为授权例外）。
+- **文档收口**：README 工程数字、迁移数量、路由口径与版本号对齐实测值；`docs/07` 新增 v1.2.0
+  视觉重构实现说明；`docs/12` / `docs/15` 状态行回写；补录 `[1.1.0]` 段落。
+
+### 新增（能力边界转正 · 2026-11-07 第二批）
+
+> 本批把此前登记的「能力降级交付」逐条转正，措辞如实：已交付什么、仍不能做什么分别写明，不写未验证的 PASS 数字。媒体能力全部在 `ams-server` 进程内由纯仓颉实现，没有独立 worker / 文件队列 / 额外容器。
+
+- **OCR（FR-ATT-013）· 纯仓颉实现**：`packages/ams-core/src/media/` —— `png.cj` 自写 PNG 解码 / 编码（剥 zlib 头尾复用 stdx 裸 deflate；编码用 stored deflate 块，自实现 CRC-32 / Adler-32）；`ocr.cj` 灰度极值中点二值化 + 水平 / 垂直投影分割 + 5×7 内置点阵字模汉明匹配，识别等宽印刷体数字 / 大写字母；`pdftext.cj` 抽取 PDF FlateDecode 内容流的 Tj / TJ 字面字符串；`media.cj` 门面（缩略图、`MediaEngine.process`、像素水印）。单测 `packages/ams-core/tests/media/media_test.cj` **12/12 PASS**，`ams-core` 全量 **150 例 / 0 失败**。
+  - **边界如实写**：不支持 CJK / 手写 / 复杂排版 / 倾斜校正 / JPEG / BMP / 图像型扫描 PDF；真实扫描件字体与内置字模差异大时识别率下降；文本型 PDF 直接抽文本，不走模板 OCR。
+  - **不引入任何外部进程**：全部在 `ams-server` 进程内同步完成，保持「一个进程、一个端口」。
+  - `scripts/media_worker.py` 保留为**离线参考实现 / 可选外部引擎**（自带 `--selftest` 12/12），**不参与运行时主链路**，不是系统依赖。
+- **缩略图（FR-ATT-012）**：服务端生成 PNG 缩略图（`GET /api/attachments/:id/thumbnail`），前端优先取用、404 回落原图 CSS 缩放。
+- **像素水印（FR-ATT-008）**：服务端把访问者 / 时间 / 追踪号烧进 PNG 像素（`GET /api/attachments/:id/watermarked`）；PDF 与不支持格式仍保留「签票 + 审计 + 前端叠加」。**仍不阻止截图 / 翻拍**，转正的只是「无法烧进像素」这一条。
+- **短信（FR-NTF-005）**：`SpoolSmsProvider` + `deploy/scripts/sms-spool.sh` 真实 HTTP 网关投递（照搬 MailSpool 文件队列范式），默认关闭、需运维配置 `SMS_*`；`build.sh ams-app` 0 error、`test.sh ams-app` **36/0**。
+- **图形验证码（FR-AUTH-011）**：纯字符串 SVG 生成（无图像库）、5 分钟一次性 challenge，登录失败 ≥3 / 注册 / 找回口令触发；10 个仓颉单测，`test.sh ams-api` **35/0**。**边界**：SVG 文本本质可被解析 / OCR，强对抗建议换图片 / 滑块；challenge 为单实例内存态，多副本需落库或共享存储。
+- **接入与开关**：迁移 `023_media.sql` 为 `arc_attachments` 增 `ocr_text / ocr_status / ocr_engine / media_error` 四列；`AMS_MEDIA_ENABLED` 与 `AMS_OCR_CONSENT` 默认 `false`，**需同时为 `true`** 才自动处理（OCR 隐私显式同意）；`POST /api/attachments/:id/media` 可手动触发，另新增 `GET /api/attachments/:id/ocr`。全量 `build.sh` **0 error**、`test.sh` **381 通过 / 0 失败**，前端 typecheck / test / build 全绿。
+- **E2E**：openGauss 容器在跑，新增 `scripts/ci/bootstrap-e2e.sh` 幂等自举夹具并修复 `scripts/ci/verify-audit.sh` 的 chain_seq 漂移，7 组真跑 **失败 0 组**（第 7 组审计链独立校验为 best-effort WARN，不阻断）。**如实写出**：第 5 / 6 组因注册强制 captcha，临时通过 `/tmp` shim 指向旧 exe 绕过（未改产品代码，属待办）；E2E 会写入测试账号，可用 `scripts/cleanup-test-accounts.sql` 清理。
+- **备份**：新增异地复制 / 恢复演练 / cron 与 systemd timer 脚本，默认未启用，`deploy/RUNBOOK.md` 已同步。
+- **npm audit**：9 个漏洞全部需 major 升级（vitest 2→5、vue-tsc 2→3），本批未修，理由记录于此，待单独排期回归。
+- **架构**：媒体能力全部进程内完成，**没有**独立 worker / 文件队列 / 额外容器，因此不触碰 `docs/15` 方案 C 结论；A/B/C 决策与阶段 3 待办不变。
+
+### 新增（JPEG 解码与 E2E 去 shim · 2026-11-07 第三批）
+
+- **仓颉 baseline JPEG 解码器**：`packages/ams-core/src/media/jpeg.cj`，纯仓颉进程内实现 ——
+  DQT / SOF0 / DHT / SOS 段解析、Huffman 解码、反量化、**定点分离式 2D IDCT**（预计算整数余弦矩阵，
+  不依赖浮点 / Math.cos）、YCbCr→RGB、4:4:4 / 4:2:2 / 4:2:0 采样。`MediaEngine.process` 对 JPEG 分流，
+  使 OCR / 缩略图 / 像素水印覆盖最常见的照片格式。单测 `jpeg_test.cj` 2 例（可控最小合法 JPEG：
+  8×8 平坦灰 + PNG 往返），`ams-core` **152 例 / 0 失败**。
+  边界：不支持渐进式 JPEG / 12·16-bit / 算术编码 / restart interval / CMYK·YCCK / 无损 JPEG。
+- **captcha shim 根治**：新增 `scripts/ci/e2e_captcha.py`（黑盒 GET 验证码 → 从 SVG 解析答案 →
+  注册携带 `captchaId/captchaCode`），改造 `bootstrap-e2e.sh` / `verify-tenant.py` / `verify-family.py`；
+  `verify-e2e.sh` 整块删除 sitecustomize / `ams-server.exe.old` 回退。7 组 E2E 只用**当前构建产物**
+  真跑 **失败 0 组**，日志无 `.old` / fallback / 答案明文。产品代码与生产验证码校验均未改动。
+- **口径更新**：README / SECURITY / `docs/10` / 配置模板中「JPEG 不支持」改为「baseline JPEG 已支持」；
+  第二批记录中该边界描述以本条为准（历史记录保留不改）。
+
+### 新增（OCR 扩展 · 验证码加固 · 依赖治理 · 2026-11-08 第四批）
+
+- **BMP 解码器**：新增 `packages/ams-core/src/media/bmp.cj`，纯仓颉进程内实现 —— BITMAPINFOHEADER / BI_RGB / 24·32·8 位（调色板）·1-bit、自下而上与自上而下两种方向、4 字节行对齐；明确拒绝 RLE 压缩、BITFIELDS、OS/2 COREHEADER、16-bit。单测 `bmp_test.cj`，已实测通过。
+- **图像型扫描 PDF 支持**：新增 `pdfimage.cj`，字节级解析 `/Subtype /Image` XObject 与内联图像（BI…ID…EI），支持无滤镜 / DCTDecode / FlateDecode 与 DeviceGray / DeviceRGB、8-bit、Predictor 1/2；逐图失败只跳过该图、不中断整份 PDF。`MediaEngine.process` 改为「PdfText 抽不到文本 → PdfImage 抽图像 → 三路 OCR」，`ocrEngine` 记为 `pdf-image+<命中引擎>`。**边界**：不支持加密 PDF、ObjStm / XRef 流、CMYK、JPEG2000、CCITT、JBIG2、图像掩码；二进制流里出现 `EI` 字面量可能误判内联图像边界。
+- **CJK 印刷体 + 手写风格数字 OCR**：新增 `glyphbits.cj` / `cjk.cj` / `hand.cj` 与生成数据 `glyphdata.cj`；`scripts/gen-media-glyphs.py` 在**构建期**用 Windows GDI 字体渲染生成点阵（220 个常用汉字 × 8 字体原型、10 个手写风格数字 × 9 原型），运行时**不需要**字体 / GDI / Python / 外部进程。算法为墨迹包围盒对齐 + ±1 位移容差汉明距离 + 断笔合并分字；`MediaOcr.recognizeAutoWithEngine` **三路路由**（5×7 印刷体 → CJK → 手写），返回实际命中引擎名。跨字体验收夹具（未参与训练的粗体 / 字体）已实测通过。**诚实边界**：只覆盖字典内 220 汉字与 10 个手写风格数字，是**字体点阵**而非训练模型；真实草书、生僻字、强倾斜、复杂排版、图像型 PDF 的高精度识别仍需外部模型；阈值来自跨字体夹具，真实扫描件泛化未验证。
+- **渐进式 JPEG**：`jpeg.cj` 扩展 SOF2 —— 多 scan 全图系数缓冲、光谱选择、逐次逼近、EOB run、AC refinement；三份由 Windows GDI+ 验证过的最小合法夹具做单测，baseline 路径保持不变。仍拒绝算术编码、12 / 16-bit、CMYK / YCCK、无损 JPEG、DRI / restart、跨 scan 重定义量化表、AC 交错扫描（Ns>1）。
+- **验证码抗自动化加固**：`captcha.cj` 的 SVG 改为**纯 path 轮廓**（内嵌点阵字模 + 旋转 / 倾斜 + 干扰线 / 噪点），不再含 `<text>` / `aria-label` / `data-*` / 答案明文；challenge TTL、一次性、3 次尝试、单实例内存态不变。**E2E 测试通道**：仅当 `AMS_ENV` 非 production / prod **且** `AMS_E2E_CAPTCHA_HINT=true` 时，响应附加 `devHint` 字段；生产环境**恒不返回**（由 `CaptchaStore.devHintAllowed` 持有保证，SEC-001 强制 production 显式凭据）。`scripts/ci/e2e_captcha.py` 只读该字段、缺失即清晰报错、不解析 SVG、不打印答案；`verify-e2e.sh` / `bootstrap-e2e.sh` 启动自建服务时显式设 `AMS_ENV=ci` 与开关，并回归断言「不带验证码的注册必须被拒绝」。**不重新引入** sitecustomize / `.old` / fallback。
+- **npm audit 9 个漏洞已修复**：`vite ^6.0.7→^7.3.7`、`@vitejs/plugin-vue ^5.2.1→^6.0.10`、`vitest ^2.1.9→^5.1.0`、`vue-tsc ^2.2.0→^3.3.14`；`npm audit` 已为 **0 vulnerabilities**；`version 1.2.0` 与 scripts 未动。`AppSheet.vue` 因 vue-tsc 3 对模板 ref 不再计入使用而报的 TS6133 已用 `root.value` 守卫修正。
+- **前端技术栈**：Vue 3.5 + TypeScript + **Vite 7**（不再是 Vite 6）；README 技术栈表、环境要求与已知限制已同步，历史「9 个漏洞未修」记录保留不改。
+
+### 修复（媒体水印 · 版本对齐 · 部署启用 · 端到端验证）
+- **媒体水印 UTF-8 崩溃**：`MediaOcr.render` / `upperByte` 此前对水印文本里任意非 ASCII 码点（如分隔符 `·` U+00B7、中文）构造单字节 `String.fromUtf8([0xB7])`，抛 `Invalid utf8 byte sequence`，导致手动 / 自动水印绘制整体失败（`ocrStatus=3`、`watermarked` 为空）。现对 ≥0x80（及负值）码点直接跳过（返回空串 → 字模 `indexOf=-1` 跳过该字），水印恢复可用；缩略图与 OCR 不受影响。
+- **版本对齐（应用版本 → 1.2.1）**：`web/package.json` / `web/package-lock.json` / `packages/ams-server/src/main.cj`（`version` 启动日志）/ `deploy/compose/docker-compose.yml` 镜像 tag 统一升至 `ams:1.2.1`；部署文档（README / RUNBOOK / Dockerfile* / run-app.sh）示例 `docker build -t ams:1.2.1` 同步。Cangjie SDK / `cjc-version` / `SDK_VERSION` 的 `1.2.0` **未动**（属编译器基线，非应用版本）。
+- **部署期启用媒体 / OCR**：运行期 `AMS_MEDIA_ENABLED=true` + `AMS_OCR_CONSENT=true`（隐私显式同意双开关）已在 `deploy/compose/.env` 打开并热重启 `ams-server`（镜像已验证健康、健康检查 1s、DB 池 51 连、媒体开关门禁满足）。
+- **端到端验证**：新增测试账户 `e2e_ocrverify`（owner 角色，自动清理正则覆盖）用于功能验证；已完成「建主体 → 上传图片附件 → 自动 / 手动媒体处理 → 取 OCR / 缩略图 / 水印」全链路，并确认 5×7 / 220 汉字 CJK 点阵 / 手写数字三路 OCR 路由按设计工作（CJK 重文本退化为 `?` 属能力边界，非缺陷）。
 
 ## [1.2.0] — 2026-11-05（前端重构 + 首次部署向导 + 关于页）
 
@@ -323,7 +501,7 @@ Chrome 在合成层上禁用 ClearType 子像素抗锯齿、改走灰度 AA。
 - `docs/09-部署与发布指南.md`：新增「§6.1 可选 · 独立 nginx 前端容器」说明反向代理
   `/api` 到后端的多容器形态。
 - `README.md`：当前状态补充「前端已重做为 Apple 风格」说明。
-- ⚠️ **待同步**：`docs/07-视觉与交互设计规范.md` 为改版前的设计基线，本次视觉重构
+- ⚠️ **历史待办（2026-11-07 已收口）**：`docs/07-视觉与交互设计规范.md` 为改版前的设计基线，本次视觉重构
   未回写该文档；如需对外一致，应安排一次 `docs/07` 与实现的对齐刷新。
 
 ### 工程化 · 发布流程（二进制 Release + CHANGELOG 作为说明）
@@ -363,6 +541,25 @@ Chrome 在合成层上禁用 ClearType 子像素抗锯齿、改走灰度 AA。
     `${SDK_HOME}/third_party/llvm/bin` 追加到 `GITHUB_PATH`。
   - `publish-toolchain.sh`：打包前同样把 MinGW DLL 补齐到 SDK 源目录下所有 bin 目录，
     使工具链 Release 资产自带完整运行时。
+
+---
+
+## [1.1.0] — 2026-11-03（前端 Apple 风格改版 + 前端容器化部署）
+
+> 该版本对应 git tag `v1.1.0`（2026-11-03）。发布时未在本文件单独记录，现于 2026-11-07
+> 依据 git 事实补录：本地无 `v1.0.0` tag，对比基线取 v1.0.0 对应的 merge commit `ba43705`；
+> `git log ba43705..v1.1.0 --oneline` 得 `0289025`（feat）+ `5fc6368`（merge），
+> `git show --stat v1.1.0` 计 15 个文件变更、987 insertions / 726 deletions，均为前端与部署侧。
+
+- **前端 Apple 风格改版**：`web/src/styles/theme.css` 设计令牌重构为 Apple 中性灰阶 / 系统蓝；
+  登录 / 注册 / 找回口令三页重做为分屏 hero；`web/src/App.vue` 外壳打磨。
+- **前端容器化部署**：新增 `deploy/docker/Dockerfile.web`、`Dockerfile.web.prebuilt`、
+  `nginx.conf`（`/api` 反代后端 + SPA 回退）、`Dockerfile.merge`（前端并入后端镜像）；
+  同步更新 `deploy/README.md`、`deploy/compose/docker-compose.yml`、`docs/09`、`README.md`。
+- **修复**：`GlobalSearch` 遮罩只盖顶栏 —— 用 `<Teleport to="body">` 脱离 `.topbar` 的
+  `backdrop-filter` 包含块。
+- 该版本无后端功能改动。上述视觉重构与容器化在 `[1.2.0]` 段落另有更细的增量记录
+  （二次调校、动效层、字体替换、部署向导等）；本段仅补录 `v1.1.0` 相对 `v1.0.0` 的增量。
 
 ---
 
@@ -612,7 +809,8 @@ P0 需求全量落地（54 已实现 / 0 部分 / 0 未实现），并以单元�
 - 会话存储当前为内存实现，重启后需重新登录（生产需接 DB）
 
 
-[1.2.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v1.0.0...v1.2.0
+[1.2.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/a703201/Personal-Archive-Management-System/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/a703201/Personal-Archive-Management-System/releases/tag/v0.1.0
