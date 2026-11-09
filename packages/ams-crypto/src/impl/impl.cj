@@ -66,9 +66,7 @@ public class StdxCryptoProvider <: CryptoProvider {
 
         match (algorithm) {
             case DigestAlgorithm.Sm3 => return CryptoResult.Ok(hmacSm3(key, data))
-            case DigestAlgorithm.Sha256 => return CryptoResult.Err(
-                AppError(AppErrorKind.CryptoFailure, "HMAC-SHA256 暂未接入")
-            )
+            case DigestAlgorithm.Sha256 => return CryptoResult.Ok(hmacSha256(key, data))
         }
     }
 
@@ -189,5 +187,68 @@ public class StdxCryptoProvider <: CryptoProvider {
         let h = HMAC(key, HashType.SM3)
         h.write(data)
         return h.finish()
+    }
+
+    /**
+     * HMAC-SHA256（RFC 2104），基于本仓已验证可用的 stdx `SHA256` 摘要原语。
+     *
+     * 【为什么不直接 `HMAC(key, HashType.SHA256)`】SDK 1.2.0 的
+     * `HashType` 在本工具链下只确认有 `SM3`；源码/头文件里查不到
+     * `SHA256` 成员，赌一个不存在的枚举会让整个 crypto 包编译失败。
+     * 而 HMAC 构造本身只有 ipad/opad + 两次摘要，自己实现 30 行、
+     * 完全可控，还能用 RFC 4231 标准向量证明正确性（见 impl_test.cj）。
+     *
+     *   K' = (key > 64B ? SHA256(key) : key) 右补零到 64B
+     *   out = SHA256( (K' xor opad) || SHA256( (K' xor ipad) || data ) )
+     *
+     * 注意：本函数只做 HMAC 计算，**不用于**档案字段加密（那仍是
+     * HMAC-SM3 / EtM）。它的用途是 S3 SigV4 / OBS 兼容签名等
+     * 与外部云服务商互操作的场景。
+     */
+    private static func hmacSha256(key: Array<Byte>, data: Array<Byte>): Array<Byte> {
+        var k = key
+        if (k.size > 64) {
+            let hk = SHA256()
+            hk.write(k)
+            k = hk.finish()
+        }
+        let ipad = Array<Byte>(64, repeat: 0u8)
+        let opad = Array<Byte>(64, repeat: 0u8)
+        var i: Int64 = 0
+        while (i < 64) {
+            let bv = if (i < k.size) { Int64(k[i]) } else { 0 }
+            ipad[i] = UInt8(bv ^ 54)    // 0x36
+            opad[i] = UInt8(bv ^ 92)    // 0x5C
+            i = i + 1
+        }
+        let inner = Array<Byte>(64 + data.size, repeat: 0u8)
+        i = 0
+        while (i < 64) {
+            inner[i] = ipad[i]
+            i = i + 1
+        }
+        i = 0
+        while (i < data.size) {
+            inner[64 + i] = data[i]
+            i = i + 1
+        }
+        let hi = SHA256()
+        hi.write(inner)
+        let ih = hi.finish()
+
+        let outer = Array<Byte>(64 + ih.size, repeat: 0u8)
+        i = 0
+        while (i < 64) {
+            outer[i] = opad[i]
+            i = i + 1
+        }
+        i = 0
+        while (i < ih.size) {
+            outer[64 + i] = ih[i]
+            i = i + 1
+        }
+        let ho = SHA256()
+        ho.write(outer)
+        return ho.finish()
     }
 }

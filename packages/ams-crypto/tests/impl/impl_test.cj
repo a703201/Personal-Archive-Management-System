@@ -245,3 +245,88 @@ public class CryptoImplTest {
         @Assert(this.provider.constantTimeEquals("abc".toArray(), "ab".toArray()), false)
     }
 }
+
+// ============================================================
+// HMAC-SHA256（RFC 4231 标准向量）
+//
+// 用途：S3 SigV4 / 各家 OBS 兼容签名，与档案字段加密用的 HMAC-SM3 分离。
+// 只认标准向量，不做「非空即通过」的弱断言。
+// ============================================================
+@Test
+public class HmacSha256Test {
+    private let provider = StdxCryptoProvider()
+
+    private func hmacHex(key: Array<Byte>, data: Array<Byte>): String {
+        match (this.provider.hmac(key, data, DigestAlgorithm.Sha256)) {
+            case CryptoResult.Ok(m) => return toHexString(m)
+            case CryptoResult.Err(_) => return "ERR"
+        }
+    }
+
+    /** RFC 4231 Test Case 1：20 × 0x0b，"Hi There" */
+    @TestCase
+    public func testRfc4231Case1() {
+        let key = Array<Byte>(20, repeat: 0x0Bu8)
+        @Assert(this.hmacHex(key, "Hi There".toArray()),
+            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7")
+    }
+
+    /** RFC 4231 Test Case 2：ASCII key "Jefe" */
+    @TestCase
+    public func testRfc4231Case2() {
+        @Assert(this.hmacHex("Jefe".toArray(), "what do ya want for nothing?".toArray()),
+            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843")
+    }
+
+    /** RFC 4231 Test Case 6：key 131 > 64 字节，必须先 SHA256(key) */
+    @TestCase
+    public func testRfc4231Case6LongKey() {
+        let key = Array<Byte>(131, repeat: 0xAAu8)
+        @Assert(this.hmacHex(key,
+            "Test Using Larger Than Block-Size Key - Hash Key First".toArray()),
+            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54")
+    }
+
+    /** RFC 4231 Test Case 7：长 key + 长 data */
+    @TestCase
+    public func testRfc4231Case7LongKeyAndData() {
+        let key = Array<Byte>(131, repeat: 0xAAu8)
+        let data = "This is a test using a larger than block-size key and a larger than " +
+                   "block-size data. The key needs to be hashed before being used by the " +
+                   "HMAC algorithm."
+        @Assert(this.hmacHex(key, data.toArray()),
+            "9b09ffa71b942fcb27635fbcd5b0e944bfdc63644f0713938a7f51535c3a35e2")
+    }
+
+    @TestCase
+    public func testOutputLengthIs32() {
+        match (this.provider.hmac("k".toArray(), "m".toArray(), DigestAlgorithm.Sha256)) {
+            case CryptoResult.Ok(m) => @Assert(m.size, 32)
+            case CryptoResult.Err(_) => @Assert(true, false)
+        }
+    }
+
+    @TestCase
+    public func testEmptyKeyRejected() {
+        match (this.provider.hmac(Array<Byte>(0, repeat: 0u8), "x".toArray(),
+                                  DigestAlgorithm.Sha256)) {
+            case CryptoResult.Ok(_) => @Assert(true, false)
+            case CryptoResult.Err(_) => @Assert(true, true)
+        }
+    }
+
+    /** 算法隔离：Sha256 与 Sm3 摘要不同，HMAC 结果也必须不同 */
+    @TestCase
+    public func testSha256DoesNotChangeSm3() {
+        let key = "key".toArray()
+        let data = "data".toArray()
+        @Assert(this.hmacHex(key, data) != this.hmacSm3Hex(key, data), true)
+    }
+
+    private func hmacSm3Hex(key: Array<Byte>, data: Array<Byte>): String {
+        match (this.provider.hmac(key, data, DigestAlgorithm.Sm3)) {
+            case CryptoResult.Ok(m) => return toHexString(m)
+            case CryptoResult.Err(_) => return "ERR"
+        }
+    }
+}
