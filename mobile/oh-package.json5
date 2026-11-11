@@ -1,0 +1,9 @@
+{
+  "modelVersion": "26.0.0",
+  "name": "ams-mobile",
+  "version": "1.0.0",
+  "description": "AMS 移动端（鸿蒙 NEXT）",
+  "dependencies": {},
+  "devDependencies": {},
+  "dynamicDependencies": {}
+}
