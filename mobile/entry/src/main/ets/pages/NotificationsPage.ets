@@ -1,5 +1,6 @@
 import { ApiClient, NotificationsData, NotificationItem } from '../common/api/ApiClient';
-import { C, F } from '../common/theme/Theme';
+import { C, F, applyTheme } from '../common/theme/Theme';
+import { t } from '../common/theme/I18n';
 import { formatDateTime } from '../common/utils/Format';
 import { Logger } from '../common/utils/Logger';
 import { DataRefresh } from '../common/store/DataRefresh';
@@ -7,6 +8,7 @@ import { DataRefresh } from '../common/store/DataRefresh';
 @Component
 export struct NotificationsPage {
   @StorageLink('ams_data_version') @Watch('onDataChanged') dataVersion: number = 0;
+  @StorageLink('ams_theme_rev') @Watch('onThemeRev') themeRev: number = 0;
   @State items: NotificationItem[] = [];
   @State onlyUnread: boolean = false;
   @State loading: boolean = false;
@@ -16,6 +18,10 @@ export struct NotificationsPage {
 
   aboutToAppear(): void {
     this.load();
+  }
+
+  onThemeRev(): void {
+    applyTheme();
   }
 
   onDataChanged(): void {
@@ -84,7 +90,7 @@ export struct NotificationsPage {
     NavDestination() {
       Column() {
         Row() {
-          Text('全部')
+          Text(t('common.all'))
             .fontSize(F.caption)
             .fontColor(!this.onlyUnread ? '#FFFFFF' : C.ink2)
             .padding({ left: 16, right: 16, top: 8, bottom: 8 })
@@ -92,14 +98,14 @@ export struct NotificationsPage {
             .backgroundColor(!this.onlyUnread ? C.accent : C.surface)
             .margin({ right: 8 })
             .onClick(() => { this.switchFilter(false); })
-          Text('仅未读')
+          Text(t('notify.unreadOnly'))
             .fontSize(F.caption)
             .fontColor(this.onlyUnread ? '#FFFFFF' : C.ink2)
             .padding({ left: 16, right: 16, top: 8, bottom: 8 })
             .borderRadius(16)
             .backgroundColor(this.onlyUnread ? C.accent : C.surface)
           Blank()
-          Text('全部已读')
+          Text(t('notify.markAllRead'))
             .fontSize(F.caption)
             .fontColor(C.accent)
             .onClick(() => { this.markAllRead(); })
@@ -117,7 +123,7 @@ export struct NotificationsPage {
         if (this.loading && this.items.length === 0) {
           LoadingProgress().width(28).height(28).margin({ top: 60 })
         } else if (this.items.length === 0) {
-          Text('暂无通知')
+          Text(t('notify.empty'))
             .fontSize(F.body)
             .fontColor(C.ink3)
             .margin({ top: 60 })
@@ -142,7 +148,7 @@ export struct NotificationsPage {
                         .maxLines(1)
                         .textOverflow({ overflow: TextOverflow.Ellipsis })
                       if (this.isImportant(n)) {
-                        Text('重要')
+                        Text(t('notify.important'))
                           .fontSize(11)
                           .fontColor(C.danger)
                           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
@@ -163,7 +169,7 @@ export struct NotificationsPage {
                         .fontColor(C.ink3)
                         .layoutWeight(1)
                       if (this.isUnread(n)) {
-                        Text(this.busyId === n.id ? '处理中…' : '标为已读')
+                        Text(this.busyId === n.id ? t('common.processing') : t('notify.markRead'))
                           .fontSize(F.caption)
                           .fontColor(C.accent)
                           .onClick(() => { this.markRead(n); })
@@ -191,7 +197,7 @@ export struct NotificationsPage {
       .height('100%')
       .backgroundColor(C.bg)
     }
-    .title('通知')
+    .title(t('notify.title'))
     .backgroundColor(C.bg)
   }
 }

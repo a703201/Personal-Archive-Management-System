@@ -1,6 +1,7 @@
 import { ApiClient, OverviewData, SubjectsData, RecentItem } from '../common/api/ApiClient';
-import { C, F } from '../common/theme/Theme';
-import { CATEGORIES, CategoryRef, ArchiveItem, categoryName, Subject } from '../common/models/Models';
+import { C, F, applyTheme } from '../common/theme/Theme';
+import { t, i18nVars, categoryNameI18n } from '../common/theme/I18n';
+import { CATEGORIES, CategoryRef, ArchiveItem, Subject } from '../common/models/Models';
 import { formatDate } from '../common/utils/Format';
 import { Logger } from '../common/utils/Logger';
 
@@ -8,6 +9,7 @@ import { Logger } from '../common/utils/Logger';
 export struct HomePage {
   @Consume('navPathStack') navPathStack: NavPathStack;
   @StorageLink('ams_data_version') @Watch('onDataChanged') dataVersion: number = 0;
+  @StorageLink('ams_theme_rev') @Watch('onThemeRev') themeRev: number = 0;
   @State subjects: Subject[] = [];
   @State overview: OverviewData = { total: 0, categories: [], recent: [], unreadNotifications: 0 };
   @State loading: boolean = false;
@@ -16,6 +18,10 @@ export struct HomePage {
 
   aboutToAppear(): void {
     this.load();
+  }
+
+  onThemeRev(): void {
+    applyTheme();
   }
 
   onDataChanged(): void {
@@ -80,12 +86,12 @@ export struct HomePage {
     Column() {
       Row() {
         Column() {
-          Text('档案库')
+          Text(t('common.archive'))
             .fontSize(F.display)
             .fontWeight(700)
             .fontColor(C.ink)
             .letterSpacing(-0.5)
-          Text(this.subjects.length > 0 ? `已管理 ${this.subjects.length} 位主体` : '个人档案随身管理')
+          Text(this.subjects.length > 0 ? t('home.managed', i18nVars([['n', this.subjects.length.toString()]])) : t('common.tagline'))
             .fontSize(F.caption)
             .fontColor(C.ink3)
             .margin({ top: 4 })
@@ -94,7 +100,7 @@ export struct HomePage {
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
         .alignSelf(ItemAlign.Center)
-        Text('设置')
+        Text(t('settings.title'))
           .fontSize(F.body)
           .fontColor(C.accent)
           .padding({ left: 12, right: 4, top: 8, bottom: 8 })
@@ -102,8 +108,8 @@ export struct HomePage {
       }
       .padding({ left: F.pad, right: F.pad, top: 28, bottom: 16 })
 
-      Row() {
-        Text('搜索档案、证件、条目…')
+        Row() {
+        Text(t('common.searchPh'))
           .fontSize(F.body)
           .fontColor(C.ink3)
           .layoutWeight(1)
@@ -119,7 +125,7 @@ export struct HomePage {
       if (this.errorMsg.length > 0) {
         Row() {
           Text(this.errorMsg).fontSize(F.caption).fontColor(C.danger).layoutWeight(1)
-          Text('重试').fontSize(F.caption).fontColor(C.accent)
+          Text(t('common.retry')).fontSize(F.caption).fontColor(C.accent)
             .onClick(() => { this.load(); })
         }
         .padding({ left: F.pad, right: F.pad, bottom: 8 })
@@ -131,7 +137,7 @@ export struct HomePage {
             // 概览卡
             Row() {
               Column() {
-                Text('档案条目')
+                Text(t('home.items'))
                   .fontSize(F.caption)
                   .fontColor(C.ink3)
                 Text(this.overview.total.toString())
@@ -142,7 +148,7 @@ export struct HomePage {
               }
               .layoutWeight(1)
               Column() {
-                Text('未读提醒')
+                Text(t('home.unread'))
                   .fontSize(F.caption)
                   .fontColor(C.ink3)
                 Text(this.overview.unreadNotifications.toString())
@@ -150,7 +156,7 @@ export struct HomePage {
                   .fontWeight(700)
                   .fontColor(this.overview.unreadNotifications > 0 ? C.warn : C.ink)
                   .margin({ top: 4 })
-                Text('点击查看 ›')
+                Text(t('home.tapView'))
                   .fontSize(11)
                   .fontColor(C.accent)
                   .margin({ top: 2 })
@@ -158,7 +164,7 @@ export struct HomePage {
               .layoutWeight(1)
               .onClick(() => { this.goNotifications(); })
               Column() {
-                Text('主体')
+                Text(t('home.subjects'))
                   .fontSize(F.caption)
                   .fontColor(C.ink3)
                 Text(this.subjects.length.toString())
@@ -176,7 +182,7 @@ export struct HomePage {
             .margin({ bottom: 20 })
 
             if (this.overview.recent.length > 0) {
-              Text('最近更新')
+              Text(t('home.recent'))
                 .width('100%')
                 .textAlign(TextAlign.Start)
                 .fontSize(F.body)
@@ -192,7 +198,7 @@ export struct HomePage {
                         .fontColor(C.ink)
                         .maxLines(1)
                         .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      Text(categoryName(rec.category) + ' · ' + formatDate(rec.updatedAt))
+                      Text(categoryNameI18n(rec.category) + ' · ' + formatDate(rec.updatedAt))
                         .fontSize(F.caption)
                         .fontColor(C.ink3)
                         .margin({ top: 4 })
@@ -213,7 +219,7 @@ export struct HomePage {
               .margin({ bottom: 20 })
             }
 
-            Text('分类')
+            Text(t('common.category'))
               .width('100%')
               .textAlign(TextAlign.Start)
               .fontSize(F.body)
@@ -261,7 +267,7 @@ export struct HomePage {
         .backgroundColor(C.accentSoft)
         .textAlign(TextAlign.Center)
       Column() {
-        Text(cat.name)
+        Text(categoryNameI18n(cat.code))
           // 明确占满父宽，textOverflow 才按可用宽度省略；配合略小的字号，
           // 让「个人基本信息」这类 6 字名称不再被截成「个人基本…」。
           .width('100%')
@@ -270,7 +276,7 @@ export struct HomePage {
           .fontColor(C.ink)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.countOf(cat.code) + ' 条')
+        Text(t('home.count', i18nVars([['n', this.countOf(cat.code).toString()]])))
           .fontSize(F.caption)
           .fontColor(C.ink3)
           .margin({ top: 6 })

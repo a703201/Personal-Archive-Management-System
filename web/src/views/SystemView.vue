@@ -17,7 +17,7 @@ import { useToast } from '../composables/useToast'
 
 const toast = useToast()
 
-type TabKey = 'health' | 'config' | 'jobs' | 'keys' | 'backup' | 'deployment'
+type TabKey = 'health' | 'config' | 'jobs' | 'keys' | 'backup' | 'deployment' | 'storage'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'health', label: tr('viewsSystemView.9ac566', '健康看板') },
@@ -26,6 +26,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'keys', label: tr('viewsSystemView.25c51c', '密钥管理') },
   { key: 'backup', label: tr('viewsSystemView.823396', '备份恢复') },
   { key: 'deployment', label: tr('viewsSystemView.deploy', '部署配置') },
+  { key: 'storage', label: tr('SystemView.storageTab', '存储平台') },
 ]
 
 const tab = ref<TabKey>('health')
@@ -235,7 +236,7 @@ async function changeKeyStatus(k: KeyRow, kind: 'retire' | 'revoke'): Promise<vo
   keyBusy.value = true
   try {
     await api(`/admin/keys/${k.id}/${kind}`, { method: 'POST', body: {} })
-    toast.success(kind === 'retire' ? '已退役' : tr('viewsSystemView.7fdb5a', '已吊销'))
+    toast.success(kind === 'retire' ? tr('SystemView.x5b109a', '已退役') : tr('viewsSystemView.7fdb5a', '已吊销'))
     await loadKeys()
   } catch (e) {
     toast.error((e as Error).message)
@@ -329,6 +330,11 @@ async function loadAll(): Promise<void> {
   } catch {
     toast.warning(tr('SystemView.deployLoadFailed', '部署配置加载失败'))
   }
+  try {
+    await loadStorage()
+  } catch {
+    toast.warning(tr('SystemView.storageLoadFailed', '存储配置加载失败'))
+  }
   loading.value = false
 }
 
@@ -400,6 +406,127 @@ async function testDeploymentMail(): Promise<void> {
   } catch (e) { toast.error((e as Error).message) } finally { depBusy.value = false }
 }
 
+// ---------------------------------------------------------------
+// 存储平台（Q2 方案 A · /api/admin/storage/*）
+//   GET  /api/admin/storage/providers  8 个可选平台 + 当前生效平台
+//   GET  /api/admin/storage/config     当前配置（凭据脱敏回显）
+//   PUT  /api/admin/storage/config     全量写 deployment.env，重启生效；
+//        库内已有附件时改 provider/endpoint/bucket 由后端以 Conflict 拒绝。
+// ---------------------------------------------------------------
+interface StorageProviderOption {
+  code: string
+  name: string
+  kind: string
+  signature: string
+  endpointTemplate: string
+  regionHint: string
+  pathStyle: boolean
+  virtualHost: boolean
+  needsCredentials: boolean
+  bucketRule: string
+  notes: string
+  docsUrl: string
+  ready: boolean
+}
+interface StorageProvidersResp {
+  current: string
+  configured: string
+  requiresRestart: boolean
+  transportReady: boolean
+  providers: StorageProviderOption[]
+}
+interface StorageConfigResp {
+  provider: string
+  configuredProvider: string
+  requiresRestart: boolean
+  endpoint: string
+  bucket: string
+  region: string
+  pathStyle: boolean
+  accessKey: string
+  secretKey: string
+  transportReady: boolean
+}
+const storageProviders = ref<StorageProviderOption[]>([])
+const storageCurrent = ref('')
+const storageRestart = ref(false)
+const storageTransportReady = ref(false)
+const storageMask = ref({ accessKey: '', secretKey: '' })
+const storageBusy = ref(false)
+const storageForm = ref({
+  provider: '',
+  endpoint: '',
+  bucket: '',
+  region: '',
+  accessKey: '',
+  secretKey: '',
+  pathStyle: true,
+})
+
+// 已有附件 → 锁定定位三元组。数据源是健康看板的 storageFiles 快照；
+// 权威判定在服务端（PUT 的 countAll() > 0 → Conflict），此处只做前置提示。
+const attachmentCount = computed(() => Number(health.value?.storageFiles ?? 0))
+const locatorLocked = computed(() => attachmentCount.value > 0)
+const selectedProvider = computed(
+  () => storageProviders.value.find((p) => p.code === storageForm.value.provider) ?? null,
+)
+
+async function loadStorage(): Promise<void> {
+  const [list, cfg] = await Promise.all([
+    api<StorageProvidersResp>('/admin/storage/providers'),
+    api<StorageConfigResp>('/admin/storage/config'),
+  ])
+  storageProviders.value = list.providers ?? []
+  storageCurrent.value = cfg.provider || list.current
+  storageRestart.value = Boolean(cfg.requiresRestart || list.requiresRestart)
+  storageTransportReady.value = Boolean(cfg.transportReady)
+  // 后端只给脱敏值，绝不预填进表单（预填会把 *** 写回配置文件）。
+  storageMask.value = { accessKey: cfg.accessKey ?? '', secretKey: cfg.secretKey ?? '' }
+  storageForm.value = {
+    provider: cfg.provider || list.current,
+    endpoint: cfg.endpoint ?? '',
+    bucket: cfg.bucket ?? '',
+    region: cfg.region ?? '',
+    accessKey: '',
+    secretKey: '',
+    pathStyle: Boolean(cfg.pathStyle),
+  }
+}
+
+async function saveStorage(): Promise<void> {
+  const f = storageForm.value
+  if (f.provider !== 'local' && (!f.endpoint.trim() || !f.bucket.trim())) {
+    toast.warning(tr('SystemView.storageNeedEndpoint', '对象存储平台需要填写 Endpoint 与 Bucket'))
+    return
+  }
+  storageBusy.value = true
+  try {
+    await api('/admin/storage/config', {
+      method: 'PUT',
+      body: {
+        provider: f.provider,
+        endpoint: f.endpoint.trim(),
+        bucket: f.bucket.trim(),
+        region: f.region.trim(),
+        accessKey: f.accessKey,
+        secretKey: f.secretKey,
+        pathStyle: String(f.pathStyle),
+      },
+    })
+    toast.success(tr('SystemView.storageSaved', '存储配置已保存，重启后端实例后生效'))
+    await loadStorage()
+  } catch (e) {
+    const err = e as Error & { status?: number }
+    if (err.status === 409) {
+      toast.error(err.message + ' ' + tr('SystemView.storageConflictHint', '请先完成数据迁移（见 docs/16-对象存储迁移方案.md）后重试。'))
+    } else {
+      toast.error(err.message)
+    }
+  } finally {
+    storageBusy.value = false
+  }
+}
+
 onMounted(loadAll)
 
 function fmtTime(ms: number | string | undefined): string {
@@ -461,7 +588,7 @@ function fmtTime(ms: number | string | undefined): string {
         <div class="card metric">
           <div class="metric__label">{{ tr('SystemView.b0eca7', '附件存储') }}</div>
           <div class="metric__value">{{ fmtBytes(health.storageBytes) }}</div>
-          <div class="metric__sub">{{ health.storageFiles }} 个文件</div>
+          <div class="metric__sub">{{ tr('SystemView.filesMetric', '{n} 个文件', { n: String(health.storageFiles) }) }}</div>
         </div>
       </div>
 
@@ -520,7 +647,7 @@ function fmtTime(ms: number | string | undefined): string {
               :disabled="runningJob === j.name"
               @click="runJob(j)"
             >
-              {{ runningJob === j.name ? '执行中…' : '立即执行' }}
+              {{ runningJob === j.name ? tr('SystemView.running', '执行中…') : tr('SystemView.runNow', '立即执行') }}
             </button>
           </div>
         </div>
@@ -546,7 +673,7 @@ function fmtTime(ms: number | string | undefined): string {
                 {{ (KEY_STATUS[Number(k.status)] ?? KEY_STATUS[1]).label }}
               </span>
             </div>
-            <div class="rowitem__sub">{{ tr('SystemView.7c49c8', '用途') }} {{ k.purpose }} {{ tr('SystemView.1fdf0d', '·') }} {{ k.note || '无备注' }}</div>
+            <div class="rowitem__sub">{{ tr('SystemView.7c49c8', '用途') }} {{ k.purpose }} {{ tr('SystemView.1fdf0d', '·') }} {{ k.note || tr('SystemView.noNote', '无备注') }}</div>
             <div class="rowitem__value">{{ tr('SystemView.f3b01f', '创建于') }} {{ fmtTime(k.createdAt) }}</div>
           </div>
           <div class="rowitem__actions" v-if="Number(k.status) === 1">
@@ -637,6 +764,79 @@ function fmtTime(ms: number | string | undefined): string {
         </div>
       </div>
     </template>
+
+    <!-- 存储平台（Q2 方案 A） -->
+    <template v-else-if="tab === 'storage'">
+      <div class="card deploy">
+        <h2 class="deploy__title">{{ tr('SystemView.storageTitle', '存储平台配置') }}</h2>
+        <p class="hint">{{ tr('SystemView.storageDesc', '选择附件存储后端。配置写入 deployment.env，保存后需重启服务生效；凭据仅脱敏回显。') }}</p>
+
+        <p v-if="storageRestart" class="storage-note storage-note--warn">
+          {{ tr('SystemView.storageRestart', '配置已写入，需重启后端实例后生效。') }}
+        </p>
+
+        <div class="storage-meta">
+          <span>{{ tr('SystemView.storageCurrent', '当前生效平台') }}：<code>{{ storageCurrent }}</code></span>
+          <span :class="storageTransportReady ? 'st st--ok' : 'st st--warn'">
+            {{ storageTransportReady ? tr('SystemView.storageTransportReady', '传输层已就绪') : tr('SystemView.storageTransportNotReady', '传输层未就绪') }}
+          </span>
+        </div>
+
+        <p v-if="locatorLocked" class="storage-note storage-note--lock">
+          {{ tr('SystemView.storageLocked').replace('{n}', String(attachmentCount)) }}
+        </p>
+
+        <div class="deploy__grid">
+          <label class="field">
+            <span class="field__label">{{ tr('SystemView.storageProvider', '存储平台') }}</span>
+            <select v-model="storageForm.provider" class="field-control" :disabled="locatorLocked">
+              <option v-for="p in storageProviders" :key="p.code" :value="p.code">{{ p.name }}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field__label">{{ tr('SystemView.storageEndpoint', 'Endpoint') }}</span>
+            <input v-model="storageForm.endpoint" class="field-control" type="text" :disabled="locatorLocked" />
+          </label>
+          <label class="field">
+            <span class="field__label">{{ tr('SystemView.storageBucket', 'Bucket') }}</span>
+            <input v-model="storageForm.bucket" class="field-control" type="text" :disabled="locatorLocked" />
+          </label>
+          <label class="field">
+            <span class="field__label">{{ tr('SystemView.storageRegion', 'Region') }}</span>
+            <input v-model="storageForm.region" class="field-control" type="text" />
+          </label>
+          <label class="field">
+            <span class="field__label">{{ tr('SystemView.storageAccessKey', 'Access Key') }}</span>
+            <input v-model="storageForm.accessKey" class="field-control" type="password" autocomplete="off" :placeholder="storageMask.accessKey || tr('SystemView.storageNotSet', '未设置')" />
+          </label>
+          <label class="field">
+            <span class="field__label">{{ tr('SystemView.storageSecretKey', 'Secret Key') }}</span>
+            <input v-model="storageForm.secretKey" class="field-control" type="password" autocomplete="off" :placeholder="storageMask.secretKey || tr('SystemView.storageNotSet', '未设置')" />
+          </label>
+          <label class="field">
+            <span class="field__label">{{ tr('SystemView.storagePathStyle', '寻址风格') }}</span>
+            <select v-model="storageForm.pathStyle" class="field-control">
+              <option :value="true">{{ tr('SystemView.storagePathStyleOn', 'Path-style') }}</option>
+              <option :value="false">{{ tr('SystemView.storagePathStyleOff', 'Virtual-host') }}</option>
+            </select>
+          </label>
+        </div>
+
+        <p class="hint">{{ tr('SystemView.storageCredentialHint', '凭据脱敏回显，留空表示本次不重写（回退环境变量注入）。') }}</p>
+
+        <div v-if="selectedProvider" class="storage-provider-hint">
+          <div class="deploy__title">{{ tr('SystemView.storageHintTitle', '平台配置提示') }}</div>
+          <div class="hint">Endpoint 模板：<code>{{ selectedProvider.endpointTemplate || '—' }}</code></div>
+          <div class="hint">Region 建议：<code>{{ selectedProvider.regionHint || '—' }}</code> · 签名：<code>{{ selectedProvider.signature }}</code></div>
+          <div class="hint">桶命名：{{ selectedProvider.bucketRule }}</div>
+          <div class="hint">{{ selectedProvider.notes }}</div>
+        </div>
+
+        <div class="deploy__actions">
+          <button class="btn-primary" type="button" :disabled="storageBusy" @click="saveStorage">{{ tr('SystemView.storageSave', '保存') }}</button>
+        </div>
+      </div>
+    </template>
   </section>
 
   <!-- 配置项编辑浮层（放在 v-if/v-else-if 链之外：
@@ -676,7 +876,7 @@ function fmtTime(ms: number | string | undefined): string {
         取消
       </button>
       <button class="btn-primary" type="button" :disabled="savingSetting" @click="saveSetting">
-        {{ savingSetting ? '保存中…' : '保存' }}
+        {{ savingSetting ? tr('SystemView.saving', '保存中…') : tr('SystemView.save', '保存') }}
       </button>
     </div>
   </AppSheet>
@@ -878,4 +1078,38 @@ function fmtTime(ms: number | string | undefined): string {
 }
 .deploy__switch input { width: 18px; height: 18px; accent-color: var(--accent); }
 @media (max-width: 639px) { .deploy__grid { grid-template-columns: 1fr; } }
+
+/* 存储平台面板（与部署配置共用白卡 / 胶囊按钮 / 单一强调蓝，零投影） */
+.storage-note {
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--g3-sm, 12px);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+}
+.storage-note--warn {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.storage-note--lock {
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.storage-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin-top: var(--sp-3);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
+}
+.storage-provider-hint {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--bg-hover);
+  border-radius: var(--g3-sm, 12px);
+  display: grid;
+  gap: 4px;
+}
 </style>

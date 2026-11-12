@@ -7,7 +7,7 @@
 [![Backend](https://img.shields.io/badge/backend-Cangjie-1f6feb)](./packages)
 [![Frontend](https://img.shields.io/badge/frontend-Vue%203%20%2B%20TS-42b883)](./web)
 [![Database](https://img.shields.io/badge/database-openGauss-orange)](./db/migrations)
-[![Tests](https://img.shields.io/badge/tests-381%20passed-brightgreen)](./scripts/test.sh)
+[![Tests](https://img.shields.io/badge/tests-523%20passed-brightgreen)](./scripts/test.sh)
 
 ---
 
@@ -51,11 +51,11 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 
 | 指标 | 数值 |
 | --- | --- |
-| 后端源码 | 130 个 `.cj`，43,693 行（src 38,248 + tests 5,445） |
-| 前端源码 | 40 个源文件（19 视图 / 7 组件 / 4 composables / 4 i18n / 2 样式 / api、router、config、入口等） |
-| 数据库迁移 | 23 个 SQL（编号 001–022，`007` 重号两个文件：`007_p1_foundation.sql` / `007_scheduler_ops.sql`；约 47 张表） |
-| HTTP 路由 | 185 条声明（25 个 routes 文件、26 处 `Routes.register`）；OpenAPI 规范另按 156 个 method+path 统计，口径不同 |
-| 单元测试 | **381 passed / 0 failed**（后端全量 `test.sh`）；前端 typecheck / test / build 全绿 |
+| 后端源码 | 135 个 `.cj` / 48,091 行；测试 43 个 `.cj` / 9,027 行 |
+| 前端源码 | 47 个源文件（21 视图 / 7 组件 / composables、i18n、样式、api、router、config、入口等） |
+| 数据库迁移 | 26 个 SQL（编号 001–025，`007` 重号两个文件：`007_p1_foundation.sql` / `007_scheduler_ops.sql`；约 47 张表） |
+| HTTP 路由 | 206 条声明（29 个 routes 文件）；OpenAPI 规范 206 个 operation / 160 个 path，静态门禁逐条断言 206/206 覆盖 |
+| 单元测试 | **523 passed / 0 failed**（后端全量 `test.sh`）；前端 typecheck / 16 例单测 / build 全绿 |
 
 > 门禁：`bash scripts/build.sh` → 0 error、`bash scripts/test.sh` → 0 fail、`cd web && npm test && npm run build` → 0 error；
 > 另有无需数据库的静态门禁 `python3 scripts/ci/check-consistency.py`（CI 必跑）。
@@ -250,7 +250,7 @@ bash scripts/build.sh               # 首次会自动编译 opengauss 驱动，�
 启动成功日志形如：
 
 ```json
-{"action":"server.ready","routes":"185","startedAt":"…","webDir":"web"}
+{"action":"server.ready","routes":"206","startedAt":"…","webDir":"web"}
 ```
 
 ### 4. 生产模式：一个进程、一个端口 ★
@@ -395,7 +395,7 @@ Archive_manager/
 | 11 | [前端技术栈选型分析](./docs/11-前端技术栈选型分析.md) | 为什么是 Vue 3？备选方案为何被否？ |
 | 12 | [家庭成员邀请（设计 + 方案评估）](./docs/12-家庭成员邀请.md) | 家庭协作安全设计（10 原则 / 14 威胁 / API 草案）与授权粒度·审批流·分批取舍（含推荐结论） |
 | 13 | [信创与国家密码标准参考](./docs/13-信创与国家密码标准参考.md) | 国密 GM/T·GB/T 对齐、已落地/未实现能力、信创适配现状 |
-| 14 | [对外 API 规范（OpenAPI）](./docs/14-对外API规范-OpenAPI.yaml) | 156 个 method+path 的 OpenAPI 3.1 基线（核心 schema 已补）；与后端 185 条路由声明为不同口径 |
+| 14 | [对外 API 规范（OpenAPI）](./docs/14-对外API规范-OpenAPI.yaml) | 206 个 operation / 160 个 path 的 OpenAPI 3.1 基线；与后端 206 条路由声明一一对应，静态门禁强制 206/206 覆盖 |
 | 15 | [架构演进路线（方案候选）](./docs/15-架构演进路线-方案候选.md) | 提炼通用框架 / SaaS·微服务化的 A/B/C 候选方案（已拍板，见 §三） |
 
 变更记录见 [CHANGELOG.md](./CHANGELOG.md)。

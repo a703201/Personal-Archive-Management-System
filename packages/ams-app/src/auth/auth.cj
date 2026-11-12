@@ -23,6 +23,7 @@
 package ams.app.auth
 
 import std.collection.*
+import std.sync.*
 
 import ams.app.audit.*
 import ams.crypto.provider.*
@@ -341,13 +342,13 @@ public class AuthService {
      * 避免引入额外的持久化表；进程重启后计数归零（可接受）。
      */
     private func progressiveDelay(username: String): Int64 {
-        // 用用户名的稳定哈希做键（不存口令，只存用户名哈希）
-        let key = AuthService.failureKey(username)
-        // 注意：仓颉 HashMap 的 `[]` 在键不存在时抛 NoneValueException，
-        // 故这里用 get() 取默认值。
-        let n = AuthService.failureCounts.get(key) ?? 0
-        AuthService.failureCounts[key] = n + 1
-        let delay = this.config.delayBaseMillis * (n + 1)
+        // 用用户名的稳定哈希做键（不存口令，只存用户名哈希）。
+        // 【并发安全】计数器的读写全部经 Mutex 串行化，见 LoginFailureCounter；
+        // 此前直接读写无锁 HashMap，并发登录会破坏哈希桶结构导致 get() 死循环，
+        // 占死工作线程并连锁拖垮整个 stdx 线程池（2026-11-11 全局 dead lock）。
+        let n = LoginFailureCounter.increment(
+            AuthService.failureKey(username), Times.nowMillis())
+        let delay = this.config.delayBaseMillis * n
         return if (delay > this.config.delayMaxMillis) { this.config.delayMaxMillis } else { delay }
     }
 
@@ -370,7 +371,7 @@ public class AuthService {
      * 该查询在「口令校验之前」由接口层调用，因此未命中时零回归。
      */
     public func captchaRequired(username: String): Bool {
-        let n = AuthService.failureCounts.get(AuthService.failureKey(username)) ?? 0
+        let n = LoginFailureCounter.get(AuthService.failureKey(username))
         return n >= this.config.captchaTriggerFailures
     }
 
@@ -378,16 +379,8 @@ public class AuthService {
      * 登录成功后清零连续失败计数（使「连续」语义正确）。
      */
     private func resetFailureCount(username: String): Unit {
-        AuthService.failureCounts.remove(AuthService.failureKey(username))
+        LoginFailureCounter.reset(AuthService.failureKey(username))
     }
-
-    /**
-     * 登录失败计数（按用户名哈希）。
-     *
-     * 用 HashMap 而非并发容器：写入量极低（登录失败路径），
-     * 且并发写同一键的概率低；真正的防护是 DB 侧的原子计数与锁定。
-     */
-    private static let failureCounts: HashMap<String, Int64> = HashMap<String, Int64>()
 
     /**
      * 刷新令牌。
@@ -520,5 +513,143 @@ public class AuthService {
             this.config.kdfIterations,
             0 // 自助注册无操作员，operatorId 记为 0
         )
+    }
+}
+
+// ============================================================
+// 登录失败计数器（进程内 · 并发安全）
+//
+// 【为什么必须加锁 · 2026-11-11 线上故障复盘】
+// 旧实现把失败次数放在无锁 `HashMap<String, Int64>` 里，由
+// progressiveDelay（写）、captchaRequired（读）、resetFailureCount（删）
+// 三处直接读写。Web 与移动端并发登录时，并发写会破坏哈希桶内部结构，
+// 使 get() 落入环链死循环，占死工作线程；stdx 线程池被逐步耗尽后，
+// 所有接口（含 /api/branding、/api/setup/status）排队 30s 并抛
+// "Exception: dead lock"，仅 /api/health 因不进业务链路仍可用。
+// 当时只做了 docker restart 恢复，未根治。此处把读 / 写 / 删全部收进
+// 一把 Mutex，与 CaptchaStore / ChunkUploadStore 的线程安全范式一致。
+//
+// 【为什么不落库】该计数只用于「渐进延迟 + 图形验证码摩擦」，
+// 真正的安全边界是 DB 侧 recordLoginFailure 的原子计数与账号锁定；
+// 进程重启清零属可接受降级，不引入额外表与写放大。
+//
+// 【容量与 TTL】用户名哈希可被枚举，故用 TTL + 桶上限兜住内存。
+// 触顶时不再新增桶，并对未知键返回保守值（触发验证码 + 最大延迟），
+// 即 fail-closed：绝不因表满而降低登录摩擦。
+// ============================================================
+public class LoginFailureCounter {
+    /** 桶上限：达到后不再新增键。 */
+    public static let MaxBuckets: Int64 = 10000
+    /** 超过该规模才触发一次过期扫描，避免每次登录都遍历全表。 */
+    private static let SweepThreshold: Int64 = 512
+    /**
+     * 两次扫描的最小间隔。
+     * 否则在大规模枚举用户名的场景下，每次失败登录都会 O(n) 遍历全表，
+     * 反而把「防内存耗尽」的措施变成新的 CPU 瓶颈。
+     */
+    private static let SweepIntervalMillis: Int64 = 60 * 1000
+    /** 计数保留时长（1 小时），与「连续失败」语义一致。 */
+    public static let TtlMillis: Int64 = 60 * 60 * 1000
+
+    private static let counts: HashMap<String, Int64> = HashMap<String, Int64>()
+    private static let touched: HashMap<String, Int64> = HashMap<String, Int64>()
+    private static let mutex: Mutex = Mutex()
+    private static var lastSweepMillis: Int64 = 0
+
+    /** 读取当前连续失败次数（不存在返回 0）。 */
+    public static func get(key: String): Int64 {
+        LoginFailureCounter.mutex.lock()
+        try {
+            return LoginFailureCounter.counts.get(key) ?? 0
+        } finally {
+            LoginFailureCounter.mutex.unlock()
+        }
+    }
+
+    /**
+     * 递增并返回递增后的值（1-based）。
+     * 表满且过期清理无效时不再新增桶，返回 MaxBuckets 使验证码阈值判定为真。
+     */
+    public static func increment(key: String, nowMillis: Int64): Int64 {
+        LoginFailureCounter.mutex.lock()
+        try {
+            LoginFailureCounter.sweepLocked(nowMillis)
+            match (LoginFailureCounter.counts.get(key)) {
+                case Some(n) =>
+                    LoginFailureCounter.counts[key] = n + 1
+                    LoginFailureCounter.touched[key] = nowMillis
+                    return n + 1
+                case None =>
+                    if (LoginFailureCounter.counts.size >= LoginFailureCounter.MaxBuckets) {
+                        return LoginFailureCounter.MaxBuckets
+                    }
+                    LoginFailureCounter.counts[key] = 1
+                    LoginFailureCounter.touched[key] = nowMillis
+                    return 1
+            }
+        } finally {
+            LoginFailureCounter.mutex.unlock()
+        }
+    }
+
+    /** 登录成功后清零（使「连续」语义正确）。 */
+    public static func reset(key: String): Unit {
+        LoginFailureCounter.mutex.lock()
+        try {
+            LoginFailureCounter.counts.remove(key)
+            LoginFailureCounter.touched.remove(key)
+        } finally {
+            LoginFailureCounter.mutex.unlock()
+        }
+    }
+
+    /** 当前桶数（观测 / 单测用）。 */
+    public static func size(): Int64 {
+        LoginFailureCounter.mutex.lock()
+        try {
+            return LoginFailureCounter.counts.size
+        } finally {
+            LoginFailureCounter.mutex.unlock()
+        }
+    }
+
+    /** 全量清空（进程内运维级重置 / 单测隔离）。 */
+    public static func clear(): Unit {
+        LoginFailureCounter.mutex.lock()
+        try {
+            let keys = ArrayList<String>()
+            for ((k, _) in LoginFailureCounter.counts) {
+                keys.add(k)
+            }
+            for (k in keys) {
+                LoginFailureCounter.counts.remove(k)
+                LoginFailureCounter.touched.remove(k)
+            }
+            LoginFailureCounter.lastSweepMillis = 0
+        } finally {
+            LoginFailureCounter.mutex.unlock()
+        }
+    }
+
+    /** 过期桶清理（调用方必须持有 mutex）。 */
+    private static func sweepLocked(nowMillis: Int64): Unit {
+        if (LoginFailureCounter.counts.size < LoginFailureCounter.SweepThreshold) {
+            return
+        }
+        if (LoginFailureCounter.lastSweepMillis != 0 &&
+            nowMillis - LoginFailureCounter.lastSweepMillis < LoginFailureCounter.SweepIntervalMillis) {
+            return
+        }
+        LoginFailureCounter.lastSweepMillis = nowMillis
+        let expired = ArrayList<String>()
+        for ((k, t) in LoginFailureCounter.touched) {
+            if (nowMillis - t > LoginFailureCounter.TtlMillis) {
+                expired.add(k)
+            }
+        }
+        for (k in expired) {
+            LoginFailureCounter.counts.remove(k)
+            LoginFailureCounter.touched.remove(k)
+        }
     }
 }

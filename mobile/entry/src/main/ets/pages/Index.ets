@@ -7,8 +7,18 @@ import { SettingsPage } from './SettingsPage';
 import { RecycleBinPage } from './RecycleBinPage';
 import { ItemEditPage } from './ItemEditPage';
 import { NotificationsPage } from './NotificationsPage';
+import { SubjectsPage } from './SubjectsPage';
+import { TagsPage } from './TagsPage';
+import { ShareLinksPage } from './ShareLinksPage';
+import { TemplatesPage } from './TemplatesPage';
+import { ItemVersionsPage } from './ItemVersionsPage';
+import { SystemPage } from './SystemPage';
+import { FamilyPage } from './FamilyPage';
+import { AttachmentsPage } from './AttachmentsPage';
+import { TasksPage } from './TasksPage';
+import { AboutPage } from './AboutPage';
 import { ArchiveItem, CategoryRef, EditParam } from '../common/models/Models';
-import { C } from '../common/theme/Theme';
+import { C, applyTheme } from '../common/theme/Theme';
 
 @Entry
 @Component
@@ -16,7 +26,12 @@ struct Index {
   @StorageLink('ams_logged_in') isLoggedIn: boolean = false;
   @StorageLink('ams_safe_top') safeTop: number = 0;
   @StorageLink('ams_safe_bottom') safeBottom: number = 0;
+  @StorageLink('ams_theme_rev') @Watch('onThemeRev') themeRev: number = 0;
   @Provide('navPathStack') navPathStack: NavPathStack = new NavPathStack();
+
+  onThemeRev(): void {
+    applyTheme();
+  }
 
   @Builder
   pageMap(name: string, param: Object) {
@@ -34,6 +49,26 @@ struct Index {
       ItemEditPage({ param: param as EditParam });
     } else if (name === 'Notifications') {
       NotificationsPage();
+    } else if (name === 'Subjects') {
+      SubjectsPage();
+    } else if (name === 'Tags') {
+      TagsPage();
+    } else if (name === 'ShareLinks') {
+      ShareLinksPage();
+    } else if (name === 'Templates') {
+      TemplatesPage();
+    } else if (name === 'ItemVersions') {
+      ItemVersionsPage({ item: param as ArchiveItem });
+    } else if (name === 'System') {
+      SystemPage();
+    } else if (name === 'Family') {
+      FamilyPage();
+    } else if (name === 'Attachments') {
+      AttachmentsPage({ item: param as ArchiveItem });
+    } else if (name === 'Tasks') {
+      TasksPage();
+    } else if (name === 'About') {
+      AboutPage();
     }
   }
 

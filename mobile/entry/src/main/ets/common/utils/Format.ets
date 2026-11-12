@@ -1,13 +1,14 @@
 import { C } from '../theme/Theme';
+import { t } from '../theme/I18n';
 
 export function sensitivityLabel(level: number): string {
   if (level >= 3) {
-    return '高';
+    return t('sens.high');
   }
   if (level === 2) {
-    return '中';
+    return t('sens.mid');
   }
-  return '低';
+  return t('sens.low');
 }
 
 export function sensitivityColor(level: number): string {
@@ -25,18 +26,9 @@ export function sensitivityColor(level: number): string {
  * 旧版误写成「0 有效 / 1 临期 / 2 已过期 / 3 草稿」，与后端完全不符，已订正。
  */
 export function statusLabel(status: number): string {
-  switch (status) {
-    case 0:
-      return '草稿';
-    case 1:
-      return '正常';
-    case 2:
-      return '已归档';
-    case 3:
-      return '已删除';
-    default:
-      return '其他';
-  }
+  const key: string = 'status.' + status.toString();
+  const v: string = t(key);
+  return v === key ? t('common.other') : v;
 }
 
 export function statusColor(status: number): string {
@@ -67,12 +59,12 @@ export function nextStatus(status: number): number {
 
 export function nextStatusLabel(status: number): string {
   if (status === 0) {
-    return '发布';
+    return t('next.publish');
   }
   if (status === 1) {
-    return '归档';
+    return t('next.archive');
   }
-  return '撤回为正常';
+  return t('next.revert');
 }
 
 export function formatDate(ms?: number): string {

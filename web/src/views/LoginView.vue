@@ -95,7 +95,7 @@ async function refreshCaptcha(): Promise<void> {
 async function onSubmit(): Promise<void> {
   error.value = ''
   if (!username.value || !password.value) {
-    error.value = '请输入用户名和口令'
+    error.value = t('LoginView.x5a6056', '请输入用户名和口令')
     return
   }
   submitting.value = true
@@ -122,7 +122,7 @@ async function onSubmit(): Promise<void> {
     const msg = (e as Error).message || t('viewsLoginView.6d207e', '登录失败，请检查用户名与口令后重试')
     error.value = msg
     // 后端验证码文案固定为中文，直接用字面量匹配最稳（与界面语言无关）
-    if (msg.includes('验证码')) {
+    if (msg.includes(t('LoginView.x983f59', '验证码'))) {
       needCaptcha.value = true
     }
     // 只要已要求验证码，每次失败都换一张：challenge 一次性消费，错误/过期/
@@ -231,7 +231,7 @@ async function onSubmit(): Promise<void> {
           <p v-if="error" class="error" role="alert">{{ error }}</p>
 
           <button class="btn-primary auth__submit" type="submit" :disabled="submitting">
-            {{ submitting ? '登录中…' : '登录' }}
+            {{ submitting ? t('LoginView.xf931ba', '登录中…') : t('LoginView.x402d19', '登录') }}
           </button>
         </form>
 

@@ -1,5 +1,6 @@
 import { ApiClient, ItemsData, ItemQuery } from '../common/api/ApiClient';
-import { C, F } from '../common/theme/Theme';
+import { C, F, applyTheme } from '../common/theme/Theme';
+import { t, i18nVars, categoryNameI18n } from '../common/theme/I18n';
 import { ArchiveItem, CategoryRef, EditParam } from '../common/models/Models';
 import { sensitivityColor, sensitivityLabel, formatDate } from '../common/utils/Format';
 import { Logger } from '../common/utils/Logger';
@@ -8,6 +9,7 @@ import { Logger } from '../common/utils/Logger';
 export struct ItemsPage {
   @Consume('navPathStack') navPathStack: NavPathStack;
   @StorageLink('ams_data_version') @Watch('onDataChanged') dataVersion: number = 0;
+  @StorageLink('ams_theme_rev') @Watch('onThemeRev') themeRev: number = 0;
   @State category: CategoryRef = { code: 0, name: '' };
   @State items: ArchiveItem[] = [];
   @State loading: boolean = false;
@@ -16,6 +18,10 @@ export struct ItemsPage {
 
   aboutToAppear(): void {
     this.load();
+  }
+
+  onThemeRev(): void {
+    applyTheme();
   }
 
   onDataChanged(): void {
@@ -53,7 +59,7 @@ export struct ItemsPage {
         // 按钮的 width('100%') 与左右 margin 会互相挤压导致贴边，
         // 改由外层 Column 的 padding 承担左右留白。
         Column() {
-          Button('＋ 新建条目')
+          Button(t('items.new'))
             .width('100%')
             .height(44)
             .fontSize(F.body)
@@ -68,13 +74,13 @@ export struct ItemsPage {
         if (this.loading && this.items.length === 0) {
           Column() {
             LoadingProgress().width(28).height(28)
-            Text('加载中…').fontSize(F.caption).fontColor(C.ink3).margin({ top: 12 })
+            Text(t('common.loading')).fontSize(F.caption).fontColor(C.ink3).margin({ top: 12 })
           }
           .margin({ top: 60 })
         } else if (this.errorMsg.length > 0 && this.items.length === 0) {
           Column() {
             Text(this.errorMsg).fontColor(C.danger).fontSize(F.body)
-            Button('重试')
+            Button(t('common.retry'))
               .height(40)
               .backgroundColor(C.accent)
               .fontColor('#FFFFFF')
@@ -86,7 +92,7 @@ export struct ItemsPage {
           .margin({ top: 60 })
           .padding({ left: F.pad, right: F.pad })
         } else if (this.items.length === 0) {
-          Text('暂无' + this.category.name + '条目')
+          Text(t('items.empty', i18nVars([['cat', categoryNameI18n(this.category.code)]])))
             .fontColor(C.ink3)
             .fontSize(F.body)
             .margin({ top: 60 })
@@ -115,7 +121,7 @@ export struct ItemsPage {
       .height('100%')
       .backgroundColor(C.bg)
     }
-    .title(this.category.name)
+    .title(categoryNameI18n(this.category.code))
     .backgroundColor(C.bg)
   }
 
@@ -142,7 +148,7 @@ export struct ItemsPage {
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
           }
-          Text('更新 ' + formatDate(it.updatedAt))
+          Text(t('items.updated') + ' ' + formatDate(it.updatedAt))
             .fontSize(F.caption)
             .fontColor(C.ink3)
         }
@@ -150,7 +156,7 @@ export struct ItemsPage {
       }
       .layoutWeight(1)
       if (it.shared === true) {
-        Text('共享')
+        Text(t('items.shared'))
           .fontSize(11)
           .fontColor(C.accent)
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })

@@ -1,12 +1,14 @@
 import { ApiClient, ItemWriteRequest, ItemUpdateRequest, SubjectsData } from '../common/api/ApiClient';
-import { C, F } from '../common/theme/Theme';
-import { ArchiveItem, EditParam, Subject, categoryName } from '../common/models/Models';
+import { C, F, applyTheme } from '../common/theme/Theme';
+import { t, i18nVars, categoryNameI18n } from '../common/theme/I18n';
+import { ArchiveItem, EditParam, Subject } from '../common/models/Models';
 import { Logger } from '../common/utils/Logger';
 import { DataRefresh } from '../common/store/DataRefresh';
 
 @Component
 export struct ItemEditPage {
   @Consume('navPathStack') navPathStack: NavPathStack;
+  @StorageLink('ams_theme_rev') @Watch('onThemeRev') themeRev: number = 0;
   @State param: EditParam = { mode: 'create', category: 0, subjectId: '' };
   @State itemId: string = '';
   @State version: number = 0;
@@ -22,6 +24,10 @@ export struct ItemEditPage {
   @State saving: boolean = false;
   @State errorMsg: string = '';
   @State levels: number[] = [1, 2, 3];
+
+  onThemeRev(): void {
+    applyTheme();
+  }
 
   aboutToAppear(): void {
     const item: ArchiveItem | undefined = this.param.item;
@@ -74,7 +80,7 @@ export struct ItemEditPage {
 
   currentSubjectName(): string {
     if (this.subjects.length === 0) {
-      return '暂无主体，请先在网页端创建';
+      return t('edit.noSubject');
     }
     if (this.subjectIndex < this.subjects.length) {
       return this.subjects[this.subjectIndex].name;
@@ -97,15 +103,15 @@ export struct ItemEditPage {
   save(): void {
     this.errorMsg = '';
     if (this.title.trim().length === 0) {
-      this.errorMsg = '标题不能为空';
+      this.errorMsg = t('edit.titleEmpty');
       return;
     }
     if (!this.validDate(this.issuedDate.trim()) || !this.validDate(this.expiresAt.trim())) {
-      this.errorMsg = '日期格式应为 YYYY-MM-DD';
+      this.errorMsg = t('edit.dateFmt');
       return;
     }
     if (this.param.mode === 'create' && this.subjectId.length === 0) {
-      this.errorMsg = '暂无主体，请先在网页端创建主体';
+      this.errorMsg = t('edit.noSubject');
       return;
     }
     this.saving = true;
@@ -151,18 +157,18 @@ export struct ItemEditPage {
       Column() {
         Scroll() {
           Column() {
-            this.inputRow('标题', '条目名称', this.title, 1)
-            this.inputRow('签发机构', '选填', this.issuer, 2)
-            this.inputRow('签发日期', 'YYYY-MM-DD，选填', this.issuedDate, 3)
-            this.inputRow('到期时间', 'YYYY-MM-DD，选填', this.expiresAt, 4)
-            this.inputRow('备注', '选填', this.remark, 5)
+            this.inputRow(t('field.title'), t('edit.titlePh'), this.title, 1)
+            this.inputRow(t('item.issuer'), t('common.optional'), this.issuer, 2)
+            this.inputRow(t('item.issuedDate'), t('edit.datePh'), this.issuedDate, 3)
+            this.inputRow(t('item.expiresAt'), t('edit.datePh'), this.expiresAt, 4)
+            this.inputRow(t('field.summary'), t('common.optional'), this.remark, 5)
 
-            Text('分类')
+            Text(t('common.category'))
               .fontSize(F.caption)
               .fontColor(C.ink3)
               .padding({ left: 4, top: 16, bottom: 8 })
             Row() {
-              Text(categoryName(this.param.category))
+              Text(categoryNameI18n(this.param.category))
                 .fontSize(F.body)
                 .fontColor(C.ink)
             }
@@ -172,7 +178,7 @@ export struct ItemEditPage {
             .borderRadius(C.radiusSm)
 
             if (this.param.mode === 'create') {
-              Text('所属主体')
+              Text(t('item.subject'))
                 .fontSize(F.caption)
                 .fontColor(C.ink3)
                 .padding({ left: 4, top: 16, bottom: 8 })
@@ -181,7 +187,7 @@ export struct ItemEditPage {
                   .fontSize(F.body)
                   .fontColor(C.ink)
                   .layoutWeight(1)
-                Text('切换').fontSize(F.caption).fontColor(C.accent)
+                Text(t('item.switch')).fontSize(F.caption).fontColor(C.accent)
               }
               .width('100%')
               .padding(14)
@@ -190,13 +196,13 @@ export struct ItemEditPage {
               .onClick(() => { this.nextSubject(); })
             }
 
-            Text('敏感度')
+            Text(t('edit.sensitivity'))
               .fontSize(F.caption)
               .fontColor(C.ink3)
               .padding({ left: 4, top: 16, bottom: 8 })
             Row() {
               ForEach(this.levels, (level: number) => {
-                Button(level === 1 ? '一般' : (level === 2 ? '较敏感' : '高敏感'))
+                Button(level === 1 ? t('edit.sensLow') : (level === 2 ? t('edit.sensMid') : t('edit.sensHigh')))
                   .layoutWeight(1)
                   .height(38)
                   .fontSize(F.caption)
@@ -224,7 +230,7 @@ export struct ItemEditPage {
 
         // 同 ItemsPage：左右留白交给外层 Column，避免 width('100%') 把 margin 挤掉。
         Column() {
-          Button(this.saving ? '保存中…' : '保存')
+          Button(this.saving ? t('common.saving') : t('common.save'))
             .width('100%')
             .height(48)
             .fontSize(F.body)
@@ -241,7 +247,7 @@ export struct ItemEditPage {
       .width('100%')
       .height('100%')
     }
-    .title(this.param.mode === 'edit' ? '编辑条目' : '新建条目')
+    .title(this.param.mode === 'edit' ? t('edit.titleEdit') : t('edit.titleNew'))
     .backgroundColor(C.bg)
   }
 

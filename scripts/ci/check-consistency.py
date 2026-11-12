@@ -29,7 +29,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FAILURES = []
 KNOWN_DUP_MIGRATIONS = {"007"}
-API_REPO_BASELINE = 24
+# ams.api -> ams.data.repo 的静态 import 计数上限（防分层被侵蚀）。
+# 2026-11-12 由 24 上调至 26：本批新增两个同向合法依赖 ——
+#   ams-api/src/middleware/tenantquota.cj（配额闸门）
+#   ams-api/src/routes/tenantregistry.cj（租户注册/引导）
+# 二者都是 ams.api -> ams.data.repo 的正常向下依赖，未引入反向或跨层引用。
+API_REPO_BASELINE = 26
 
 
 def read(path):

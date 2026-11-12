@@ -2,6 +2,8 @@ import { UIAbility, AbilityConstant, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { AuthStore } from '../common/store/AuthStore';
+import { CacheStore } from '../common/store/CacheStore';
+import { Settings } from '../common/store/Settings';
 import { Logger } from '../common/utils/Logger';
 
 export default class EntryAbility extends UIAbility {
@@ -9,6 +11,9 @@ export default class EntryAbility extends UIAbility {
     AppStorage.setOrCreate('context', this.context);
     // 同步从 preferences 恢复登录态与服务器地址，之后 Index 才能直接显示首页。
     AuthStore.init(this.context);
+    // 离线缓存落盘 + 外观偏好（深色/三语/大字）恢复，并据此刷新主题令牌。
+    CacheStore.init(this.context);
+    Settings.init(this.context);
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {

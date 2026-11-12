@@ -1,12 +1,14 @@
 import { ApiClient, SearchData } from '../common/api/ApiClient';
-import { C, F } from '../common/theme/Theme';
-import { ArchiveItem, CATEGORIES, CategoryRef } from '../common/models/Models';
+import { C, F, applyTheme } from '../common/theme/Theme';
+import { t, categoryNameI18n } from '../common/theme/I18n';
+import { ArchiveItem, CATEGORIES, CategoryRef, HighlightSegment } from '../common/models/Models';
 import { sensitivityColor, sensitivityLabel, statusLabel, statusColor } from '../common/utils/Format';
 import { Logger } from '../common/utils/Logger';
 
 @Component
 export struct SearchPage {
   @Consume('navPathStack') navPathStack: NavPathStack;
+  @StorageLink('ams_theme_rev') @Watch('onThemeRev') themeRev: number = 0;
   @State query: string = '';
   @State results: ArchiveItem[] = [];
   @State searched: boolean = false;
@@ -67,11 +69,30 @@ export struct SearchPage {
     }
   }
 
+  onThemeRev(): void {
+    applyTheme();
+  }
+
+  /** 取 /api/search 返回的 title 高亮片段；无则空数组。 */
+  titleSegments(it: ArchiveItem): HighlightSegment[] {
+    if (it.highlight !== undefined && it.highlight.title !== undefined) {
+      return it.highlight.title;
+    }
+    return [];
+  }
+
+  issuerSegments(it: ArchiveItem): HighlightSegment[] {
+    if (it.highlight !== undefined && it.highlight.issuer !== undefined) {
+      return it.highlight.issuer;
+    }
+    return [];
+  }
+
   build() {
     NavDestination() {
       Column() {
         Row() {
-          TextInput({ placeholder: '搜索档案、证件、条目…', text: this.query })
+          TextInput({ placeholder: t('common.searchPh'), text: this.query })
             .layoutWeight(1)
             .height(44)
             .backgroundColor(C.surfaceAlt)
@@ -79,7 +100,7 @@ export struct SearchPage {
             .padding({ left: 16 })
             .onChange((v: string) => { this.query = v; })
             .onSubmit(() => { this.doSearch(); })
-          Button('搜索')
+          Button(t('common.search'))
             .height(44)
             .borderRadius(C.radiusSm)
             .backgroundColor(C.accent)
@@ -92,7 +113,7 @@ export struct SearchPage {
         // 分类筛选（横向滚动，0 = 全部）
         Scroll() {
           Row() {
-            Text('全部')
+            Text(t('common.all'))
               .fontSize(F.caption)
               .fontColor(this.category === 0 ? '#FFFFFF' : C.ink2)
               .padding({ left: 14, right: 14, top: 7, bottom: 7 })
@@ -101,7 +122,7 @@ export struct SearchPage {
               .margin({ right: 8 })
               .onClick(() => { this.pickCategory(0); })
             ForEach(CATEGORIES, (cat: CategoryRef) => {
-              Text(cat.name)
+              Text(categoryNameI18n(cat.code))
                 .fontSize(F.caption)
                 .fontColor(this.category === cat.code ? '#FFFFFF' : C.ink2)
                 .padding({ left: 14, right: 14, top: 7, bottom: 7 })
@@ -122,7 +143,7 @@ export struct SearchPage {
         } else if (this.errorMsg.length > 0) {
           Column() {
             Text(this.errorMsg).fontSize(F.body).fontColor(C.danger)
-            Button('重试')
+            Button(t('common.retry'))
               .height(40)
               .fontSize(F.body)
               .backgroundColor(C.accent)
@@ -133,20 +154,26 @@ export struct SearchPage {
           }
           .margin({ top: 60 })
         } else if (this.searched && this.results.length === 0) {
-          Text('未找到相关条目').fontColor(C.ink3).margin({ top: 60 })
+          Text(t('search.notFound')).fontColor(C.ink3).margin({ top: 60 })
         } else if (!this.searched) {
-          Text('输入关键词开始搜索').fontColor(C.ink3).margin({ top: 60 })
+          Text(t('search.start')).fontColor(C.ink3).margin({ top: 60 })
         } else {
           List() {
             ForEach(this.results, (it: ArchiveItem) => {
               ListItem() {
                 Row() {
                   Column() {
-                    Text(it.title).fontSize(F.body).fontWeight(500).fontColor(C.ink)
-                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    if (this.titleSegments(it).length > 0) {
+                      this.highlightLine(this.titleSegments(it), F.body)
+                    } else {
+                      Text(it.title).fontSize(F.body).fontWeight(500).fontColor(C.ink)
+                        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    }
                     Row() {
                       Text(statusLabel(it.status)).fontSize(11).fontColor(statusColor(it.status))
-                      if (it.issuer && it.issuer.length > 0) {
+                      if (this.issuerSegments(it).length > 0) {
+                        this.highlightLine(this.issuerSegments(it), F.caption)
+                      } else if (it.issuer && it.issuer.length > 0) {
                         Text(' · ' + it.issuer)
                           .fontSize(F.caption)
                           .fontColor(C.ink3)
@@ -176,7 +203,7 @@ export struct SearchPage {
                   if (this.loadingMore) {
                     LoadingProgress().width(20).height(20).margin({ right: 8 })
                   }
-                  Text(this.loadingMore ? '加载中…' : '加载更多')
+                  Text(this.loadingMore ? t('common.loading') : t('search.more'))
                     .fontSize(F.caption)
                     .fontColor(C.accent)
                 }
@@ -193,7 +220,25 @@ export struct SearchPage {
       }
       .width('100%').height('100%').backgroundColor(C.bg)
     }
-    .title('搜索')
+    .title(t('common.search'))
     .backgroundColor(C.bg)
+  }
+
+  /**
+   * 渲染后端 SearchHighlighter 的分段高亮：hit=true 用强调色加粗 + 底色，
+   * 其余用普通色。全程 Text + 样式，不用 Web 组件、不做 v-html。
+   */
+  @Builder
+  highlightLine(segs: HighlightSegment[], size: number) {
+    Row() {
+      ForEach(segs, (seg: HighlightSegment) => {
+        Text(seg.text)
+          .fontSize(size)
+          .fontWeight(seg.hit ? 700 : 400)
+          .fontColor(seg.hit ? C.warn : C.ink)
+          .backgroundColor(seg.hit ? C.accentSoft : '#00000000')
+      }, (seg: HighlightSegment, idx: number) => idx.toString())
+    }
+    .alignItems(VerticalAlign.Center)
   }
 }

@@ -141,6 +141,13 @@ services:
       AMS_MEDIA_ENABLED: "${AMS_MEDIA_ENABLED:-false}"
       AMS_OCR_CONSENT: "${AMS_OCR_CONSENT:-false}"
       AMS_SMS_SPOOL_DIR: /app/data-sms/spool
+      # 反向代理下的客户端 IP 解析：默认关闭（XFF 可伪造，绝不默认采信）。
+      # 仅当 ams 只接受来自可信反代的连接时设为 true；此时 nginx 必须
+      # 用 $remote_addr 覆盖 XFF（见 deploy/docker/nginx.conf 与 README §4.6）。
+      AMS_TRUST_PROXY_HEADERS: "${AMS_TRUST_PROXY_HEADERS:-false}"
+      # 可选：逗号分隔的可信直连代理 IP（留空表示不限制直连来源，
+      # 适用于容器网络内只有反代能访问后端的部署）。
+      AMS_TRUSTED_PROXY_IPS: "${AMS_TRUSTED_PROXY_IPS:-}"
     ports:
       - "8080:8080"
     volumes:
@@ -172,13 +179,22 @@ services:
   # OCR / 缩略图 / 像素水印由 ams-server 进程内的 ams.core.media 完成，
   # 不需要独立 worker、文件队列或额外容器。
 
-  # ---- Q2 方案 A · 可选 S3 兼容后端（部署拓扑预留）----
+  # ---- Q2 方案 A · 可选 S3 兼容后端（多厂商驱动已真实落地）----
   # 只有 `docker compose -p ams --profile s3 up -d` 才会创建该容器，
   # 默认 up -d 完全不变化（仍是 ams + openGauss 两容器 + 一次性 init）。
-  # ⚠️ 当前只落地「可插拔骨架」：把 AMS_STORAGE_BACKEND 设为 s3 会
-  #    因 S3Transport / SigV4（依赖 HMAC-SHA256）未实现而**失败关闭**，
-  #    启动即报 StorageFailure。此服务仅用于预置网络与卷拓扑，
-  #    不代表对象存储已可用；最终选型仍待运维·甲方确认。
+  #
+  # 【Q2 最终选型 · 2026-11-12 定稿】默认「本地 FS(local)」或「自建 MinIO(minio)」，
+  #   并在管理页 / 配置提供「华为云 OBS(huawei)」等云对象存储作为**可选**接入项，
+  #   对外共 8 选 1（local/minio/huawei/aliyun/qiniu/tencent/aws/s3）。
+  #   业务层零改动即可切换；切换前置见 docs/16 迁移方案。
+  #
+  # 【驱动已真实可用】SigV4 签名（sigv4.cj）+ 真实 HTTP/1.1 传输层
+  #   （http_transport.cj 的 HttpS3Transport，std.net + stdx.net.tls，
+  #   http/https 均可用）均已落地：选非 local 平台且 AMS_S3_* 配齐时即构建
+  #   真实传输层、真正读写；配置缺失/连接/签名/响应失败一律**失败关闭**
+  #   （抛 StorageFailure），绝不静默回落 FS 或明文写入。
+  # 端到端验证：`bash scripts/ci/verify-minio.sh`（起本容器 + 跑
+  #   ams-storage 集成测试真实 MinIO 往返 PUT/GET/404/DELETE）。
   minio:
     profiles: ["s3"]
     image: minio/minio:latest

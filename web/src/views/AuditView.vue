@@ -52,7 +52,7 @@ function fmtTime(ms: number | string): string {
   const pad = (n2: number) => String(n2).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
-const resultText = (r: number | string) => (Number(r) === 0 ? '成功' : t('viewsAuditView.3e3c80', '失败'))
+const resultText = (r: number | string) => (Number(r) === 0 ? t('AuditView.x330363', '成功') : t('viewsAuditView.3e3c80', '失败'))
 
 async function load(): Promise<void> {
   loading.value = true
@@ -114,7 +114,7 @@ onMounted(load)
     <div class="page-head">
       <h1 class="page-title">{{ t('AuditView.7666cd', '审计日志') }}</h1>
       <button class="btn-ghost" type="button" :disabled="verifying" @click="verifyChain">
-        {{ verifying ? '校验中…' : '校验审计链' }}
+        {{ verifying ? t('AuditView.x6e89b2', '校验中…') : t('AuditView.x8e0c7c', '校验审计链') }}
       </button>
     </div>
 

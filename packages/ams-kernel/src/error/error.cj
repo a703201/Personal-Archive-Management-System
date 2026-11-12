@@ -22,6 +22,7 @@ public enum AppErrorKind {
     | NotFound
     | Conflict
     | RateLimited
+    | QuotaExceeded
     | PayloadTooLarge
     | UnsupportedMediaType
     | CryptoFailure
@@ -42,6 +43,7 @@ public func kindToCode(kind: AppErrorKind): String {
         case AppErrorKind.NotFound => "NOT_FOUND"
         case AppErrorKind.Conflict => "CONFLICT"
         case AppErrorKind.RateLimited => "RATE_LIMITED"
+        case AppErrorKind.QuotaExceeded => "QUOTA_EXCEEDED"
         case AppErrorKind.PayloadTooLarge => "PAYLOAD_TOO_LARGE"
         case AppErrorKind.UnsupportedMediaType => "UNSUPPORTED_MEDIA_TYPE"
         case AppErrorKind.CryptoFailure => "CRYPTO_FAILURE"
@@ -65,6 +67,7 @@ public func kindToHttpStatus(kind: AppErrorKind): Int64 {
         case AppErrorKind.PayloadTooLarge => 413
         case AppErrorKind.UnsupportedMediaType => 415
         case AppErrorKind.RateLimited => 429
+        case AppErrorKind.QuotaExceeded => 429
         case AppErrorKind.CryptoFailure => 500
         case AppErrorKind.Internal => 500
         case AppErrorKind.StorageFailure => 503

@@ -1,6 +1,7 @@
 import { ApiClient, StatusBody } from '../common/api/ApiClient';
-import { C, F } from '../common/theme/Theme';
-import { ArchiveItem, EditParam, categoryName } from '../common/models/Models';
+import { C, F, applyTheme } from '../common/theme/Theme';
+import { t, i18nVars, categoryNameI18n } from '../common/theme/I18n';
+import { ArchiveItem, EditParam } from '../common/models/Models';
 import {
   sensitivityColor, sensitivityLabel, statusLabel, statusColor,
   nextStatus, nextStatusLabel, formatDate
@@ -12,6 +13,7 @@ import { DataRefresh } from '../common/store/DataRefresh';
 export struct ItemDetailPage {
   @Consume('navPathStack') navPathStack: NavPathStack;
   @StorageLink('ams_data_version') @Watch('onDataChanged') dataVersion: number = 0;
+  @StorageLink('ams_theme_rev') @Watch('onThemeRev') themeRev: number = 0;
   @Prop item: ArchiveItem = {} as ArchiveItem;
   @State full: ArchiveItem = {} as ArchiveItem;
   @State loading: boolean = false;
@@ -31,6 +33,34 @@ export struct ItemDetailPage {
 
   onDataChanged(): void {
     this.load();
+  }
+
+  onThemeRev(): void {
+    applyTheme();
+  }
+
+  stashItemId(): void {
+    try {
+      AppStorage.setOrCreate('ams_last_item_id', this.currentItem().id);
+    } catch (e) {}
+  }
+
+  goVersions(): void {
+    this.navPathStack.pushPath({ name: 'ItemVersions', param: this.currentItem() });
+  }
+
+  goAttachments(): void {
+    this.navPathStack.pushPath({ name: 'Attachments', param: this.currentItem() });
+  }
+
+  goTags(): void {
+    this.stashItemId();
+    this.navPathStack.pushPath({ name: 'Tags' });
+  }
+
+  goShare(): void {
+    this.stashItemId();
+    this.navPathStack.pushPath({ name: 'ShareLinks' });
   }
 
   load(): void {
@@ -108,6 +138,29 @@ export struct ItemDetailPage {
   }
 
   @Builder
+  moreRow(label: string, kind: string) {
+    Row() {
+      Text(label).fontSize(F.body).fontColor(C.ink).layoutWeight(1)
+      Text('›').fontSize(20).fontColor(C.ink3)
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    .borderWidth({ bottom: 1 }).borderColor(C.hairline)
+    .stateStyles({ pressed: { opacity: 0.7 } })
+    .onClick(() => {
+      if (kind === '1') {
+        this.goVersions();
+      } else if (kind === '2') {
+        this.goAttachments();
+      } else if (kind === '3') {
+        this.goTags();
+      } else if (kind === '4') {
+        this.goShare();
+      }
+    })
+  }
+
+  @Builder
   field(label: string, value: string) {
     Row() {
       Text(label).fontSize(F.caption).fontColor(C.ink3).width(84)
@@ -130,11 +183,11 @@ export struct ItemDetailPage {
                 .fontSize(F.title).fontWeight(700).fontColor(C.ink)
                 .margin({ top: 8, bottom: 4 })
               Row() {
-                Text(categoryName(this.currentItem().category))
+                Text(categoryNameI18n(this.currentItem().category))
                   .fontSize(F.caption).fontColor(C.accent)
                   .padding({ left: 10, right: 10, top: 4, bottom: 4 })
                   .borderRadius(8).backgroundColor(C.accentSoft)
-                Text(sensitivityLabel(this.currentItem().sensitivity) + '敏感')
+                Text(t('item.sensitivity', i18nVars([['lvl', sensitivityLabel(this.currentItem().sensitivity)]])))
                   .fontSize(F.caption).fontColor(sensitivityColor(this.currentItem().sensitivity))
                   .padding({ left: 10, right: 10, top: 4, bottom: 4 })
                   .borderRadius(8).backgroundColor(C.surfaceAlt)
@@ -145,11 +198,29 @@ export struct ItemDetailPage {
               }
               .margin({ bottom: 16 })
 
-              this.field('签发机构', this.currentItem().issuer ?? '—')
-              this.field('签发日期', this.currentItem().issuedDate ?? '—')
-              this.field('到期时间', this.currentItem().expiresAt ?? '—')
-              this.field('更新时间', formatDate(this.currentItem().updatedAt))
-              this.field('备注', this.currentItem().remark ?? '—')
+              this.field(t('item.issuer'), this.currentItem().issuer ?? '—')
+              this.field(t('item.issuedDate'), this.currentItem().issuedDate ?? '—')
+              this.field(t('item.expiresAt'), this.currentItem().expiresAt ?? '—')
+              this.field(t('item.updatedAt'), formatDate(this.currentItem().updatedAt))
+              this.field(t('field.summary'), this.currentItem().remark ?? '—')
+
+              // 更多能力入口（历史版本 / 附件 / 标签 / 共享链接）
+              Text(t('common.more'))
+                .fontSize(F.caption)
+                .fontColor(C.ink3)
+                .width('100%')
+                .textAlign(TextAlign.Start)
+                .padding({ top: 20, bottom: 8 })
+              Column() {
+                this.moreRow(t('nav.versions'), '1')
+                this.moreRow(t('nav.attachments'), '2')
+                this.moreRow(t('nav.tags'), '3')
+                this.moreRow(t('nav.share'), '4')
+              }
+              .width('100%')
+              .backgroundColor(C.surface)
+              .borderRadius(C.radius)
+              .clip(true)
 
               if (this.errorMsg.length > 0) {
                 Text(this.errorMsg)
@@ -167,7 +238,7 @@ export struct ItemDetailPage {
         // 底部操作栏：拆两行，避免四个按钮挤在一行贴边
         Column() {
           Row() {
-            Button('编辑')
+            Button(t('common.edit'))
               .layoutWeight(1)
               .height(42)
               .fontSize(F.body)
@@ -176,7 +247,7 @@ export struct ItemDetailPage {
               .borderRadius(C.radiusSm)
               .enabled(!this.busy)
               .onClick(() => { this.goEdit(); })
-            Button('克隆')
+            Button(t('item.clone'))
               .layoutWeight(1)
               .height(42)
               .fontSize(F.body)
@@ -199,7 +270,7 @@ export struct ItemDetailPage {
               .borderRadius(C.radiusSm)
               .enabled(!this.busy)
               .onClick(() => { this.doTransition(); })
-            Button(this.confirmingDelete ? '确认删除' : '删除')
+            Button(this.confirmingDelete ? t('item.confirmDelete') : t('common.delete'))
               .layoutWeight(1)
               .height(42)
               .fontSize(F.body)
@@ -220,7 +291,7 @@ export struct ItemDetailPage {
           .margin({ top: 10 })
 
           Row() {
-            Text('当前状态：' + statusLabel(this.currentItem().status))
+            Text(t('item.curStatus') + statusLabel(this.currentItem().status))
               .fontSize(F.caption)
               .fontColor(statusColor(this.currentItem().status))
           }
@@ -235,7 +306,7 @@ export struct ItemDetailPage {
       .width('100%')
       .height('100%')
     }
-    .title('条目详情')
+    .title(t('item.detail'))
     .backgroundColor(C.bg)
   }
 }

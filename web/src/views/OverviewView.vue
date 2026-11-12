@@ -8,7 +8,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { t } from '../i18n'
 import { api } from '../api/client'
-import { categoryName, formatTime } from '../composables/useCatalog'
+import { catName, formatTime } from '../composables/useCatalog'
 
 interface CategoryStat {
   category: number
@@ -99,7 +99,7 @@ onMounted(load)
         <p v-if="topCategories.length === 0" class="hint">{{ t('OverviewView.2e545d', '暂无档案') }}</p>
         <ul v-else class="bars">
           <li v-for="c in topCategories" :key="c.category" class="bar">
-            <span class="bar__name">{{ categoryName(c.category) }}</span>
+            <span class="bar__name">{{ catName(c.category) }}</span>
             <span class="bar__track">
               <span
                 class="bar__fill"
@@ -118,7 +118,7 @@ onMounted(load)
         <ul v-else class="recent">
           <li v-for="it in data.recent" :key="it.id" class="recent__row">
             <span class="recent__title">{{ it.title }}</span>
-            <span class="recent__cat">{{ categoryName(it.category) }}</span>
+            <span class="recent__cat">{{ catName(it.category) }}</span>
             <span class="recent__time">{{ formatTime(it.updatedAt) }}</span>
           </li>
         </ul>

@@ -106,7 +106,7 @@ async function sendCode(): Promise<void> {
   error.value = ''
   notice.value = ''
   if (!account.value.trim()) {
-    error.value = '请输入用户名、邮箱或手机号'
+    error.value = t('ForgotPasswordView.xe137fd', '请输入用户名、邮箱或手机号')
     return
   }
   busy.value = true
@@ -133,7 +133,7 @@ async function sendCode(): Promise<void> {
       return
     }
     masked.value = res.masked
-    notice.value = `${res.notice}（${res.masked}），${Math.floor(res.expiresIn / 60)} 分钟内有效`
+    notice.value = t('ForgotPasswordView.x3fd555', '{p1}（{p2}），{p3} 分钟内有效', { p1: res.notice, p2: res.masked, p3: Math.floor(res.expiresIn / 60) })
     step.value = 2
     startCooldown(60)
   } catch (e) {
@@ -148,7 +148,7 @@ async function sendCode(): Promise<void> {
 async function verifyCode(): Promise<void> {
   error.value = ''
   if (!/^\d{6}$/.test(code.value.trim())) {
-    error.value = '请输入 6 位数字验证码'
+    error.value = t('ForgotPasswordView.x9885d5', '请输入 6 位数字验证码')
     return
   }
   busy.value = true
@@ -159,7 +159,7 @@ async function verifyCode(): Promise<void> {
       body: { account: account.value.trim(), code: code.value.trim() },
     })
     resetToken = res.resetToken
-    notice.value = `验证通过，请在 ${Math.floor(res.expiresIn / 60)} 分钟内设置新口令`
+    notice.value = t('ForgotPasswordView.x099639', '验证通过，请在 {p1} 分钟内设置新口令', { p1: Math.floor(res.expiresIn / 60) })
     step.value = 3
   } catch (e) {
     error.value = (e as Error).message || t('viewsForgotPasswordView.0cba85', '验证码校验失败')
@@ -171,11 +171,11 @@ async function verifyCode(): Promise<void> {
 async function submitReset(): Promise<void> {
   error.value = ''
   if (pwdHint.value) {
-    error.value = `口令不符合要求：${pwdHint.value}`
+    error.value = t('ForgotPasswordView.x7ca374', '口令不符合要求：{p1}', { p1: pwdHint.value })
     return
   }
   if (password.value !== password2.value) {
-    error.value = '两次输入的新口令不一致'
+    error.value = t('ForgotPasswordView.x6ca67c', '两次输入的新口令不一致')
     return
   }
   busy.value = true
@@ -253,7 +253,7 @@ function goLogin(): void {
             />
           </label>
           <p class="hint-block">
-            我们会向账号绑定的邮箱发送 6 位验证码。未绑定邮箱的账号需联系管理员重置。
+            {{ t('ForgotPasswordView.x8170f6', '我们会向账号绑定的邮箱发送 6 位验证码。未绑定邮箱的账号需联系管理员重置。') }}
           </p>
           <div class="auth__field">
             <span class="auth__label">{{ t('ForgotPasswordView.captchaLabel', '验证码') }}</span>
@@ -280,7 +280,7 @@ function goLogin(): void {
           </div>
           <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
-            {{ busy ? '发送中…' : '发送验证码' }}
+            {{ busy ? t('ForgotPasswordView.x088157', '发送中…') : t('ForgotPasswordView.xc5c358', '发送验证码') }}
           </button>
         </form>
 
@@ -301,7 +301,7 @@ function goLogin(): void {
           </label>
           <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
-            {{ busy ? '校验中…' : '下一步' }}
+            {{ busy ? t('ForgotPasswordView.x6e89b2', '校验中…') : t('ForgotPasswordView.x38ce27', '下一步') }}
           </button>
           <!-- 重新发送同样走 /password/forgot，需再填一次图形验证码 -->
           <div class="auth__field">
@@ -335,7 +335,7 @@ function goLogin(): void {
               :disabled="busy || cooldown > 0"
               @click="sendCode"
             >
-              {{ cooldown > 0 ? `重新发送（${cooldown}s）` : '重新发送' }}
+              {{ cooldown > 0 ? t('ForgotPasswordView.x6cadec', '重新发送（{p1}s）', { p1: cooldown }) : t('ForgotPasswordView.x89b213', '重新发送') }}
             </button>
           </div>
         </form>
@@ -367,7 +367,7 @@ function goLogin(): void {
           <p class="hint-block">{{ t('ForgotPasswordView.2d7650', '重置成功后，该账号在所有设备上的登录状态将立即失效，需重新登录。') }}</p>
           <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
-            {{ busy ? '重置中…' : '重置口令' }}
+            {{ busy ? t('ForgotPasswordView.x9c56ac', '重置中…') : t('ForgotPasswordView.x318b06', '重置口令') }}
           </button>
           <div class="fgt-row">
             <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
@@ -379,13 +379,13 @@ function goLogin(): void {
           <div class="done" role="status">✓</div>
           <p class="done-text">{{ t('ForgotPasswordView.19d326', '口令已重置') }}</p>
           <p class="hint-block">
-            为了安全，原会话已全部下线。请使用新口令重新登录；若账号已启用双因子，登录时还需输入动态码。
+            {{ t('ForgotPasswordView.x274142', '为了安全，原会话已全部下线。请使用新口令重新登录；若账号已启用双因子，登录时还需输入动态码。') }}
           </p>
           <button class="btn-primary auth__submit" type="button" @click="goLogin">{{ t('ForgotPasswordView.6c01b0', '返回登录') }}</button>
         </div>
 
         <p v-if="step < 4" class="auth__switch">
-          想起来了？<RouterLink to="/login">{{ t('ForgotPasswordView.f2fe4e', '返回登录') }}</RouterLink>
+          {{ t('ForgotPasswordView.xecdb92', '想起来了？') }}<RouterLink to="/login">{{ t('ForgotPasswordView.f2fe4e', '返回登录') }}</RouterLink>
         </p>
       </div>
     </main>

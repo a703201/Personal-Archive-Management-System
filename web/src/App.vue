@@ -184,7 +184,7 @@ onMounted(async () => {
             :aria-label="t('App.cd99b2', '语言')"
             @change="setLocale(($event.target as HTMLSelectElement).value as 'zh-CN' | 'en' | 'fr')"
           >
-            <option v-for="l in supported" :key="l" :value="l">{{ l === 'zh-CN' ? '中文' : l === 'en' ? 'English' : 'Français' }}</option>
+            <option v-for="l in supported" :key="l" :value="l">{{ l === 'zh-CN' ? t('App.xa7bac2', '中文') : l === 'en' ? 'English' : 'Français' }}</option>
           </select>
         </div>
       </header>

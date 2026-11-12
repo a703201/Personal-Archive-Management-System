@@ -88,7 +88,7 @@ async function load(): Promise<void> {
 
 async function accept(): Promise<void> {
   if (code.value.length < 8) {
-    acceptError.value = '请输入完整的 8 位邀请码'
+    acceptError.value = t('InviteView.x185a75', '请输入完整的 8 位邀请码')
     return
   }
   submitting.value = true
@@ -136,11 +136,11 @@ onMounted(() => {
       <!-- 已成功加入 -->
       <div v-else-if="accepted" class="invite-done">
         <h1 class="invite-done__title">
-          {{ accepted.alreadyMember ? '你已在该家庭组中' : '已加入家庭组' }}
+          {{ accepted.alreadyMember ? t('InviteView.x0d9e80', '你已在该家庭组中') : t('InviteView.x6921d9', '已加入家庭组') }}
         </h1>
         <p class="invite-done__group">{{ accepted.groupName }}</p>
         <p class="invite-done__desc">
-          你的角色：{{ roleText }}
+          {{ t('InviteView.xedb851', '你的角色：') }}{{ roleText }}
           <template v-if="accepted.alreadyMember">{{ t('InviteView.4ed3b8', '（无需重复加入）') }}</template>
         </p>
         <p class="invite-done__note">
@@ -171,7 +171,7 @@ onMounted(() => {
           <dd>{{ fmt(meta.expiresAt) }}</dd>
           <dt>{{ t('InviteView.59faa1', '剩余可用') }}</dt>
           <dd :class="{ 'invite-kv__warn': lastChance }">
-            {{ meta.remainingUses }} 次{{ lastChance ? '（仅剩最后一次）' : '' }}
+            {{ meta.remainingUses }} 次{{ lastChance ? t('InviteView.x876bdc', '（仅剩最后一次）') : '' }}
           </dd>
         </dl>
 
@@ -203,7 +203,7 @@ onMounted(() => {
           </p>
           <p v-if="acceptError" class="invite-error">{{ acceptError }}</p>
           <button class="btn-primary" type="button" :disabled="submitting" @click="accept">
-            {{ submitting ? '加入中…' : '加入家庭组' }}
+            {{ submitting ? t('InviteView.x37ba83', '加入中…') : t('InviteView.x515dea', '加入家庭组') }}
           </button>
         </template>
       </div>

@@ -1,3 +1,5 @@
+import { categoryNameI18n } from '../theme/I18n';
+
 export interface Subject {
   id: string;
   name: string;
@@ -6,6 +8,24 @@ export interface Subject {
   summary?: string;
   version?: number;
   itemCount?: number;
+  /** 以下字段来自 subjects.cj 的 SubjectView.toJson。 */
+  isPrimary?: boolean;
+  status?: number;
+  completeness?: number;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+/** 搜索高亮片段（search.cj / SearchHighlighter.toJson）。 */
+export interface HighlightSegment {
+  text: string;
+  hit: boolean;
+}
+
+/** 搜索结果里每条的 highlight 结构：title / issuer 各一组片段。 */
+export interface ItemHighlight {
+  title?: HighlightSegment[];
+  issuer?: HighlightSegment[];
 }
 
 export interface ArchiveItem {
@@ -24,6 +44,8 @@ export interface ArchiveItem {
   shared?: boolean;
   issuedDate?: string;
   expiresAt?: string;
+  /** 仅 /api/search 返回的分段高亮，其它接口为空。 */
+  highlight?: ItemHighlight;
 }
 
 export interface CategoryRef {
@@ -55,10 +77,5 @@ export const CATEGORIES: CategoryRef[] = [
 ];
 
 export function categoryName(code: number): string {
-  for (let i = 0; i < CATEGORIES.length; i++) {
-    if (CATEGORIES[i].code === code) {
-      return CATEGORIES[i].name;
-    }
-  }
-  return '其他';
+  return categoryNameI18n(code);
 }

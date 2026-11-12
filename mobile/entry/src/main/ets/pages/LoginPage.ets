@@ -2,11 +2,13 @@ import { webview } from '@kit.ArkWeb';
 import { util } from '@kit.ArkTS';
 import { ApiClient, CaptchaData, LoginData } from '../common/api/ApiClient';
 import { AuthStore } from '../common/store/AuthStore';
-import { C, F } from '../common/theme/Theme';
+import { C, F, applyTheme } from '../common/theme/Theme';
+import { t } from '../common/theme/I18n';
 import { Logger } from '../common/utils/Logger';
 
 @Component
 export struct LoginPage {
+  @StorageLink('ams_theme_rev') @Watch('onThemeRev') themeRev: number = 0;
   @State username: string = '';
   @State password: string = '';
   @State captchaId: string = '';
@@ -23,6 +25,10 @@ export struct LoginPage {
 
   aboutToAppear(): void {
     this.refreshCaptcha();
+  }
+
+  onThemeRev(): void {
+    applyTheme();
   }
 
   aboutToDisappear(): void {
@@ -84,12 +90,12 @@ export struct LoginPage {
       this.captchaHtml = this.buildCaptchaHtml(data.svg);
       this.captchaLoading = false;
       // 只清掉「验证码加载失败」这一类旧提示，保留真正的登录错误。
-      if (this.errorMsg.indexOf('验证码加载失败') >= 0) {
+      if (this.errorMsg.indexOf(t('login.captchaLoadFail')) >= 0) {
         this.errorMsg = '';
       }
       this.renderCaptcha();
     }).catch((e: Error) => {
-      this.errorMsg = '验证码加载失败：' + e.message;
+      this.errorMsg = t('login.captchaLoadFail') + e.message;
       this.captchaLoading = false;
       Logger.warn('LoginPage', 'captcha failed: ' + e.message);
     });
@@ -99,7 +105,7 @@ export struct LoginPage {
     this.errorMsg = '';
     AuthStore.setBaseUrl(this.serverUrl);
     if (this.username.length === 0 || this.password.length === 0) {
-      this.errorMsg = '请输入用户名与口令';
+      this.errorMsg = t('login.emptyCred');
       return;
     }
     // 验证码不是每次登录的必填项：后端仅在「该账号连续登录失败 >= 3 次」
@@ -113,7 +119,7 @@ export struct LoginPage {
       this.loginTimer = -1;
       if (this.loading) {
         this.loading = false;
-        this.errorMsg = '登录超时，请检查服务器地址与网络后重试';
+        this.errorMsg = t('login.timeout');
       }
     }, 15000);
 
@@ -127,7 +133,7 @@ export struct LoginPage {
       .catch((e: Error) => {
         this.loading = false;
         this.clearLoginTimer();
-        this.errorMsg = e.message ?? '登录失败，请重试';
+        this.errorMsg = e.message ?? t('login.fail');
         // 后端触发风控后返回含「验证码」的中文提示，此时清空输入并刷新挑战。
         if (this.errorMsg.indexOf('验证码') >= 0) {
           this.needCaptcha = true;
@@ -147,12 +153,12 @@ export struct LoginPage {
         .margin({ top: 56, bottom: 8 })
 
       Column() {
-        Text('档案库')
+        Text(t('common.archive'))
           .fontSize(F.display)
           .fontWeight(700)
           .fontColor(C.ink)
           .letterSpacing(-0.5)
-        Text('Archive Management · 个人档案随身管理')
+        Text(t('common.brandPrefix') + t('common.tagline'))
           .fontSize(F.caption)
           .fontColor(C.ink3)
           .margin({ top: 6 })
@@ -164,7 +170,7 @@ export struct LoginPage {
       .margin({ top: 72, bottom: 44, left: F.pad })
 
       Column() {
-        TextInput({ placeholder: '服务器地址（IP 或域名）', text: this.serverUrl })
+        TextInput({ placeholder: t('login.serverPh'), text: this.serverUrl })
           .height(48)
           .backgroundColor(C.surfaceAlt)
           .borderRadius(C.radiusSm)
@@ -173,7 +179,7 @@ export struct LoginPage {
           .onChange((v: string) => { this.serverUrl = v; })
           .margin({ bottom: 12 })
 
-        TextInput({ placeholder: '用户名' })
+        TextInput({ placeholder: t('login.userPh') })
           .height(48)
           .backgroundColor(C.surfaceAlt)
           .borderRadius(C.radiusSm)
@@ -181,7 +187,7 @@ export struct LoginPage {
           .fontSize(F.body)
           .onChange((v: string) => { this.username = v; })
 
-        TextInput({ placeholder: '口令' })
+        TextInput({ placeholder: t('login.pwdPh') })
           .height(48)
           .backgroundColor(C.surfaceAlt)
           .borderRadius(C.radiusSm)
@@ -200,7 +206,7 @@ export struct LoginPage {
             .javaScriptAccess(false)
             .domStorageAccess(false)
             .onControllerAttached(() => { this.renderCaptcha(); })
-          Text(this.captchaLoading ? '加载中…' : '刷新')
+          Text(this.captchaLoading ? t('common.loading') : t('common.refresh'))
             .fontSize(F.caption)
             .fontColor(C.accent)
             .padding(12)
@@ -209,7 +215,7 @@ export struct LoginPage {
         .margin({ top: 12 })
         .height(48)
 
-        TextInput({ placeholder: this.needCaptcha ? '请输入图中验证码' : '验证码（选填）' })
+        TextInput({ placeholder: this.needCaptcha ? t('login.captchaPh') : t('login.captchaPhOpt') })
           .height(48)
           .backgroundColor(C.surfaceAlt)
           .borderRadius(C.radiusSm)
@@ -218,7 +224,7 @@ export struct LoginPage {
           .margin({ top: 12 })
           .onChange((v: string) => { this.captchaInput = v; })
 
-        Text('服务端仅在该账号连续登录失败 3 次后强制校验验证码，平时可留空')
+        Text(t('login.captchaHint'))
           .fontSize(11)
           .fontColor(C.ink3)
           .margin({ top: 8, left: 4 })
@@ -230,7 +236,7 @@ export struct LoginPage {
             .margin({ top: 12 })
         }
 
-        Button(this.loading ? '登录中…' : '登 录')
+        Button(this.loading ? t('login.loggingIn') : t('login.loginBtn'))
           .width('100%')
           .height(50)
           .borderRadius(C.radiusSm)

@@ -226,7 +226,7 @@ async function toggleStatus(u: UserRow): Promise<void> {
   const next = isActive(u) ? 1 : 0
   try {
     await api(`/users/${u.id}/status`, { method: 'POST', body: { status: next } })
-    success(next === 0 ? '已启用' : t('viewsUsersView.6c7dcb', '已停用'))
+    success(next === 0 ? t('UsersView.x53ace4', '已启用') : t('viewsUsersView.6c7dcb', '已停用'))
     loadUsers()
   } catch (e) {
     toastError((e as Error).message)
@@ -365,7 +365,7 @@ onMounted(() => {
             </td>
             <td>
               <span class="badge" :class="isActive(u) ? 'badge--ok' : 'badge--off'">
-                {{ isActive(u) ? '正常' : '已停用' }}
+                {{ isActive(u) ? t('UsersView.xfd6e80', '正常') : t('UsersView.x69b0f6', '已停用') }}
               </span>
             </td>
             <td>{{ u.failed_attempts }}</td>
@@ -373,9 +373,9 @@ onMounted(() => {
             <td class="tbl__act">
               <div class="row-actions">
                 <button class="btn-text" type="button" @click="openRoles(u)">{{ t('UsersView.6b2669', '角色') }}</button>
-                <button class="btn-text" type="button" @click="openReset(u)">改口令</button>
+                <button class="btn-text" type="button" @click="openReset(u)">{{ t('UsersView.xd2ef4c', '改口令') }}</button>
                 <button class="btn-text" type="button" @click="toggleStatus(u)">
-                  {{ isActive(u) ? '停用' : '启用' }}
+                  {{ isActive(u) ? t('UsersView.x5c56a8', '停用') : t('UsersView.x7854b5', '启用') }}
                 </button>
                 <button class="btn-text" type="button" @click="unlock(u)">{{ t('UsersView.eb7cf7', '解锁') }}</button>
                 <button class="btn-text danger" type="button" @click="askDelete(u)">{{ t('UsersView.3755f5', '删除') }}</button>
@@ -422,7 +422,7 @@ onMounted(() => {
       <template #footer>
         <button class="btn-ghost" type="button" @click="showCreate = false">{{ t('UsersView.4d0b46', '取消') }}</button>
         <button class="btn-primary" type="button" :disabled="creating" @click="createUser">
-          {{ creating ? '创建中…' : '创建' }}
+          {{ creating ? t('UsersView.xd156b3', '创建中…') : t('UsersView.xd9ac92', '创建') }}
         </button>
       </template>
     </AppSheet>
@@ -443,7 +443,7 @@ onMounted(() => {
       <template #footer>
         <button class="btn-ghost" type="button" @click="showPwd = false">{{ t('UsersView.4d0b46', '取消') }}</button>
         <button class="btn-primary" type="button" :disabled="!passwordOk || resetting" @click="resetPassword">
-          {{ resetting ? '保存中…' : '保存' }}
+          {{ resetting ? t('UsersView.x9b5d32', '保存中…') : t('UsersView.xbe5fbb', '保存') }}
         </button>
       </template>
     </AppSheet>
@@ -456,13 +456,13 @@ onMounted(() => {
       <template #footer>
         <button class="btn-ghost" type="button" :disabled="deleting" @click="showDelete = false">{{ t('UsersView.4d0b46', '取消') }}</button>
         <button class="btn-danger" type="button" :disabled="deleting" @click="confirmDelete">
-          {{ deleting ? '删除中…' : '删除' }}
+          {{ deleting ? t('UsersView.xfc2799', '删除中…') : t('UsersView.x2f4aad', '删除') }}
         </button>
       </template>
     </AppSheet>
 
     <!-- 角色管理 -->
-    <AppSheet v-model="showRoles" :title="`角色管理 · ${roleTarget?.username ?? ''}`" size="lg">
+    <AppSheet v-model="showRoles" :title="t('UsersView.x69a69f', '角色管理 · {p1}', { p1: roleTarget?.username ?? '' })" size="lg">
       <div class="roles">
         <div class="roles__col">
           <h3 class="roles__h">{{ t('UsersView.9723b3', '当前角色') }}</h3>
@@ -482,7 +482,7 @@ onMounted(() => {
               <option v-for="r in availableRoles" :key="r.code" :value="r.code">{{ r.name }}（{{ r.code }}）</option>
             </select>
             <button class="btn-primary" type="button" :disabled="!pickRole || savingRole" @click="assignRole">
-              {{ savingRole ? '分配中…' : '分配' }}
+              {{ savingRole ? t('UsersView.x0468aa', '分配中…') : t('UsersView.xe39de3', '分配') }}
             </button>
           </div>
         </div>

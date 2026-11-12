@@ -91,19 +91,19 @@ const phoneValid = computed(() => {
 async function onSubmit(): Promise<void> {
   serverError.value = ''
   if (!username.value || !password.value) {
-    serverError.value = '请输入用户名和口令'
+    serverError.value = t('RegisterView.x5a6056', '请输入用户名和口令')
     return
   }
   if (!passwordOk.value) {
-    serverError.value = '口令不满足安全策略，请检查下方提示'
+    serverError.value = t('RegisterView.x3a044b', '口令不满足安全策略，请检查下方提示')
     return
   }
   if (!emailValid.value) {
-    serverError.value = '邮箱格式不正确'
+    serverError.value = t('RegisterView.x75262e', '邮箱格式不正确')
     return
   }
   if (!phoneValid.value) {
-    serverError.value = '手机号格式不正确'
+    serverError.value = t('RegisterView.x19c896', '手机号格式不正确')
     return
   }
 
@@ -222,12 +222,12 @@ async function onSubmit(): Promise<void> {
           <p v-if="serverError" class="reg-error">{{ serverError }}</p>
 
           <button class="btn-primary auth__submit" type="submit" :disabled="submitting">
-            {{ submitting ? '注册中…' : '注册' }}
+            {{ submitting ? t('RegisterView.x24d8b3', '注册中…') : t('RegisterView.xfe0e8b', '注册') }}
           </button>
         </form>
 
         <p class="auth__switch">
-          已有账号？<RouterLink to="/login">{{ t('RegisterView.6c01b0', '返回登录') }}</RouterLink>
+          {{ t('RegisterView.xc3b432', '已有账号？') }}<RouterLink to="/login">{{ t('RegisterView.6c01b0', '返回登录') }}</RouterLink>
         </p>
       </div>
     </main>

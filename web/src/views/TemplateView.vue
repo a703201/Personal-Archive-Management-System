@@ -22,10 +22,10 @@ import { api } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
 import {
   CATEGORY_DEFS,
-  categoryName,
+  catName,
   formatTime,
-  sensitivityName,
-  statusName,
+  sensitivityLabel,
+  statusLabel,
 } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
 
@@ -279,7 +279,7 @@ onMounted(load)
       <div>
         <h1 class="page-title">{{ tr('TemplateView.dad23e', '条目模板') }}</h1>
         <p class="page-desc">
-          把常用档案的骨架存成模板，套用时一次生成多条，省去重复填写。
+          {{ tr('TemplateView.x6be055', '把常用档案的骨架存成模板，套用时一次生成多条，省去重复填写。') }}
         </p>
       </div>
       <button class="btn-primary" type="button" @click="openCreate">{{ tr('TemplateView.1eaf5c', '新建模板') }}</button>
@@ -288,7 +288,7 @@ onMounted(load)
     <p v-if="loading" class="hint">{{ tr('TemplateView.300ee3', '加载中…') }}</p>
     <p v-else-if="loadError" class="hint hint--error">{{ loadError }}</p>
     <p v-else-if="templates.length === 0" class="hint">
-      还没有模板。点「新建模板」把常建的档案存下来（如「身份证」「职业资格证」）。
+      {{ tr('TemplateView.x40a5df', '还没有模板。点「新建模板」把常建的档案存下来（如「身份证」「职业资格证」）。') }}
     </p>
 
     <ul v-else class="tpl-list">
@@ -296,16 +296,16 @@ onMounted(load)
         <div class="tpl-item__main">
           <div class="tpl-item__top">
             <span class="tpl-item__name">{{ t.name }}</span>
-            <span class="chip">{{ categoryName(t.category) }}</span>
+            <span class="chip">{{ catName(t.category) }}</span>
             <span class="chip chip--sens" :class="`chip--sens${t.sensitivity}`">
-              {{ sensitivityName(t.sensitivity) }}
+              {{ sensitivityLabel(t.sensitivity) }}
             </span>
           </div>
           <p class="tpl-item__title">{{ t.title }}</p>
           <div class="tpl-item__meta">
-            <span>{{ statusName(t.status) }}</span>
+            <span>{{ statusLabel(t.status) }}</span>
             <span v-if="Number(t.expiresOffsetDays) > 0">
-              有效期 +{{ t.expiresOffsetDays }} 天
+              {{ tr('TemplateView.xb3d133', '有效期 +') }}{{ t.expiresOffsetDays }} {{ tr('TemplateView.x249aba', '天') }}
             </span>
             <span v-if="t.issuer">{{ tr('TemplateView.89de45', '签发：') }}{{ t.issuer }}</span>
             <span>{{ tr('TemplateView.d9db02', '更新') }} {{ formatTime(t.updatedAt) }}</span>
@@ -313,7 +313,7 @@ onMounted(load)
         </div>
         <div class="tpl-item__actions">
           <button class="btn-text" type="button" @click="openApply(t)">{{ tr('TemplateView.ed8305', '套用') }}</button>
-          <button class="btn-text" type="button" @click="openEdit(t)">编辑</button>
+          <button class="btn-text" type="button" @click="openEdit(t)">{{ tr('TemplateView.x95b351', '编辑') }}</button>
           <button class="btn-text danger" type="button" @click="askDelete(t)">{{ tr('TemplateView.3755f5', '删除') }}</button>
         </div>
       </li>
@@ -353,9 +353,9 @@ onMounted(load)
         <label class="field">
           <span class="field__label">{{ tr('TemplateView.435c52', '分类') }}</span>
           <select v-model.number="form.category" class="field-control" @change="onCategoryChange">
-            <option v-for="c in categoryOptions" :key="c.code" :value="c.code">
-              {{ c.name }}
-            </option>
+              <option v-for="c in categoryOptions" :key="c.code" :value="c.code">
+                {{ catName(c.code) }}
+              </option>
           </select>
         </label>
         <label class="field">
@@ -402,7 +402,7 @@ onMounted(load)
             class="field-control field-control--mono"
             rows="4"
             spellcheck="false"
-            placeholder='{"发证机关": "市公安局"}'
+            :placeholder='tr("TemplateView.x41cebd", "{\"发证机关\": \"市公安局\"}")'
           />
           <span class="field__hint">{{ tr('TemplateView.63ac22', '套用时会原样写入每个新条目的扩展字段') }}</span>
         </label>
@@ -410,10 +410,10 @@ onMounted(load)
 
       <template #footer>
         <button class="btn-ghost" type="button" :disabled="saving" @click="showEdit = false">
-          取消
+          {{ tr('TemplateView.x625fb2', '取消') }}
         </button>
         <button class="btn-primary" type="button" :disabled="saving" @click="save">
-          {{ saving ? '保存中…' : '保存' }}
+          {{ saving ? tr('TemplateView.x9b5d32', '保存中…') : tr('TemplateView.xbe5fbb', '保存') }}
         </button>
       </template>
     </AppSheet>
@@ -459,7 +459,7 @@ onMounted(load)
           :disabled="applying || subjects.length === 0"
           @click="apply"
         >
-          {{ applying ? '生成中…' : '生成档案' }}
+          {{ applying ? tr('TemplateView.x069491', '生成中…') : tr('TemplateView.xbbbf27', '生成档案') }}
         </button>
       </template>
     </AppSheet>
@@ -474,7 +474,7 @@ onMounted(load)
           取消
         </button>
         <button class="btn-danger" type="button" :disabled="deleting" @click="confirmDelete">
-          {{ deleting ? '删除中…' : '删除' }}
+          {{ deleting ? tr('TemplateView.xfc2799', '删除中…') : tr('TemplateView.x2f4aad', '删除') }}
         </button>
       </template>
     </AppSheet>

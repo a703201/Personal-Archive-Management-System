@@ -393,6 +393,8 @@ main(): Int64 {
     ).register(router)
     // 租户运营（SaaS 方案 A · 阶段 3）：配额 / 配置 / 审计聚合视图
     TenantOpsRoutes(TenantOpsRepo(db)).register(router)
+    // 租户注册 / 首次引导（阶段 3 收口）：列表、建租户、一次性建 org_admin
+    TenantRegistryRoutes(TenantRegistry(db), hasher, passwordValidator, policy.iterations).register(router)
     // 条目接口（FR-ARCH-001~008）：带资源守卫，对象级鉴权在此生效
     let itemRepo = ItemRepo(db)
     let itemFieldRepo = ItemFieldRepo(db)
@@ -668,7 +670,7 @@ main(): Int64 {
     let apiServer = ApiServer(
         config.httpHost, config.httpPort, router, staticDir: webDir)
 
-    // 中间件链顺序：请求ID -> 访问日志 -> 限流 -> 鉴权
+    // 中间件链顺序：请求ID -> 访问日志 -> 限流 -> 鉴权 -> 租户配额闸门 -> 业务处理
     apiServer.use(requestIdMiddleware())
     apiServer.use(accessLogMiddleware())
     apiServer.use(rateLimitMiddleware(rateLimiter))
@@ -694,6 +696,10 @@ main(): Int64 {
         ),
         router
     ))
+    // ---- 租户配额闸门（docs/15 阶段 3 收口）----
+    // 必须排在鉴权之后：req.tenantId 由 authMiddleware 填充。
+    // 默认开启，AMS_QUOTA_ENFORCE=false 可整体关闭（灰度 / 压测回退）。
+    apiServer.use(tenantQuotaMiddleware(TenantQuotaGuard(db)))
 
     log.info("server.ready", None, [
         ("routes", "${router.size()}"),

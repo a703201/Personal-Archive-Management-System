@@ -264,10 +264,11 @@ docker compose -p ams -f deploy/compose/docker-compose.yml up -d --no-build ams
 > 一个进程一个端口），要么 nginx 前端容器 + 后端容器（多容器、需反代）。
 > 全栈 `docker compose up` 默认走前者。
 
-### 4.5 可选 S3 profile（Q2 预留，**默认不启用**）
+### 4.5 可选 S3 profile（Q2 可选，**默认不启用**，最终选型已定稿）
 
-Q2（附件存储最终用自建 MinIO / 华为云 OBS / 本地 FS）仍待运维·甲方确认。
-本仓已按方案 A 落地**可插拔骨架**，默认仍是本地 FS：
+Q2 已于 2026-11-12 定稿：默认「本地 FS」或「自建 MinIO」，云 OBS 作为可选接入项
+（共 8 选 1：local / minio / huawei / aliyun / qiniu / tencent / aws / s3）。
+本仓方案 A 多厂商驱动已真实落地，默认仍是本地 FS：
 
 ```bash
 # 默认起栈：只有 ams + ams_opengauss（+ 一次性 init），行为与改造前一致
@@ -277,11 +278,13 @@ docker compose -p ams -f deploy/compose/docker-compose.yml up -d
 docker compose -p ams -f deploy/compose/docker-compose.yml --profile s3 up -d
 ```
 
-> ⚠️ **`--profile s3` 只起 MinIO 容器，不代表对象存储已可用**。
-> 本批已补 HMAC-SHA256（RFC 4231 验证）与 **SigV4 签名计算**（AWS 官方
-> GET Object 向量验证），但 `S3Transport`（HTTP 客户端）仍未接入。
-> 选择非 `local` 平台会让应用**启动即失败关闭**（`StorageFailure`），
-> 不会静默回落 FS、更不会明文写入。
+> ⚠️ **`--profile s3` 起 MinIO 容器后，配合 `AMS_STORAGE_PROVIDER=minio` + 配齐
+> `AMS_S3_*` 即真实可用**：2026-11-09 已补齐 HMAC-SHA256（RFC 4231 向量验证）、
+> SigV4 签名计算（AWS 官方 GET Object 向量）与**真实 HTTP/1.1 传输层**
+> （`HttpS3Transport`，http/https 均可，404→None、其余失败关闭）。配置缺失 /
+> 连接 / 签名 / 响应失败一律**失败关闭**，不静默回落 FS、更不会明文写入。
+> 仅「直接 `new S3ObjectStorage` 不传 transport」的罕见路径才会落到
+> `UnavailableS3Transport` 失败关闭桩；工厂 `StorageBackends.make` 始终注入真实 `HttpS3Transport`。
 >
 > **平台选择接口**（`cfg:read` / `cfg:manage`，配置写 `deployment.env`，重启生效）：
 > `GET /api/admin/storage/providers`（8 个可选平台：local / minio / huawei /
@@ -289,9 +292,49 @@ docker compose -p ams -f deploy/compose/docker-compose.yml --profile s3 up -d
 > `PUT /api/admin/storage/config`。库内已有附件时，改变 provider / endpoint /
 > bucket 会被 **Conflict 拒绝**（旧 `storage_key` 会在新后端失效）。
 >
-> 生产启用对象存储前还需补：真实 HTTP 客户端 → 桶策略（禁公共读）→
-> 端到端上传下载验证。隔离区（FR-ATT-007）恒定本地 FS。完整配置位见
-> `deploy/config/ams.env.example` 的 Q2 段与 `docs/README.md` §六。
+> **端到端往返验证（2026-11-12 实测）**：
+> - 真实 MinIO 一键：`bash scripts/ci/verify-minio.sh`（起本 profile 容器 + 跑 `ams-storage`
+>   集成测试真实 MinIO 往返 PUT/GET/404/DELETE）。
+> - **免 Docker 等效验证**：`bash scripts/ci/verify-s3-moto.sh`（用 `moto` 起 S3 兼容端点
+>   替代 MinIO，无需拉取镜像 / 无需重启 Docker / 无需 WSL）。本环境因镜像节点繁忙且
+>   沙箱禁止重启 Docker，已用该脚本完成**真实 HTTP 往返验证**：SigV4 签名被服务端接受、
+>   中文 key 无损、404→None、DELETE 语义全部通过（`ams-storage` 64 用例 0 失败）。
+> 集成用例 `s3_integration_test.cj` 默认 SKIP，仅 `AMS_IT_MINIO=1` 且 127.0.0.1:9000
+> 可达时真连；验证结果见 CHANGELOG。
+> → 桶策略（禁公共读）→ 存量附件迁移方案。七牛 QiniuV2 / 阿里 OssV1
+> 自有签名仍标注未实现，只走各家 S3 兼容 + SigV4。隔离区（FR-ATT-007）
+> 恒定本地 FS。完整配置位见 `deploy/config/ams.env.example` 的 Q2 段与
+> `docs/README.md` §六。
+
+### 4.6 反向代理与客户端 IP（限流 / 验证码分桶）
+
+验证码签发限流与通用 IP 限流按客户端地址分桶。若 ams 前面挂了 Nginx /
+Ingress / 云负载均衡，`remoteAddr` 恒为代理地址，**所有用户会共用一个桶而被误限流**。
+
+后端提供 `ams.api.http.ClientIp`（`packages/ams-api/src/http/clientip.cj`），
+默认**不信任**任何 `X-Forwarded-For` / `X-Real-IP`（这类头客户端可伪造），
+行为与改造前完全一致、零回归。需要反代时按下面三步开启：
+
+```bash
+# 1) 反代必须覆盖、而不是追加 XFF（deploy/docker/nginx.conf 已按此配置）：
+#    proxy_set_header X-Forwarded-For $remote_addr;
+#    proxy_set_header X-Real-IP       $remote_addr;
+
+# 2) 在 .env 显式开启后端解析（compose 默认 false）：
+AMS_TRUST_PROXY_HEADERS=true
+# 3) 可选：只允许来自这些直连代理的请求携带代理头（逗号分隔）。
+#    留空 = 不限制直连来源，适用于容器网络内仅反代可访问后端的部署。
+AMS_TRUSTED_PROXY_IPS=172.28.0.20,10.0.0.9
+```
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `AMS_TRUST_PROXY_HEADERS` | `false` | 仅 `true` 时采信代理头；其它值一律按 socket 地址处理 |
+| `AMS_TRUSTED_PROXY_IPS` | 空 | 可信直连代理白名单；非空且 `remoteAddr` 不在其中时忽略代理头 |
+
+解析结果会做键规范化校验（IPv4 四段数字 / IPv6 字符集，长度 ≤ 64），
+非法值一律回退 socket 地址，绝不把未校验字符串写进日志或内存表。
+单测：`packages/ams-api/tests/http/clientip_test.cj`（6 例，含伪造头回退与 IPv6 映射地址）。
 
 ---
 
@@ -330,6 +373,7 @@ compose 把三个凭据改为 `${VAR:?...}` 必填变量；后端另有 **SEC-00
 - [ ] 配置 `AMS_DB_APP_USER` / `AMS_DB_APP_PASSWORD` 受限角色 `ams_app`（见 §1）
 - [ ] 不要在 compose / 镜像里硬编码口令，改用 `env_file` 或 Docker secrets；`.env` 不入库
 - [ ] 反向代理置于容器前终止 TLS 后转发 `:8080`（容器本身只提供 HTTP）
+- [ ] 若启用了反代：按 §4.6 设置 `AMS_TRUST_PROXY_HEADERS=true`、用 `$remote_addr` 覆盖 XFF，并按需配置 `AMS_TRUSTED_PROXY_IPS`（不设会全体共用一个限流桶）
 - [ ] 限制 `15432` 端口暴露、收紧 `db` 的 `privileged: true`（见 [RUNBOOK.md](RUNBOOK.md) §8）
 - [ ] 持久卷 `ams_ogdata`（external）、`ams-config`、`ams-data`、`ams-exports`、`ams-mail`、`ams-backups` 已声明；**确认备份策略**：用 `deploy/scripts/backup.sh` 定期导出并按 [RUNBOOK.md](RUNBOOK.md) §3 校验，恢复步骤与演练见 §4
 - [ ] 配置异地后端（`RCLONE_REMOTE` 或 `OFFSITE_HOST` + `OFFSITE_PATH`）并启用 `deploy/scripts/backup-offsite.sh`（校验通过才复制、未配置即报错退出；默认未启用）

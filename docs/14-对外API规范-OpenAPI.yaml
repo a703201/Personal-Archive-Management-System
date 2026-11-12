@@ -2,7 +2,7 @@
 # AMS · 对外 API 规范（OpenAPI 3.1）
 #
 # 核心资源 schema 已定义，部分动态字段以 additionalProperties 保留，字段以代码为准。
-# 覆盖 packages/ams-api/src/routes 下 203 个 method+path 组合（157 个唯一路径）。
+# 覆盖 packages/ams-api/src/routes 下 206 个 method+path 组合。
 # request/response 按路径语义引用 components.schemas 中的结构化定义；
 # 无法判定语义的动态字段以 type: object + additionalProperties: true 保留。
 # 所有 2xx 响应实际由 ApiEnvelope 包裹（见 http.cj ApiResponse.ok），
@@ -5929,6 +5929,91 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/tenants:
+    get:
+      operationId: get_admin_tenants
+      tags: [admin]
+      summary: GET /api/admin/tenants (租户列表, acl:manage)
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      operationId: post_admin_tenants
+      tags: [admin]
+      summary: POST /api/admin/tenants (建租户并播种默认配额, acl:manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: 租户编码已存在或创建失败
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/tenants/{id}/bootstrap-admin:
+    post:
+      operationId: post_admin_tenants_by_id_bootstrap_admin
+      tags: [admin]
+      summary: POST /api/admin/tenants/:id/bootstrap-admin (一次性建首个 org_admin, acl:manage)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 该租户已有用户, 首次引导只允许执行一次
         '500':
           $ref: '#/components/responses/ServerError'
 

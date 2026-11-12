@@ -23,6 +23,8 @@ export function clearToken(): void {
   sessionStorage.removeItem(TOKEN_KEY)
 }
 
+import { t } from '../i18n'
+
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
@@ -101,12 +103,12 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   } catch (e) {
     // 网络层失败靠 catch 区分：超时 / 调用方取消 / 真正的网络错误
     if (timedOut) {
-      throw new ApiError(0, 'TIMEOUT', '请求超时，请检查网络后重试')
+      throw new ApiError(0, 'TIMEOUT', t('ApiError.timeout', '请求超时，请检查网络后重试'))
     }
     if ((e as Error)?.name === 'AbortError') {
       throw e // 调用方主动取消，原样透出
     }
-    throw new ApiError(0, 'NETWORK', '网络连接失败，请稍后重试')
+    throw new ApiError(0, 'NETWORK', t('ApiError.network', '网络连接失败，请稍后重试'))
   } finally {
     if (timer) clearTimeout(timer)
     signal?.removeEventListener('abort', forwardAbort)
@@ -117,7 +119,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   try {
     payload = text ? (JSON.parse(text) as Envelope<T>) : undefined
   } catch {
-    throw new ApiError(res.status, 'BAD_RESPONSE', '响应不是合法 JSON')
+    throw new ApiError(res.status, 'BAD_RESPONSE', t('ApiError.badJson', '响应不是合法 JSON'))
   }
 
   if (!res.ok) {
@@ -129,13 +131,13 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     if (res.status === 401 && auth) {
       clearToken()
       // 交给上层路由决定跳转，这里只抛出，避免与 vue-router 强耦合
-      throw new ApiError(401, 'UNAUTHORIZED', '登录已失效，请重新登录')
+      throw new ApiError(401, 'UNAUTHORIZED', t('ApiError.unauthorized', '登录已失效，请重新登录'))
     }
     throw new ApiError(res.status, payload?.code ?? 'ERROR', payload?.message ?? res.statusText)
   }
 
   if (!payload) {
-    throw new ApiError(res.status, 'EMPTY', '空响应')
+    throw new ApiError(res.status, 'EMPTY', t('ApiError.empty', '空响应'))
   }
   return payload.data
 }
@@ -169,20 +171,20 @@ export async function apiBinary<T>(
   })
   if (res.status === 401) {
     clearToken()
-    throw new ApiError(401, 'UNAUTHORIZED', '登录已失效，请重新登录')
+    throw new ApiError(401, 'UNAUTHORIZED', t('ApiError.unauthorized', '登录已失效，请重新登录'))
   }
   const text = await res.text()
   let payload: Envelope<T> | undefined
   try {
     payload = text ? (JSON.parse(text) as Envelope<T>) : undefined
   } catch {
-    throw new ApiError(res.status, 'BAD_RESPONSE', '响应不是合法 JSON')
+    throw new ApiError(res.status, 'BAD_RESPONSE', t('ApiError.badJson', '响应不是合法 JSON'))
   }
   if (!res.ok) {
     throw new ApiError(res.status, payload?.code ?? 'ERROR', payload?.message ?? res.statusText)
   }
   if (!payload) {
-    throw new ApiError(res.status, 'EMPTY', '空响应')
+    throw new ApiError(res.status, 'EMPTY', t('ApiError.empty', '空响应'))
   }
   return payload.data
 }
@@ -195,7 +197,7 @@ export async function apiBlob(path: string): Promise<Blob> {
   const res = await fetch(`/api${path}`, { headers, credentials: 'same-origin' })
   if (res.status === 401) {
     clearToken()
-    throw new ApiError(401, 'UNAUTHORIZED', '登录已失效，请重新登录')
+    throw new ApiError(401, 'UNAUTHORIZED', t('ApiError.unauthorized', '登录已失效，请重新登录'))
   }
   if (!res.ok) {
     // 错误响应是 JSON 信封，这里取出 message 便于提示

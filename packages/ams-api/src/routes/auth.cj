@@ -343,7 +343,8 @@ public class AuthRoutes {
         if (!oldId.isEmpty()) {
             CaptchaStore.invalidate(oldId)
         }
-        let ch = CaptchaStore.issueForIp(req.remoteAddr, Times.nowMillis())
+        // 反代部署下按可配置策略解析客户端 IP；默认不信任 XFF（见 ClientIp）。
+        let ch = CaptchaStore.issueForIp(ClientIp.resolve(req), Times.nowMillis())
         // devHint 由 CaptchaStore 严格门禁：仅「非 production + 显式测试开关」时非空，
         // 生产恒为空串，因此响应里不会出现该字段（见 captcha.cj devHintAllowed）。
         let data = "{\"captchaId\":\"${ApiResponse.escape(ch.captchaId)}\"," +

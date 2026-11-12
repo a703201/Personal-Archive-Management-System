@@ -8,25 +8,47 @@
  */
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { t } from '../i18n'
-import { aboutConfig, ABOUT_PLACEHOLDER } from '../config/about'
+import { t, locale } from '../i18n'
+import { aboutConfig, type AboutLink } from '../config/about'
 
 const cfg = aboutConfig
 
-/** 空字段统一显示占位文案，填入真实值后自动切换 */
-function valueOrPlaceholder(v: string): string {
-  return v && v.trim() ? v : ABOUT_PLACEHOLDER.text
+/** 按当前 locale 选取三语文案，缺译回退 zh */
+function L<T>(zh: T, en?: T, fr?: T): T {
+  if (locale.value === 'en') return (en ?? zh) as T
+  if (locale.value === 'fr') return (fr ?? zh) as T
+  return zh
 }
 
+/** 空字段统一显示占位文案，填入真实值后自动切换 */
+function valueOrPlaceholder(v: string): string {
+  return v && v.trim() ? v : t('about.placeholderText', '待补充')
+}
+
+const placeholderLink = t('about.placeholderLink', '待配置')
+
 /** 外链 aria-label：静态结构走 t()，动态字段用 vars 注入，避免 en/fr 残留中文括号 */
-function linkAriaLabel(label: string, description: string): string {
+function linkAriaLabel(l: AboutLink): string {
   const newWindow = t('about.opensNewWindow', '在新窗口打开')
+  const label = linkLabel(l)
+  const description = linkDesc(l)
   return t('about.linkAria', `${label} · ${description}（${newWindow}）`, {
     label,
     description,
     newWindow,
   })
 }
+
+function linkLabel(l: AboutLink): string {
+  return L(l.label, l.labelEn, l.labelFr)
+}
+
+function linkDesc(l: AboutLink): string {
+  return L(l.description, l.descriptionEn, l.descriptionFr)
+}
+
+const tagline = computed(() => L(cfg.tagline, cfg.taglineEn, cfg.taglineFr))
+const summary = computed(() => L(cfg.summary, cfg.summaryEn, cfg.summaryFr))
 
 /** 仍有未提供的内容时，才显示「如何替换」的说明 */
 const hasPending = computed(
@@ -44,14 +66,14 @@ const hasPending = computed(
       <div class="about__mark" aria-hidden="true">A</div>
       <p class="about__eyebrow">{{ t('about.eyebrow', '关于') }}</p>
       <h1 class="page-title">{{ cfg.productName }}</h1>
-      <p class="about__tagline">{{ cfg.tagline }}</p>
+      <p class="about__tagline">{{ tagline }}</p>
       <p class="about__version">v{{ cfg.version }} · {{ cfg.license }}</p>
     </header>
 
     <!-- 项目简介 -->
     <div class="card about__card">
       <h2 class="section-title">{{ t('about.introTitle', '项目简介') }}</h2>
-      <p v-for="(para, i) in cfg.summary" :key="i" class="about__para">{{ para }}</p>
+      <p v-for="(para, i) in summary" :key="i" class="about__para">{{ para }}</p>
       <ul class="about__stack" :aria-label="t('about.stack', '技术栈')">
         <li v-for="s in cfg.stack" :key="s" class="about__stack-item">{{ s }}</li>
       </ul>
@@ -94,22 +116,22 @@ const hasPending = computed(
             :href="link.href"
             target="_blank"
             rel="noopener noreferrer"
-            :aria-label="linkAriaLabel(link.label, link.description)"
+            :aria-label="linkAriaLabel(link)"
           >
             <span class="about__link-text">
-              <span class="about__link-label">{{ link.label }}</span>
-              <span class="about__link-desc">{{ link.description }}</span>
+              <span class="about__link-label">{{ linkLabel(link) }}</span>
+              <span class="about__link-desc">{{ linkDesc(link) }}</span>
             </span>
             <svg class="about__link-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="m9 18 6-6-6-6" />
             </svg>
           </a>
-          <div v-else class="about__link about__link--pending" :aria-label="`${link.label} · ${ABOUT_PLACEHOLDER.link}`">
+          <div v-else class="about__link about__link--pending" :aria-label="`${linkLabel(link)} · ${placeholderLink}`">
             <span class="about__link-text">
-              <span class="about__link-label">{{ link.label }}</span>
-              <span class="about__link-desc">{{ link.description }}</span>
+              <span class="about__link-label">{{ linkLabel(link) }}</span>
+              <span class="about__link-desc">{{ linkDesc(link) }}</span>
             </span>
-            <span class="about__tag">{{ ABOUT_PLACEHOLDER.link }}</span>
+            <span class="about__tag">{{ placeholderLink }}</span>
           </div>
         </li>
       </ul>

@@ -165,7 +165,7 @@ async function saveMeta(): Promise<void> {
       method: 'PUT',
       body: { summary: metaSummary.value, keywords: metaKeywords.value },
     })
-    notice.value = '已保存摘要与关键词'
+    notice.value = tr('AttachmentPanel.xa168b2', '已保存摘要与关键词')
     metaOpen.value = false
     await load()
   } catch (e) {
@@ -343,7 +343,7 @@ async function openVersions(a: Att): Promise<void> {
 
 async function compare(): Promise<void> {
   if (!verAtt.value || !cmpFrom.value || !cmpTo.value) {
-    error.value = '请选择两个版本'
+    error.value = tr('AttachmentPanel.x55caa9', '请选择两个版本')
     return
   }
   try {
@@ -359,7 +359,7 @@ async function makeCurrent(v: Ver): Promise<void> {
   if (!verAtt.value) return
   try {
     await api(`/attachments/${verAtt.value.id}/versions/${v.id}/current`, { method: 'POST' })
-    notice.value = `已切换到 v${v.versionNo}`
+    notice.value = tr('AttachmentPanel.xa78c8a', '已切换到 v{p1}', { p1: v.versionNo })
     await openVersions(verAtt.value)
   } catch (e) {
     error.value = (e as Error).message || tr('componentsAttachmentPanel.9e2fdc', '切换失败')
@@ -389,7 +389,7 @@ async function uploadVersion(ev: Event): Promise<void> {
       const j = await res.json().catch(() => ({}))
       throw new Error(j.message || tr('componentsAttachmentPanel.c39493', `上传失败（${res.status}）`, { status: res.status }))
     }
-    notice.value = `已上传新版本 ${file.name}`
+    notice.value = tr('AttachmentPanel.x264e4b', '已上传新版本 {p1}', { p1: file.name })
     verNote.value = ''
     await openVersions(verAtt.value)
     await load()
@@ -431,7 +431,7 @@ async function batchDownload(): Promise<void> {
     a.download = res.fileName
     a.click()
     URL.revokeObjectURL(url)
-    notice.value = `已打包 ${picked.value.size} 个附件（${fmtSize(res.size)}）`
+    notice.value = tr('AttachmentPanel.x2284f3', '已打包 {p1} 个附件（{p2}）', { p1: picked.value.size, p2: fmtSize(res.size) })
   } catch (e) {
     error.value = (e as Error).message || tr('componentsAttachmentPanel.cc2b99', '打包下载失败')
   } finally {
@@ -461,7 +461,7 @@ function toggleTag(id: number): void {
 
 async function applyTags(mode: 'add' | 'remove'): Promise<void> {
   if (pickedTags.value.size === 0) {
-    error.value = '请选择标签'
+    error.value = tr('AttachmentPanel.xce7cf5', '请选择标签')
     return
   }
   busy.value = true
@@ -470,7 +470,7 @@ async function applyTags(mode: 'add' | 'remove'): Promise<void> {
       method: 'POST',
       body: { ids: Array.from(picked.value), tagIds: Array.from(pickedTags.value), mode },
     })
-    notice.value = mode === 'add' ? '标签已添加' : tr('componentsAttachmentPanel.7fcc85', '标签已移除')
+    notice.value = mode === 'add' ? tr('AttachmentPanel.x3ea58d', '标签已添加') : tr('componentsAttachmentPanel.7fcc85', '标签已移除')
     tagOpen.value = false
   } catch (e) {
     error.value = (e as Error).message || tr('componentsAttachmentPanel.c9c0ae', '打标签失败')
@@ -488,7 +488,7 @@ async function batchDelete(): Promise<void> {
       method: 'POST',
       body: { ids: Array.from(picked.value) },
     })
-    notice.value = '已删除'
+    notice.value = tr('AttachmentPanel.x5cc232', '已删除')
     await load()
   } catch (e) {
     error.value = (e as Error).message || tr('componentsAttachmentPanel.72250c', '删除失败')
@@ -506,7 +506,7 @@ onMounted(load)
       <h3 class="att__title">{{ tr('AttachmentPanel.4ff6b6', '附件（') }}{{ list.length }}{{ tr('AttachmentPanel.fa354c', '）') }}</h3>
       <div class="att__actions">
         <button class="btn-text" type="button" :disabled="busy" @click="fileInput?.click()">
-          上传
+          {{ tr('AttachmentPanel.xd5a73b', '上传') }}
         </button>
         <input ref="fileInput" class="hidden" type="file" @change="upload" />
       </div>
@@ -522,16 +522,16 @@ onMounted(load)
             :checked="picked.size === list.length"
             @change="toggleAll"
           />
-          全选
+          {{ tr('AttachmentPanel.x66eeac', '全选') }}
         </label>
         <span v-if="picked.size > 0" class="pickbar__count">{{ tr('AttachmentPanel.f24ddc', '已选') }} {{ picked.size }}</span>
         <template v-if="picked.size > 0">
           <button class="btn-text" type="button" :disabled="busy" @click="batchDownload">
-            打包下载
+            {{ tr('AttachmentPanel.xa2247c', '打包下载') }}
           </button>
           <button class="btn-text" type="button" :disabled="busy" @click="openTag">{{ tr('AttachmentPanel.58446e', '打标签') }}</button>
           <button class="btn-text btn-text--danger" type="button" :disabled="busy" @click="batchDelete">
-            删除
+            {{ tr('AttachmentPanel.x2f4aad', '删除') }}
           </button>
         </template>
       </div>
@@ -643,7 +643,7 @@ onMounted(load)
         </div>
         <div v-if="diff" class="diff">
           <p class="diff__sum">
-            内容{{ diff.contentChanged ? '已变化' : '未变化' }} · 大小变化
+            内容{{ diff.contentChanged ? tr('AttachmentPanel.x1ac6e8', '已变化') : tr('AttachmentPanel.x6392f0', '未变化') }} · 大小变化
             {{ diff.sizeDelta > 0 ? '+' : '' }}{{ diff.sizeDelta }} B
           </p>
           <table class="diff__table">

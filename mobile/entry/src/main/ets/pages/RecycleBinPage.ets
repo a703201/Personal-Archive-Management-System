@@ -1,12 +1,14 @@
 import { ApiClient, RecycleBinData } from '../common/api/ApiClient';
-import { C, F } from '../common/theme/Theme';
-import { ArchiveItem, categoryName } from '../common/models/Models';
+import { C, F, applyTheme } from '../common/theme/Theme';
+import { t, categoryNameI18n } from '../common/theme/I18n';
+import { ArchiveItem } from '../common/models/Models';
 import { formatDate } from '../common/utils/Format';
 import { Logger } from '../common/utils/Logger';
 
 @Component
 export struct RecycleBinPage {
   @StorageLink('ams_data_version') @Watch('onDataChanged') dataVersion: number = 0;
+  @StorageLink('ams_theme_rev') @Watch('onThemeRev') themeRev: number = 0;
   @State items: ArchiveItem[] = [];
   @State loading: boolean = false;
   @State errorMsg: string = '';
@@ -14,6 +16,10 @@ export struct RecycleBinPage {
 
   aboutToAppear(): void {
     this.load();
+  }
+
+  onThemeRev(): void {
+    applyTheme();
   }
 
   onDataChanged(): void {
@@ -53,7 +59,7 @@ export struct RecycleBinPage {
         } else if (this.errorMsg.length > 0) {
           Column() {
             Text(this.errorMsg).fontSize(F.body).fontColor(C.danger)
-            Button('重试')
+            Button(t('common.retry'))
               .height(40)
               .fontSize(F.body)
               .backgroundColor(C.accent)
@@ -64,7 +70,7 @@ export struct RecycleBinPage {
           }
           .margin({ top: 60 })
         } else if (this.items.length === 0) {
-          Text('暂无回收站条目')
+          Text(t('recycle.empty'))
             .fontSize(F.body)
             .fontColor(C.ink3)
             .margin({ top: 60 })
@@ -79,13 +85,13 @@ export struct RecycleBinPage {
                       .fontColor(C.ink)
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(categoryName(it.category) + ' · ' + formatDate(it.updatedAt))
+                    Text(categoryNameI18n(it.category) + ' · ' + formatDate(it.updatedAt))
                       .fontSize(F.caption)
                       .fontColor(C.ink3)
                       .margin({ top: 4 })
                   }
                   .layoutWeight(1)
-                  Button(this.busyId === it.id ? '恢复中…' : '恢复')
+                  Button(this.busyId === it.id ? t('recycle.restoring') : t('recycle.restore'))
                     .height(32)
                     .fontSize(F.caption)
                     .backgroundColor(C.accentSoft)
@@ -109,7 +115,7 @@ export struct RecycleBinPage {
       .height('100%')
       .backgroundColor(C.bg)
     }
-    .title('回收站')
+    .title(t('settings.recycle'))
     .backgroundColor(C.bg)
   }
 }

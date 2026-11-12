@@ -20,6 +20,16 @@
 > 本批不改动业务功能完成度口径（P0 54 / P1 34 / P2 23 不变），属能力补强 + 安全收口。
 > 版本号提升至 **1.3.0**（语义化 minor：多新功能模块 + 安全加固）。
 
+### 收口（2026-11-12 · 线上故障根治 + 工程治理 + 阶段 3 边界清零）
+
+- **根治后端全局 dead lock**：`ams-app/src/auth/auth.cj` 的 `failureCounts` 原为**无锁 `HashMap`**，并发登录（Web + 移动端）会破坏哈希桶结构使 `get()` 死循环、占死 stdx 工作线程，进而拖垮 `/api/branding`、`/api/setup/status` 等所有接口（30s 超时并报 `Exception: dead lock`）。改为 `LoginFailureCounter`：读 / 写 / 删全部经 `Mutex` 串行化，并补 TTL（1h）、桶上限（10000，表满对未知键 fail-closed 返回保守值）、扫描间隔节流。新增 `packages/ams-app/tests/auth/login_failure_counter_test.cj` **5 例**（含 32 线程并发递增精确性、读写删混合压力）。经审计 `ParamDistributor.distribute()` 的锁只保护只读匹配、handler 在锁外执行，非本次根因，未改动。
+- **反代客户端 IP 可配置解析**：新增 `ams.api.http.ClientIp`，验证码签发限流与通用 IP 限流改按 `ClientIp.resolve(req)` 分桶。默认**不信任** `X-Forwarded-For` / `X-Real-IP`（零伪造面）；`AMS_TRUST_PROXY_HEADERS=true` 显式开启，可用 `AMS_TRUSTED_PROXY_IPS` 限定可信直连代理；IP 键做 IPv4 / IPv6 规范化校验，非法一律回退 socket 地址。`deploy/docker/nginx.conf` 把 `$proxy_add_x_forwarded_for` 改为**覆盖式** `$remote_addr`；compose、部署指南、Checklist 同步。单测 6 例。
+- **配额写路径强制闸门**：新增 `TenantQuotaGuard` + `tenantQuotaMiddleware`（鉴权之后），创建类 POST 按租户配额拦截，超限返回新错误码 **`QUOTA_EXCEEDED` / 429**。`AMS_QUOTA_ENFORCE=false` 可整体回退；配额表缺失 / 查询失败记 warn 放行，不阻断业务写入。单测 6 例（边界 +1、字节向上取整、路径识别、错误码映射）。
+- **租户注册 / 首次引导**：新增 `TenantRegistry` + `TenantRegistryRoutes`（`GET /api/admin/tenants`、`POST /api/admin/tenants`、`POST /api/admin/tenants/:id/bootstrap-admin`，`acl:manage`）。两步式建租户（播种默认配额）→ 一次性建首个 `org_admin`；口令复用主路径策略与哈希，显式写 `tenant_id`，重复引导拒绝，失败补偿删孤儿行。单测 4 例。
+- **Q2 配套收口**：`SystemView.vue` 新增「存储平台」配置面板（8 平台 / 凭据脱敏 / 重启提示 / 定位三元组锁定），i18n 三语各 +25 键且键集一致；新增 `docs/16-对象存储迁移方案.md`（迁移 / 校验 / 回滚）与 `scripts/ci/verify-minio.sh`（一键端到端；**本机 Docker daemon 不可用，尚未实跑**）；`docs/README.md` §六 补 Q2 可拍板结论。
+- **工程治理**：根 README 数字由 381 tests / 185 路由 / 23 迁移订正为实测值；`web/dist` 旧 chunk 清理（175 → 129 文件，`vue-tsc` + `vite build` 全绿）；`deploy/README.md` §4.5 关于「S3Transport 未接入」的过时表述改为真实传输层已落地的口径。
+- **移动端功能补齐**：`mobile/` 新增 9 个页面 + `CacheStore` / `Settings` / `I18n`，覆盖主体管理、标签、共享链接、模板、历史版本、系统信息、家庭组、附件、导入导出任务、搜索高亮、深色 / 三语 / 大字、离线缓存落盘。`bash mobile/build_hap.sh` 实跑 5 次，最终 `BUILD SUCCESSFUL`、零 WARN。降级项见 `mobile/README.md`（条目已挂标签无只读端点、系统运维改用公开只读端点、历史页面 i18n 未全量翻译、真机未联调）。
+
 ### 新增（检索 / 授权 / 上传 / 国际化 · 真实小缺口收口）
 - **搜索高亮片段**（FR-SRC-001 补遗）：新增 `ams.core.search.SearchHighlighter`，按 **UTF-8 字符边界**把命中切成 `[{text,hit}]` 分段（含长文本以首命中为中心开窗 + 省略号、ASCII 大小写折叠、对齐后端「单字回退 LIKE」）。`GET /api/search` 每行返回 `highlight.title` / `highlight.issuer`；**敏感度 ≥ 2 的条目 issuer 不生成高亮**，避免通过片段反推掩码前明文。前端 `GlobalSearch.vue` 用 `v-for` + `<mark>` 渲染，**不用 v-html**（零 XSS 面）。单测 11 例。
 - **分片上传 / 断点续传**（FR-ATT-001 补齐）：新增 `ChunkUploadStore`（单实例内存态 + Mutex，1 MiB 分片、50 MB 上限、24h TTL、归属绑定、非末片长度强校验、重传幂等）与 5 个端点 `POST/GET/PUT/POST/DELETE /api/attachments/upload/sessions...`。合并后的明文**原样交给 `AttachmentService.upload()`**，加密 / 去重 / 审计 / 媒体链路零回归。前端 `web/src/api/chunkedUpload.ts` 在文件 > 1 MiB 时启用，会话 ID 存 sessionStorage 支持刷新后续传；小文件仍走原单次上传。单测 9 例。
