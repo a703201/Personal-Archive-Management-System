@@ -29,7 +29,7 @@ import ams.storage.*
 public class Mailer {
     private let emailRepo: EmailRepo
     private let configRepo: ConfigRepo
-    /** 短信 provider（FR-NTF-005）：默认 Noop，sms.enabled=true 时启用。 */
+    /** 短信 provider（FR-NTF-005）：默认 Noop，由 makeSmsProvider 按部署配置选择。 */
     private let smsProvider: SmsProvider
     /** SMTP 暂存（默认禁用，行为与旧版一致；启用后由 mail-spool.sh 真实投递）。 */
     private let spool: MailSpool
@@ -97,17 +97,23 @@ public class Mailer {
     /**
      * 安全事件告警（FR-NTF-005）：站内信（调用方负责 push）+ 邮件 + 可选短信。
      *
-     * 邮件始终发送；短信仅当 sms.enabled=true 且该用户留有手机号时尝试，
+     * 邮件始终发送；短信仅当短信通道总开关（部署配置 SMS_ENABLED / 旧 sms.enabled）打开且该用户留有手机号时尝试，
      * 失败不影响邮件与站内信。返回的 id 为邮件入队 id（短信不返回 id）。
      */
     public func sendAlert(toAddr: String, phone: String, subject: String, body: String): Int64 {
         let mailId = this.send(toAddr, subject, body)
-        let smsEnabled = this.configRepo.getValue("sms", "enabled", "false") == "true"
+        let smsEnabled = smsChannelEnabled(this.configRepo)
         if (smsEnabled && !phone.isEmpty()) {
+            // 短信为 best-effort 通道：Spool 投递失败会抛 AppError，这里捕获后不阻断主流程，
+            // 但必须以 ERROR 级别留痕（含原因），确保故障对运维可见，绝不静默降级。
             try {
-                this.smsProvider.send(phone, "【AMS】${subject}")
+                this.smsProvider.send(phone, "【AMS】${subject}\n${body}")
             } catch (e: Exception) {
-                Log.get().error("sms.failed", None, [("phone", phone), ("err", "${e}")])
+                Log.get().error("sms.failed", None, [
+                    ("phone", phone),
+                    ("err", "${e}"),
+                    ("note", "短信 best-effort 失败，邮件/站内信不受影响")
+                ])
             }
         }
         return mailId

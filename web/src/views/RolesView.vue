@@ -21,7 +21,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { t } from '../i18n'
 import { api } from '../api/client'
-import { categoryName } from '../composables/useCatalog'
+import { catName } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
 import AppSheet from '../components/AppSheet.vue'
 
@@ -167,7 +167,7 @@ async function savePerms(): Promise<void> {
       method: 'POST',
       body: { perms: [...selected.value] },
     })
-    success(t('viewsRolesView.f1e96f', `已为「${permTarget.value.name}」设置 ${selected.value.size} 项权限`))
+    success(t('viewsRolesView.f1e96f', `已为「${permTarget.value.name}」设置 ${selected.value.size} 项权限`, { name: permTarget.value.name, count: selected.value.size }))
     showPerms.value = false
   } catch (e) {
     toastError((e as Error).message)
@@ -231,7 +231,7 @@ async function loadPreview(): Promise<void> {
 /** 主体范围的可读说明 */
 function scopeText(d: PreviewData): string {
   if (d.scope === 'any') return t('viewsRolesView.184631', '全机构主体')
-  if (d.scope.startsWith('user:')) return t('viewsRolesView.c879b2', `指定用户（ID ${d.scope.slice(5)}）的可访问主体`)
+  if (d.scope.startsWith('user:')) return t('viewsRolesView.c879b2', `指定用户（ID ${d.scope.slice(5)}）的可访问主体`, { id: d.scope.slice(5) })
   return t('viewsRolesView.de48b2', '仅本人范围（该角色不含 archive:*:any，故不猜测他人主体）')
 }
 
@@ -262,10 +262,10 @@ onMounted(load)
             <div class="u-sub">{{ r.code }}</div>
           </div>
           <span class="badge" :class="isBuiltin(r) ? 'badge--builtin' : 'badge--custom'">
-            {{ isBuiltin(r) ? '内置' : '自定义' }}
+            {{ isBuiltin(r) ? t('RolesView.x89e180', '内置') : t('RolesView.xf1d4ff', '自定义') }}
           </span>
         </div>
-        <p class="role-desc">{{ r.description || '（无描述）' }}</p>
+        <p class="role-desc">{{ r.description || t('RolesView.xd496ae', '（无描述）') }}</p>
         <div class="role-meta">{{ t('RolesView.bff342', '数据级别上限：') }}{{ r.max_data_level }}</div>
         <div class="role-actions">
           <button class="btn-text" type="button" @click="openPerms(r)">{{ t('RolesView.560165', '权限') }}</button>
@@ -276,7 +276,7 @@ onMounted(load)
             type="button"
             @click="askDelete(r)"
           >
-            删除
+            {{ t('RolesView.x2f4aad', '删除') }}
           </button>
         </div>
       </div>
@@ -305,13 +305,13 @@ onMounted(load)
       <template #footer>
         <button class="btn-ghost" type="button" @click="showCreate = false">{{ t('RolesView.4d0b46', '取消') }}</button>
         <button class="btn-primary" type="button" :disabled="creating" @click="createRole">
-          {{ creating ? '创建中…' : '创建' }}
+          {{ creating ? t('RolesView.xd156b3', '创建中…') : t('RolesView.xd9ac92', '创建') }}
         </button>
       </template>
     </AppSheet>
 
     <!-- 权限设置 -->
-    <AppSheet v-model="showPerms" :title="`权限设置 · ${permTarget?.name ?? ''}`" size="lg">
+    <AppSheet v-model="showPerms" :title="t('RolesView.xdee9ca', '权限设置 · {p1}', { p1: permTarget?.name ?? '' })" size="lg">
       <div v-if="isBuiltin(permTarget)" class="notice">
         内置角色由系统管理，此处仅展示权限目录（只读）。如需调整，请新建自定义角色后分配。
       </div>
@@ -359,7 +359,7 @@ onMounted(load)
           :disabled="isBuiltin(permTarget) || savingPerms"
           @click="savePerms"
         >
-          {{ savingPerms ? '保存中…' : '保存' }}
+          {{ savingPerms ? t('RolesView.x9b5d32', '保存中…') : t('RolesView.xbe5fbb', '保存') }}
         </button>
       </template>
     </AppSheet>
@@ -367,7 +367,7 @@ onMounted(load)
     <!-- 权限预览（FR-ACL-013 · 方案 A） -->
     <AppSheet
       v-model="showPreview"
-      :title="`权限预览 · ${previewTarget?.name ?? ''}`"
+      :title="t('RolesView.xf8a4d1', '权限预览 · {p1}', { p1: previewTarget?.name ?? '' })"
       size="md"
     >
       <div class="notice">
@@ -419,7 +419,7 @@ onMounted(load)
           <dd>{{ previewData.fields.visibleLevels.join(' / ') || '—' }}</dd>
           <dt>{{ t('RolesView.79255c', '掩码敏感度') }}</dt>
           <dd>
-            {{ previewData.fields.maskedLevels.join(' / ') || '无（该角色可见全部级别）' }}
+            {{ previewData.fields.maskedLevels.join(' / ') || t('RolesView.xbbe9e6', '无（该角色可见全部级别）') }}
           </dd>
           <dt>{{ t('RolesView.b298af', '权限点数') }}</dt>
           <dd>{{ previewData.perms.length }} 项</dd>
@@ -429,7 +429,7 @@ onMounted(load)
         <p v-if="previewCategories.length === 0" class="hint">{{ t('RolesView.85d965', '该范围内没有可见条目。') }}</p>
         <ul v-else class="cat-list">
           <li v-for="c in previewCategories" :key="c.category" class="cat-row">
-            <span class="cat-row__name">{{ categoryName(c.category) }}</span>
+            <span class="cat-row__name">{{ catName(c.category) }}</span>
             <span class="cat-row__bar">
               <span
                 class="cat-row__fill"
@@ -459,7 +459,7 @@ onMounted(load)
       <template #footer>
         <button class="btn-ghost" type="button" :disabled="deleting" @click="showDelete = false">{{ t('RolesView.4d0b46', '取消') }}</button>
         <button class="btn-danger" type="button" :disabled="deleting" @click="confirmDelete">
-          {{ deleting ? '删除中…' : '删除' }}
+          {{ deleting ? t('RolesView.xfc2799', '删除中…') : t('RolesView.x2f4aad', '删除') }}
         </button>
       </template>
     </AppSheet>

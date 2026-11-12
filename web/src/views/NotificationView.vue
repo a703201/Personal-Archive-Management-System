@@ -145,7 +145,7 @@ onMounted(load)
         :disabled="markingAll || items.length === 0"
         @click="markAllRead"
       >
-        {{ markingAll ? '处理中…' : '全部已读' }}
+        {{ markingAll ? t('NotificationView.xcf978c', '处理中…') : t('NotificationView.x1d1a68', '全部已读') }}
       </button>
     </div>
 
@@ -176,7 +176,7 @@ onMounted(load)
         <div class="note__body">
           <div class="note__head">
             <span class="badge badge--cat">{{ categoryLabel(n.category) }}</span>
-            <span v-if="isImportant(n)" class="tag-imp">重要</span>
+            <span v-if="isImportant(n)" class="tag-imp">{{ t('NotificationView.xfc7e38', '重要') }}</span>
             <span class="note__title">{{ n.title }}</span>
           </div>
           <p class="note__text">{{ n.body }}</p>
@@ -192,7 +192,7 @@ onMounted(load)
             :disabled="markingId === n.id"
             @click="markRead(n)"
           >
-            {{ markingId === n.id ? '处理中…' : '标为已读' }}
+            {{ markingId === n.id ? t('NotificationView.xcf978c', '处理中…') : t('NotificationView.xc14e0d', '标为已读') }}
           </button>
         </div>
       </article>
@@ -200,7 +200,7 @@ onMounted(load)
 
     <div v-if="!loading && total > size" class="pager">
       <button class="btn-ghost" type="button" :disabled="page <= 1" @click="changePage(-1)">
-        上一页
+        {{ t('NotificationView.xf4f853', '上一页') }}
       </button>
       <span class="pager__info">{{ t('NotificationView.dae828', '第') }} {{ page }} {{ t('NotificationView.42099b', '/') }} {{ totalPages() }} {{ locale === 'zh-CN' ? t('NotificationView.734221', '页') : '' }}</span>
       <button
@@ -209,7 +209,7 @@ onMounted(load)
         :disabled="page >= totalPages()"
         @click="changePage(1)"
       >
-        下一页
+        {{ t('NotificationView.xb4e1b5', '下一页') }}
       </button>
     </div>
   </section>

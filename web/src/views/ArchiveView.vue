@@ -23,7 +23,7 @@ import AppSheet from '../components/AppSheet.vue'
 import AttachmentPanel from '../components/AttachmentPanel.vue'
 import ShareLinkPanel from '../components/ShareLinkPanel.vue'
 import DatePicker from '../components/DatePicker.vue'
-import { CATEGORY_DEFS as CATEGORIES, categoryName, categorySensitivity } from '../composables/useCatalog'
+import { CATEGORY_DEFS as CATEGORIES, catName, categorySensitivity, sensitivityLabel } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
 
 const toast = useToast()
@@ -50,8 +50,7 @@ const RELATION_OPTS = [
   { value: 4, label: tr('viewsArchiveView.1a26ed', '其他') },
 ]
 
-/** 本页历史别名，指向共享字典（保留调用点不变，减少改动面） */
-const catName = categoryName
+// 分类名（locale 感知，直接取自 useCatalog 的 catName）
 const catSensitivity = categorySensitivity
 
 function statusLabel(v: number | string): string {
@@ -59,8 +58,7 @@ function statusLabel(v: number | string): string {
 }
 
 function sensLabel(v: number | string): string {
-  const n = Number(v)
-  return n >= 3 ? '高敏' : n === 2 ? '敏感' : tr('viewsArchiveView.7cda07', '普通')
+  return sensitivityLabel(v)
 }
 
 /**
@@ -274,8 +272,13 @@ async function batchEdit(): Promise<void> {
     )
     const skipped = res.requested - res.updated
     toast.success(
-      tr('viewsArchiveView.9fead2', `已更新 ${res.updated} 条${res.tagged ? `，打标 ${res.tagged} 次` : ''}`) +
-        (skipped > 0 ? `；${skipped} 条未变更（可能无权限或已删除）` : ''),
+      tr('viewsArchiveView.9fead2', `已更新 ${res.updated} 条`, { count: res.updated }) +
+        (res.tagged
+          ? tr('viewsArchiveView.batchTagged', `，打标 ${res.tagged} 次`, { count: res.tagged })
+          : '') +
+        (skipped > 0
+          ? tr('viewsArchiveView.batchUnchanged', `；${skipped} 条未变更（可能无权限或已删除）`, { count: skipped })
+          : ''),
     )
     selected.value = new Set()
     editCategory.value = null
@@ -307,7 +310,7 @@ async function batchDelete(): Promise<void> {
         // 单条失败不阻断其余已选项
       }
     }
-    toast.success(tr('viewsArchiveView.f36211', `已删除 ${ok} 条（移入回收站）`))
+    toast.success(tr('viewsArchiveView.f36211', `已删除 ${ok} 条（移入回收站）`, { count: ok }))
     selected.value = new Set()
     await loadItems()
   } catch (e) {
@@ -591,7 +594,7 @@ async function save(): Promise<void> {
     if (Object.keys(fields).length > 0) {
       await api(`/items/${itemId}/fields`, { method: 'PUT', body: fields })
     }
-    toast.success(formMode.value === 'create' ? '档案已创建' : tr('viewsArchiveView.06ad0b', '档案已更新'))
+    toast.success(formMode.value === 'create' ? tr('viewsArchiveView.created', '档案已创建') : tr('viewsArchiveView.06ad0b', '档案已更新'))
     showForm.value = false
     await loadItems()
   } catch (e) {
@@ -749,7 +752,7 @@ function inputType(t: number | string): string {
       <div>
         <h1 class="page-title">{{ tr('ArchiveView.3ca928', '档案') }}</h1>
         <p class="page-sub">
-          共 {{ total }} 条
+          {{ tr('ArchiveView.totalCount', '共 {n} 条', { n: total }) }}
           <template v-if="activeSubject"> {{ tr('ArchiveView.2eaeb7', '· 当前主体') }} {{ activeSubject.name }}</template>
         </p>
       </div>
@@ -795,7 +798,7 @@ function inputType(t: number | string): string {
       />
       <select v-model.number="category" class="field-control" @change="reload">
         <option :value="0">{{ tr('ArchiveView.a8e369', '全部分类') }}</option>
-        <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ c.name }}</option>
+        <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ catName(c.code) }}</option>
       </select>
       <select v-model.number="status" class="field-control" @change="reload">
         <option v-for="s in STATUS_OPTS" :key="s.value" :value="s.value">{{ s.label }}</option>
@@ -856,7 +859,7 @@ function inputType(t: number | string): string {
             type="checkbox"
             class="item__checkbox"
             :checked="selected.has(String(it.id))"
-            :aria-label="tr('ArchiveView.888021', '`选择 ${it.title}`')"
+            :aria-label="tr('ArchiveView.888021', `选择 ${it.title}`, { title: it.title })"
             @change="toggleSelect(String(it.id))"
           />
         </label>
@@ -881,7 +884,7 @@ function inputType(t: number | string): string {
             :disabled="cloningId === String(it.id)"
             @click.stop="cloneItem(it)"
           >
-            {{ cloningId === String(it.id) ? '复制中…' : '复制' }}
+            {{ cloningId === String(it.id) ? tr('ArchiveView.x05f26e', '复制中…') : tr('ArchiveView.x79d3ab', '复制') }}
           </button>
           <button class="btn-text btn-text--danger" type="button" @click.stop="askDelete(it)">
             删除
@@ -912,7 +915,7 @@ function inputType(t: number | string): string {
         <span>{{ tr('ArchiveView.3b6209', '改分类') }}</span>
         <select v-model="editCategory" class="field-control field-control--sm">
           <option :value="null">{{ tr('ArchiveView.47de0d', '（不改）') }}</option>
-          <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ c.name }}</option>
+          <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ catName(c.code) }}</option>
         </select>
       </label>
       <label class="batchbar__field">
@@ -927,7 +930,7 @@ function inputType(t: number | string): string {
         </select>
       </label>
       <button class="btn-primary" type="button" :disabled="batchEditing" @click="batchEdit">
-        {{ batchEditing ? '应用中…' : '应用修改' }}
+        {{ batchEditing ? tr('ArchiveView.x9a6c96', '应用中…') : tr('ArchiveView.xeb7352', '应用修改') }}
       </button>
       <button class="btn-ghost" type="button" @click="selected = new Set()">取消</button>
       <button
@@ -936,7 +939,7 @@ function inputType(t: number | string): string {
         :disabled="batchDeleting"
         @click="batchDelete"
       >
-        {{ batchDeleting ? '删除中…' : '批量删除' }}
+        {{ batchDeleting ? tr('ArchiveView.xfc2799', '删除中…') : tr('ArchiveView.x7fb62b', '批量删除') }}
       </button>
     </div>
 
@@ -980,7 +983,7 @@ function inputType(t: number | string): string {
             class="field-control"
             @change="onCategoryChange"
           >
-            <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ c.name }}</option>
+            <option v-for="c in CATEGORIES" :key="c.code" :value="c.code">{{ catName(c.code) }}</option>
           </select>
         </label>
 
@@ -1046,7 +1049,7 @@ function inputType(t: number | string): string {
           取消
         </button>
         <button class="btn-primary" type="button" :disabled="saving" @click="save">
-          {{ saving ? '保存中…' : '保存' }}
+          {{ saving ? tr('ArchiveView.x9b5d32', '保存中…') : tr('ArchiveView.xbe5fbb', '保存') }}
         </button>
       </div>
     </AppSheet>
@@ -1144,7 +1147,7 @@ function inputType(t: number | string): string {
           取消
         </button>
         <button class="btn-primary" type="button" :disabled="subjectSaving" @click="saveSubject">
-          {{ subjectSaving ? '保存中…' : '保存' }}
+          {{ subjectSaving ? tr('ArchiveView.x9b5d32', '保存中…') : tr('ArchiveView.xbe5fbb', '保存') }}
         </button>
       </div>
     </AppSheet>
@@ -1168,7 +1171,7 @@ function inputType(t: number | string): string {
             :disabled="restoring === String(it.id)"
             @click="restoreItem(it)"
           >
-            {{ restoring === String(it.id) ? '恢复中…' : '恢复' }}
+            {{ restoring === String(it.id) ? tr('ArchiveView.xabc103', '恢复中…') : tr('ArchiveView.xc7db6d', '恢复') }}
           </button>
         </div>
       </div>
@@ -1187,7 +1190,7 @@ function inputType(t: number | string): string {
           取消
         </button>
         <button class="btn-danger" type="button" :disabled="deleting" @click="confirmDelete">
-          {{ deleting ? '处理中…' : '移入回收站' }}
+          {{ deleting ? tr('ArchiveView.xcf978c', '处理中…') : tr('ArchiveView.x1e96a9', '移入回收站') }}
         </button>
       </div>
     </AppSheet>

@@ -1,3 +1,14 @@
+# ============================================================
+# 【仅元数据文档 · 不参与构建】（架构演进方案 A，2026-11-08 决策）
+#   本仓全部包使用点号分层命名（ams.kernel / ams.kit ...），而 cjpm 1.2.0
+#   要求 name 为扁平标识符且与源码 package 声明逐字相等 —— 两者不兼容。
+#   请勿执行 cjpm build / check / publish：会报 "the package name ... is wrong"。
+#   实际构建由 scripts/build.sh（cjc 直接编译）完成；框架分发由
+#   scripts/package-kit.sh 打成「静态库 .a + 接口快照 .cjo」发布包。
+#   本文件 name / version 均为模板元数据，无构建含义；
+#   发布版本以 packages/ams-kit/src/kit.cj 的 KIT_VERSION 为唯一来源。
+#   详见 packages/ams-kit/README.md 与 docs/15 §4.1。
+# ============================================================
 [package]
   cjc-version = "1.2.0"
   name = "ams_crypto"

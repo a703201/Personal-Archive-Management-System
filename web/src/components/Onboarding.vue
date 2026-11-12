@@ -89,7 +89,7 @@ function finish(): void {
       <div class="onboard__actions">
         <button class="btn-ghost" type="button" @click="finish">{{ t('Onboarding.31a985', '跳过') }}</button>
         <button class="btn-primary" type="button" @click="next">
-          {{ isLast ? '开始使用' : '下一步' }}
+          {{ isLast ? t('Onboarding.x85d22d', '开始使用') : t('Onboarding.x38ce27', '下一步') }}
         </button>
       </div>
     </div>

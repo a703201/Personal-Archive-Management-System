@@ -10,7 +10,7 @@
  * 前端不缓存任何令牌到 localStorage：重置令牌只放在组件内存里，
  * 页面刷新即丢弃（重新走验证码），减少泄漏面。
  */
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { t } from '../i18n'
 import { useRouter } from 'vue-router'
 import { api } from '../api/client'
@@ -29,6 +29,40 @@ const error = ref('')
 const notice = ref('')
 const masked = ref('')
 const busy = ref(false)
+
+/**
+ * 图形验证码（FR-AUTH-011）：第一步 /auth/password/forgot 强制要求，
+ * 第二步「重新发送」复用同一接口，故同样需要。SVG 用 <img :src>，
+ * 禁止 v-html 注入；captcha 状态在两步间共享。
+ */
+const captchaId = ref('')
+const captchaSvg = ref('')
+const captchaCode = ref('')
+const captchaSrc = computed(() =>
+  captchaSvg.value ? 'data:image/svg+xml,' + encodeURIComponent(captchaSvg.value) : '',
+)
+
+/** 拉取（或刷新）验证码；带 old=<旧 ID> 让后端作废旧挑战。 */
+async function refreshCaptcha(): Promise<void> {
+  const old = captchaId.value
+  try {
+    const q = old ? `?old=${encodeURIComponent(old)}` : ''
+    const res = await api<{ captchaId: string; svg: string; expiresAt: number }>(
+      `/auth/captcha${q}`,
+      { auth: false },
+    )
+    captchaId.value = res.captchaId
+    captchaSvg.value = res.svg
+    captchaCode.value = ''
+  } catch {
+    // 静默降级：用户可点图片/刷新按钮重试
+  }
+}
+
+// 进入第一步即加载一张验证码
+onMounted(() => {
+  void refreshCaptcha()
+})
 
 /** 重置令牌只存内存 */
 let resetToken = ''
@@ -72,7 +106,7 @@ async function sendCode(): Promise<void> {
   error.value = ''
   notice.value = ''
   if (!account.value.trim()) {
-    error.value = '请输入用户名、邮箱或手机号'
+    error.value = t('ForgotPasswordView.xe137fd', '请输入用户名、邮箱或手机号')
     return
   }
   busy.value = true
@@ -86,7 +120,12 @@ async function sendCode(): Promise<void> {
     }>('/auth/password/forgot', {
       method: 'POST',
       auth: false,
-      body: { account: account.value.trim() },
+      body: {
+        account: account.value.trim(),
+        // FR-AUTH-011：第一步 / 重新发送均强制图形验证码
+        captchaId: captchaId.value,
+        captchaCode: captchaCode.value.trim(),
+      },
     })
     if (!res.sent) {
       // 后端已给出人话原因（账号不存在 / 未绑定邮箱 / 请求过频）
@@ -94,20 +133,22 @@ async function sendCode(): Promise<void> {
       return
     }
     masked.value = res.masked
-    notice.value = `${res.notice}（${res.masked}），${Math.floor(res.expiresIn / 60)} 分钟内有效`
+    notice.value = t('ForgotPasswordView.x3fd555', '{p1}（{p2}），{p3} 分钟内有效', { p1: res.notice, p2: res.masked, p3: Math.floor(res.expiresIn / 60) })
     step.value = 2
     startCooldown(60)
   } catch (e) {
     error.value = (e as Error).message || t('viewsForgotPasswordView.644c16', '验证码发送失败')
   } finally {
     busy.value = false
+    // challenge 一次性消费 / 错误 / 过期后都换一张，供本步或第二步重发使用
+    void refreshCaptcha()
   }
 }
 
 async function verifyCode(): Promise<void> {
   error.value = ''
   if (!/^\d{6}$/.test(code.value.trim())) {
-    error.value = '请输入 6 位数字验证码'
+    error.value = t('ForgotPasswordView.x9885d5', '请输入 6 位数字验证码')
     return
   }
   busy.value = true
@@ -118,7 +159,7 @@ async function verifyCode(): Promise<void> {
       body: { account: account.value.trim(), code: code.value.trim() },
     })
     resetToken = res.resetToken
-    notice.value = `验证通过，请在 ${Math.floor(res.expiresIn / 60)} 分钟内设置新口令`
+    notice.value = t('ForgotPasswordView.x099639', '验证通过，请在 {p1} 分钟内设置新口令', { p1: Math.floor(res.expiresIn / 60) })
     step.value = 3
   } catch (e) {
     error.value = (e as Error).message || t('viewsForgotPasswordView.0cba85', '验证码校验失败')
@@ -130,11 +171,11 @@ async function verifyCode(): Promise<void> {
 async function submitReset(): Promise<void> {
   error.value = ''
   if (pwdHint.value) {
-    error.value = `口令不符合要求：${pwdHint.value}`
+    error.value = t('ForgotPasswordView.x7ca374', '口令不符合要求：{p1}', { p1: pwdHint.value })
     return
   }
   if (password.value !== password2.value) {
-    error.value = '两次输入的新口令不一致'
+    error.value = t('ForgotPasswordView.x6ca67c', '两次输入的新口令不一致')
     return
   }
   busy.value = true
@@ -171,12 +212,12 @@ function goLogin(): void {
     <aside class="auth__hero stagger">
       <div class="auth__brand">AMS</div>
       <p class="auth__eyebrow">ACCOUNT RECOVERY</p>
-      <h1 class="auth__headline">忘记口令？<br />一步找回。</h1>
-      <p class="auth__tagline">验证身份后重设，全程无需联系人工。</p>
+      <h1 class="auth__headline">{{ t('ForgotPasswordView.heroHeadlineA', '忘记口令？') }}<br />{{ t('ForgotPasswordView.heroHeadlineB', '一步找回。') }}</h1>
+      <p class="auth__tagline">{{ t('ForgotPasswordView.heroTagline', '验证身份后重设，全程无需联系人工。') }}</p>
       <ul class="auth__points">
-        <li>邮箱验证码，10 分钟内有效</li>
-        <li>重置后自动下线全部会话</li>
-        <li>不改数据，档案原样保留</li>
+        <li>{{ t('ForgotPasswordView.heroPoint1', '邮箱验证码，10 分钟内有效') }}</li>
+        <li>{{ t('ForgotPasswordView.heroPoint2', '重置后自动下线全部会话') }}</li>
+        <li>{{ t('ForgotPasswordView.heroPoint3', '不改数据，档案原样保留') }}</li>
       </ul>
     </aside>
 
@@ -212,11 +253,34 @@ function goLogin(): void {
             />
           </label>
           <p class="hint-block">
-            我们会向账号绑定的邮箱发送 6 位验证码。未绑定邮箱的账号需联系管理员重置。
+            {{ t('ForgotPasswordView.x8170f6', '我们会向账号绑定的邮箱发送 6 位验证码。未绑定邮箱的账号需联系管理员重置。') }}
           </p>
+          <div class="auth__field">
+            <span class="auth__label">{{ t('ForgotPasswordView.captchaLabel', '验证码') }}</span>
+            <div class="captcha-row">
+              <img
+                v-if="captchaSrc"
+                class="captcha-img"
+                :src="captchaSrc"
+                :alt="t('ForgotPasswordView.captchaAlt', '验证码，点击可刷新')"
+                @click="refreshCaptcha"
+              />
+              <button class="captcha-refresh" type="button" @click="refreshCaptcha">
+                {{ t('ForgotPasswordView.captchaRefresh', '刷新') }}
+              </button>
+            </div>
+            <input
+              v-model="captchaCode"
+              class="field-control"
+              type="text"
+              maxlength="6"
+              autocomplete="off"
+              :placeholder="t('ForgotPasswordView.captchaPlaceholder', '请输入上图中的字符')"
+            />
+          </div>
           <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
-            {{ busy ? '发送中…' : '发送验证码' }}
+            {{ busy ? t('ForgotPasswordView.x088157', '发送中…') : t('ForgotPasswordView.xc5c358', '发送验证码') }}
           </button>
         </form>
 
@@ -237,8 +301,32 @@ function goLogin(): void {
           </label>
           <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
-            {{ busy ? '校验中…' : '下一步' }}
+            {{ busy ? t('ForgotPasswordView.x6e89b2', '校验中…') : t('ForgotPasswordView.x38ce27', '下一步') }}
           </button>
+          <!-- 重新发送同样走 /password/forgot，需再填一次图形验证码 -->
+          <div class="auth__field">
+            <span class="auth__label">{{ t('ForgotPasswordView.captchaLabel', '验证码') }}</span>
+            <div class="captcha-row">
+              <img
+                v-if="captchaSrc"
+                class="captcha-img"
+                :src="captchaSrc"
+                :alt="t('ForgotPasswordView.captchaAlt', '验证码，点击可刷新')"
+                @click="refreshCaptcha"
+              />
+              <button class="captcha-refresh" type="button" @click="refreshCaptcha">
+                {{ t('ForgotPasswordView.captchaRefresh', '刷新') }}
+              </button>
+            </div>
+            <input
+              v-model="captchaCode"
+              class="field-control"
+              type="text"
+              maxlength="6"
+              autocomplete="off"
+              :placeholder="t('ForgotPasswordView.captchaPlaceholder', '重发前请输入上图中的字符')"
+            />
+          </div>
           <div class="fgt-row">
             <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
             <button
@@ -247,7 +335,7 @@ function goLogin(): void {
               :disabled="busy || cooldown > 0"
               @click="sendCode"
             >
-              {{ cooldown > 0 ? `重新发送（${cooldown}s）` : '重新发送' }}
+              {{ cooldown > 0 ? t('ForgotPasswordView.x6cadec', '重新发送（{p1}s）', { p1: cooldown }) : t('ForgotPasswordView.x89b213', '重新发送') }}
             </button>
           </div>
         </form>
@@ -279,7 +367,7 @@ function goLogin(): void {
           <p class="hint-block">{{ t('ForgotPasswordView.2d7650', '重置成功后，该账号在所有设备上的登录状态将立即失效，需重新登录。') }}</p>
           <p v-if="error" class="fgt-error" role="alert">{{ error }}</p>
           <button class="btn-primary auth__submit" type="submit" :disabled="busy">
-            {{ busy ? '重置中…' : '重置口令' }}
+            {{ busy ? t('ForgotPasswordView.x9c56ac', '重置中…') : t('ForgotPasswordView.x318b06', '重置口令') }}
           </button>
           <div class="fgt-row">
             <button class="btn-text" type="button" @click="back">{{ t('ForgotPasswordView.75ef12', '上一步') }}</button>
@@ -291,13 +379,13 @@ function goLogin(): void {
           <div class="done" role="status">✓</div>
           <p class="done-text">{{ t('ForgotPasswordView.19d326', '口令已重置') }}</p>
           <p class="hint-block">
-            为了安全，原会话已全部下线。请使用新口令重新登录；若账号已启用双因子，登录时还需输入动态码。
+            {{ t('ForgotPasswordView.x274142', '为了安全，原会话已全部下线。请使用新口令重新登录；若账号已启用双因子，登录时还需输入动态码。') }}
           </p>
           <button class="btn-primary auth__submit" type="button" @click="goLogin">{{ t('ForgotPasswordView.6c01b0', '返回登录') }}</button>
         </div>
 
         <p v-if="step < 4" class="auth__switch">
-          想起来了？<RouterLink to="/login">{{ t('ForgotPasswordView.f2fe4e', '返回登录') }}</RouterLink>
+          {{ t('ForgotPasswordView.xecdb92', '想起来了？') }}<RouterLink to="/login">{{ t('ForgotPasswordView.f2fe4e', '返回登录') }}</RouterLink>
         </p>
       </div>
     </main>
@@ -405,5 +493,27 @@ function goLogin(): void {
   text-align: center;
   font-size: 13px;
   color: var(--text-muted);
+}
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.captcha-img {
+  width: 180px;
+  height: 52px;
+  border: 1px solid var(--border, #d7dce3);
+  border-radius: var(--g3-sm);
+  cursor: pointer;
+  background: #fff;
+}
+.captcha-refresh {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px;
 }
 </style>

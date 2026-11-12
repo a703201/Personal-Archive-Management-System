@@ -27,9 +27,11 @@
 package ams.app.attachment
 
 import std.collection.*
+import std.env.*
 import stdx.encoding.base64.*
 
 import ams.core.attachment.*
+import ams.core.media.*
 import ams.crypto.key.*
 import ams.crypto.provider.*
 import ams.data.repo.*
@@ -65,6 +67,14 @@ public class AttachmentService {
     private let keyManager: KeyManager
     private let cipherProvider: CryptoProvider
     private let itemRepo: ?ItemRepo
+    /**
+     * 用户仓储（可选）：装配后上传前强制校验「目标主体属于当前操作者」，
+     * 堵住「传任意 subjectId 即可往他人主体挂附件」的越权面。
+     * 单次上传 / 分片上传 / 批量导入共用同一条 upload() 链路，故在此一处收口。
+     */
+    private let userRepo: ?UserRepo
+    /** Q2 多厂商：落库时自述平台 code（默认 local，零回归） */
+    private let storageProvider: String
 
     public init(
         repo: AttachmentRepo,
@@ -72,7 +82,9 @@ public class AttachmentService {
         quarantine: StorageBackend,
         keyManager: KeyManager,
         cipherProvider: CryptoProvider,
-        itemRepo!: ?ItemRepo = None
+        itemRepo!: ?ItemRepo = None,
+        userRepo!: ?UserRepo = None,
+        storageProvider!: String = "local"
     ) {
         this.repo = repo
         this.storage = storage
@@ -80,6 +92,8 @@ public class AttachmentService {
         this.keyManager = keyManager
         this.cipherProvider = cipherProvider
         this.itemRepo = itemRepo
+        this.userRepo = userRepo
+        this.storageProvider = storageProvider
     }
 
     /**
@@ -140,6 +154,21 @@ public class AttachmentService {
         if (owner <= 0) {
             throw validationError("subjectId", "缺少 subjectId 或 itemId，无法确定附件归属")
         }
+        // ---- 1c. 归属校验（防越权往他人主体挂附件）----
+        // owner 已在 1b 按 itemId 反查修正，故这里校验的就是最终落库主体。
+        match (this.userRepo) {
+            case Some(ur) =>
+                let subs = ur.listAccessibleSubjectIds(operatorId)
+                if (!subs.contains("${owner}")) {
+                    throw AppError(AppErrorKind.Forbidden, "无权向该主体上传附件")
+                }
+            case None =>
+                // 纯单测 / 内嵌场景未注入用户仓储：不静默放行，留告警便于排查。
+                // 生产装配（main.cj）必定注入，故运行时不会走到这条分支。
+                Log.get().warn("attachment.upload.owner_check_skipped", None, [
+                    ("subjectId", "${owner}"), ("operatorId", "${operatorId}")
+                ])
+        }
         // ---- 2. 指纹与去重（FR-ATT-002）----
         let cipher = AttachmentCipher(this.cipherProvider)
         let fp = match (cipher.fingerprint(plain)) {
@@ -193,7 +222,10 @@ public class AttachmentService {
         let attId = this.repo.create(
             owner, itemId, category, title, storageKey,
             kv.version, plain.size, ext, mime, fp, dkey,
-            status.toCode(), operatorId, summary: summary, keywords: keywords
+            status.toCode(), operatorId, summary: summary, keywords: keywords,
+            // Q2 方案 A：落库记录真实后端与厂商，供后续按后端路由读取 / 迁移
+            storageBackend: this.storage.backendCode(),
+            storageProvider: this.storageProvider
         )
         this.repo.setWrappedDek(attId, AttachmentService.encodeWrapped(wrapped))
 
@@ -230,6 +262,22 @@ public class AttachmentService {
             case None => ()
         }
 
+        // ---- 9. 媒体处理（仅开关开启时自动触发；失败绝不阻断上传）----
+        // OCR 需隐私显式同意（PRD FR-ATT-013）：两个开关都为 true 才执行。
+        if (AttachmentService.mediaEnabled()) {
+            try {
+                let media = this.processMedia(attId, "AMS")
+                Log.get().info("attachment.media.auto", None, [
+                    ("id", "${attId}"), ("ocrStatus", "${media.ocrStatus}"),
+                    ("error", media.error)
+                ])
+            } catch (e: Exception) {
+                Log.get().warn("attachment.media.auto.failed", None, [
+                    ("id", "${attId}"), ("reason", e.toString())
+                ])
+            }
+        }
+
         return UploadResult(attId, false, status.toCode())
     }
 
@@ -238,6 +286,68 @@ public class AttachmentService {
      */
     public func updateMeta(attachmentId: Int64, summary: String, keywords: String, operatorId: Int64): Bool {
         return this.repo.updateMeta(attachmentId, summary, keywords, operatorId)
+    }
+
+    /**
+     * 媒体处理总开关（零回归：默认关闭）。
+     *
+     * OCR 需隐私显式同意（PRD FR-ATT-013）：AMS_MEDIA_ENABLED 与
+     * AMS_OCR_CONSENT 两个环境变量必须**同时**显式为 true 才允许自动处理。
+     * 在 AttachmentService 内部直接读环境变量，不改 main.cj 装配。
+     */
+    public static func mediaEnabled(): Bool {
+        let enabled = (getVariable("AMS_MEDIA_ENABLED") ?? "false").toAsciiLower()
+        let consent = (getVariable("AMS_OCR_CONSENT") ?? "false").toAsciiLower()
+        let enabledOn = enabled == "true" || enabled == "1"
+        let consentOn = consent == "true" || consent == "1"
+        return enabledOn && consentOn
+    }
+
+    /**
+     * 进程内处理附件媒体：OCR / 缩略图 / 像素水印。
+     *
+     * 取明文 → MediaEngine.process（纯仓颉、同步、无外部进程）→
+     * 非空的缩略图 / 水印图落文件存储 → OCR 结果落库。
+     * 任何异常都吞掉并记日志，返回带 error 的 MediaResult，绝不阻断调用方。
+     */
+    public func processMedia(attachmentId: Int64, watermarkText: String): MediaResult {
+        try {
+            let plain = this.download(attachmentId)
+            let result = MediaEngine.process(plain, true, true, true, watermarkText)
+            if (result.thumbnail.size > 0) {
+                this.storage.put("thumb_${attachmentId}.png", result.thumbnail)
+            }
+            if (result.watermarked.size > 0) {
+                this.storage.put("wm_${attachmentId}.png", result.watermarked)
+            }
+            try {
+                this.repo.updateOcr(attachmentId, result.ocrText, result.ocrStatus,
+                    result.ocrEngine, result.error)
+            } catch (e: Exception) {
+                Log.get().warn("attachment.media.ocr.persist.failed", None, [
+                    ("id", "${attachmentId}"), ("reason", e.toString())
+                ])
+            }
+            return result
+        } catch (e: Exception) {
+            Log.get().warn("attachment.media.failed", None, [
+                ("id", "${attachmentId}"), ("reason", e.toString())
+            ])
+            let failed = MediaResult()
+            failed.ocrStatus = 3
+            failed.error = e.toString()
+            return failed
+        }
+    }
+
+    /** 读取已落盘的缩略图（PNG 字节）；未生成返回 None。 */
+    public func mediaThumbnail(attachmentId: Int64): Option<Array<Byte>> {
+        return this.storage.get("thumb_${attachmentId}.png")
+    }
+
+    /** 读取已落盘的像素水印图（PNG 字节）；未生成返回 None。 */
+    public func mediaWatermarked(attachmentId: Int64): Option<Array<Byte>> {
+        return this.storage.get("wm_${attachmentId}.png")
     }
 
     /**

@@ -50,6 +50,9 @@ import urllib.error
 import urllib.request
 import concurrent.futures
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from e2e_captcha import fetch_captcha
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PORT = os.environ.get("AMS_VERIFY_PORT", "18102")
 BASE = "http://127.0.0.1:%s" % PORT
@@ -99,6 +102,15 @@ def call(method, path, body=None, token=None, raw=False):
 
 def data_of(resp):
     return resp[2].get("data") if isinstance(resp[2], dict) else None
+
+
+def register(base_payload):
+    """先取图形验证码，再把 captchaId/captchaCode 合入注册请求体。"""
+    captcha_id, captcha_code = fetch_captcha(BASE)
+    payload = dict(base_payload)
+    payload["captchaId"] = captcha_id
+    payload["captchaCode"] = captcha_code
+    return call("POST", "/api/auth/register", payload)
 
 
 def db_exec(sql):
@@ -210,13 +222,11 @@ check("GET /api/health → OK", st == 200 and data_of((st, ctype, body)) is not 
 print()
 print("[二] 准备账号")
 
-r = call("POST", "/api/auth/register",
-         {"username": user_a, "password": pwd, "email": "%s@e2e.local" % user_a})
+r = register({"username": user_a, "password": pwd, "email": "%s@e2e.local" % user_a})
 check("注册 A", r[0] == 200, str(r[2])[:200])
 id_a = data_of(r).get("id") if data_of(r) else None
 
-r = call("POST", "/api/auth/register",
-         {"username": user_b, "password": pwd, "email": "%s@e2e.local" % user_b})
+r = register({"username": user_b, "password": pwd, "email": "%s@e2e.local" % user_b})
 check("注册 B", r[0] == 200, str(r[2])[:200])
 id_b = data_of(r).get("id") if data_of(r) else None
 
@@ -336,8 +346,7 @@ check("成员建邀请 → 403", r[0] == 403, str(r[2])[:200])
 # ---- 非成员视角：失效邀请一律 404，且落地页不再暴露组名 ----
 # C 只用于验证「非成员 + 失效邀请」，不需要任何权限
 user_c = "e2e_c_" + suffix
-call("POST", "/api/auth/register",
-     {"username": user_c, "password": pwd, "email": "%s@e2e.local" % user_c})
+register({"username": user_c, "password": pwd, "email": "%s@e2e.local" % user_c})
 r = call("POST", "/api/auth/login", {"username": user_c, "password": pwd})
 tok_c = data_of(r).get("accessToken") if data_of(r) else None
 check("登录 C（非成员）", bool(tok_c), str(r[2])[:200])
@@ -393,8 +402,7 @@ CONC_N = 10
 conc_toks = []
 for i in range(CONC_N):
     u = "e2e_cc_%d_%s" % (i, suffix)
-    call("POST", "/api/auth/register",
-         {"username": u, "password": pwd, "email": "%s@e2e.local" % u})
+    register({"username": u, "password": pwd, "email": "%s@e2e.local" % u})
     rr = call("POST", "/api/auth/login", {"username": u, "password": pwd})
     tt = (data_of(rr) or {}).get("accessToken")
     if not tt:

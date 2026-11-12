@@ -193,7 +193,7 @@ async function moveTag(t: TagNode, parentId: string): Promise<void> {
   busy.value = true
   try {
     await api(`/tags/${t.id}/parent`, { method: 'PUT', body: { parentId: parentId || 0 } })
-    success(parentId ? '已移动到该父标签下' : tr('viewsTagView.0a5fb5', '已提升为顶层标签'))
+    success(parentId ? tr('TagView.x971858', '已移动到该父标签下') : tr('viewsTagView.0a5fb5', '已提升为顶层标签'))
     await load()
   } catch (e) {
     toastError((e as Error).message)
@@ -239,7 +239,7 @@ async function confirmMerge(t: TagNode): Promise<void> {
   busy.value = true
   try {
     const r = await api<{ moved: number }>(`/tags/${t.id}/merge`, { method: 'POST', body: { targetId } })
-    success(tr('viewsTagView.b6fae7', `已合并，迁移 ${r.moved} 条关联`))
+    success(tr('viewsTagView.b6fae7', `已合并，迁移 ${r.moved} 条关联`, { count: r.moved }))
     mergeId.value = ''
     await load()
   } catch (e) {
@@ -256,7 +256,7 @@ async function confirmMerge(t: TagNode): Promise<void> {
       <div>
         <h1 class="page-title">{{ tr('TagView.4e02a9', '标签管理') }}</h1>
         <p class="page-sub">
-          支持父子层级（最多 {{ maxDepth }} 层）。移动时会拒绝形成环的层级，深度超限也会被拦下。
+          {{ tr('TagView.xb3e67d', '支持父子层级（最多') }} {{ maxDepth }} {{ tr('TagView.xcf2db9', '层）。移动时会拒绝形成环的层级，深度超限也会被拦下。') }}
         </p>
       </div>
     </div>

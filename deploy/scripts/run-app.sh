@@ -10,15 +10,19 @@
 #
 # ⚠️ 前提（只需在源码变更后重跑）：
 #   bash deploy/scripts/build-linux-docker.sh   # 产出 build/linux/ 与 web/dist/
-#   该脚本会经由 Dockerfile.prebuilt 自动构建 ams:0.1.0（若镜像已存在则不重建）。
+#   该脚本会经由 Dockerfile.prebuilt 自动构建 ams:1.3.0（若镜像已存在则不重建）。
 #
 # 用法：
+#   cp deploy/compose/.env.example deploy/compose/.env   # 首次必做，按需修改
 #   bash deploy/scripts/run-app.sh
-#   AMS_DB_PASSWORD='...' AMS_TOKEN_SECRET='...' bash deploy/scripts/run-app.sh
 #   bash deploy/scripts/run-app.sh --build     # 强制重建应用镜像
+#   # 也可不建 .env，改用环境变量注入（三个必填变量都要给）：
+#   AMS_DB_PASSWORD='...' AMS_TOKEN_SECRET='...' AMS_KEK='...' bash deploy/scripts/run-app.sh
 #
 # 数据保护：数据库数据在命名卷 ams_ogdata（external），重建容器不丢数据。
-#           迁移脚本幂等（检测到 sys_users 即跳过）。
+#           迁移由 compose 的 init 服务执行 migrate.sh，按逐文件台账
+#           _ams_migrations 登记「已成功执行」的迁移，新增迁移会自动补跑；
+#           不是「检测到 sys_users 就整体跳过」（那会漏掉增量迁移）。
 #
 # 已知陷阱（已在本脚本规避）：
 #   - 仓颉运行时只认 IP 字面量，compose 已给 db 分配静态 IP 172.28.0.10。
@@ -28,6 +32,7 @@
 set -uo pipefail
 
 COMPOSE_FILE="$(cd "$(dirname "$0")/.." && pwd)/compose/docker-compose.yml"
+ENV_FILE="$(dirname "$COMPOSE_FILE")/.env"
 PROJECT="${AMS_COMPOSE_PROJECT:-ams}"
 BUILD_FLAG=""
 for a in "$@"; do
@@ -35,6 +40,28 @@ for a in "$@"; do
     --build) BUILD_FLAG="--build" ;;
   esac
 done
+
+# ---- 启动前检查：compose 的三个凭据是 ${VAR:?...} 必填变量 ----
+# 没有 .env、也没从环境注入时，compose 只会抛一句含糊的 ":?" 错误；
+# 这里提前给出可操作的复制指引并退出，避免用户对着报错猜。
+if [ ! -f "$ENV_FILE" ]; then
+  if [ -z "${AMS_DB_PASSWORD:-}" ] || [ -z "${AMS_TOKEN_SECRET:-}" ] || [ -z "${AMS_KEK:-}" ]; then
+    echo "[ERROR] 缺少 compose 变量文件：$ENV_FILE" >&2
+    echo "        docker-compose.yml 已把 AMS_DB_PASSWORD / AMS_TOKEN_SECRET /" >&2
+    echo "        AMS_KEK 改为 \${VAR:?...} 必填变量，未注入时 compose 会直接拒绝启动。" >&2
+    echo "" >&2
+    echo "  请先复制模板并按需修改：" >&2
+    echo "        cp deploy/compose/.env.example deploy/compose/.env" >&2
+    echo "        \$EDITOR deploy/compose/.env" >&2
+    echo "" >&2
+    echo "  或改用环境变量注入后再运行（三个必须都设置）：" >&2
+    echo "        export AMS_DB_PASSWORD=... AMS_TOKEN_SECRET=... AMS_KEK=..." >&2
+    echo "  详见 deploy/README.md §凭据与 SEC-001 与 deploy/RUNBOOK.md。" >&2
+    exit 1
+  fi
+  echo "[WARN] 未找到 $ENV_FILE，但三个必填变量已从环境注入，继续启动。" >&2
+  echo "       仍建议：cp deploy/compose/.env.example deploy/compose/.env" >&2
+fi
 
 echo "=== AMS 统一栈启动（project=$PROJECT）==="
 # 停止并移除「旧的独立容器」（若你之前用 run-app.sh 旧版本或手动起过），

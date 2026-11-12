@@ -1,0 +1,53 @@
+# ============================================================
+# AMS · 每日备份 + 异地副本 oneshot 服务「示例」（默认未启用）
+#
+# 由 ams-backup.timer 触发（每日 02:30）；也可手动跑一次：
+#   sudo systemctl start ams-backup.service
+# 流程：ExecStartPre 先 backup.sh 生成本地逻辑备份，
+#       ExecStart 再 backup-offsite.sh 校验 sha256 后复制到异地。
+# 与 deploy/scripts/crontab.example 二选一，不要同时启用。
+#
+# [!!] 这是样例：未与发布包集成、未实机验证；异地后端（RCLONE_REMOTE
+#      或 OFFSITE_HOST/OFFSITE_PATH）必须由运维在 EnvironmentFile 里配置，
+#      未配置时 backup-offsite.sh 会明确报错退出 1（不会静默成功）。
+# [!!] 行尾：本文件按仓库 Windows 工作区风格为 CRLF；拷到 Linux 前
+#      请先转成 LF（dos2unix /etc/systemd/system/ams-backup.service），
+#      否则 systemd 可能把行尾 CR 读进配置值里。
+#
+# 部署（需 root）：
+#   sudo install -d -m 0750 /etc/ams
+#   sudo cp deploy/config/ams.env.example /etc/ams/ams.env
+#   sudo chmod 600 /etc/ams/ams.env
+#   # 在 /etc/ams/ams.env 填：AMS_DB_PASSWORD / AMS_TOKEN_SECRET / AMS_KEK
+#   #   以及异地后端：RCLONE_REMOTE 或 OFFSITE_HOST + OFFSITE_PATH、OFFSITE_KEEP
+#   #   注意 EnvironmentFile 用纯 KEY=VALUE 文本，不要写 export、不要加引号
+#   sudo cp deploy/systemd/ams-backup.service /etc/systemd/system/
+#   sudo cp deploy/systemd/ams-backup.timer   /etc/systemd/system/
+#   # 把下面所有 /ABS/REPO 替换为仓库在宿主机上的绝对路径
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ams-backup.timer
+#   systemctl list-timers ams-backup.timer
+#   journalctl -u ams-backup.service -f
+#
+# 前提：ams 栈已启动（backup.sh / backup-offsite.sh 需要 db 容器 ams_opengauss
+#       在运行）；Requires=docker.service 只保证 Docker 守护进程，不保证容器。
+# 凭据：AMS_DB_PASSWORD 等写在 /etc/ams/ams.env（600），绝不在单元文件里
+#       明文写密钥（见 deploy/RUNBOOK.md §1.1）。
+# 启用动作清单见 deploy/RUNBOOK.md §9「自动化启用清单」。
+# ============================================================
+
+[Unit]
+Description=AMS 每日备份 + 异地副本（oneshot 示例，默认未启用）
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/ABS/REPO
+EnvironmentFile=/etc/ams/ams.env
+ExecStartPre=/bin/bash /ABS/REPO/deploy/scripts/backup.sh
+ExecStart=/bin/bash /ABS/REPO/deploy/scripts/backup-offsite.sh
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

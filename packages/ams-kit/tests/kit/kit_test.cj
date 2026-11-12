@@ -9,12 +9,14 @@
 package ams.kit.test
 
 import std.unittest.*
+import std.collection.*
 import stdx.encoding.hex.*
 
 import ams.kit.*
 import ams.crypto.provider.*
 import ams.crypto.key.*
 import ams.crypto.blindindex.*
+import ams.security.audit.*
 
 
 @Test
@@ -76,5 +78,81 @@ public class KitFacadeTest {
         @Assert(bi.matches(dk, "VALUE123", "value123", NormalizeRule.GenericV1), true)
         // 不同值不命中
         @Assert(bi.matches(dk, "Different", "value123", NormalizeRule.GenericV1), false)
+    }
+}
+
+// ============================================================
+// Phase 3（docs/15 §4.1）：审计哈希链 / 检索 / 导入模板内核
+// 不做「非空即通过」的弱断言 —— 每个 facade 都跑真实能力。
+// ============================================================
+@Test
+public class KitPhase3Test {
+    private let provider = newCryptoProvider()
+
+    @TestCase
+    public func testAuditChainFacadeComputesRealHash() {
+        let g = auditGenesisHash()
+        @Assert(g.size, 32)
+        var allZero = true
+        for (b in g) {
+            if (b != 0u8) { allZero = false }
+        }
+        @Assert(allZero, true)
+
+        let chain = newAuditChain(this.provider)
+        let e = AuditEntry(
+            1, "u1", ActorType.User, AuditAction.Login, "登录", "user", "u1", "s1", 0,
+            AuditResult.Success, "", "127.0.0.1", "kit-test", "trace1",
+            Array<(String, String)>(), 1790000000000
+        )
+        match (chain.computeHash(e, g)) {
+            case CryptoResult.Ok(h) => @Assert(h.size, 32)   // 真 SM3 摘要
+            case CryptoResult.Err(_) => @Assert(true, false)
+        }
+    }
+
+    @TestCase
+    public func testSearchFacades() {
+        let toks = tokenizeForSearch("档案管理系统")
+        @Assert(toks.size > 0, true)
+        var hasBigram = false
+        for (t in toks) {
+            if (t == "档案") { hasBigram = true }
+        }
+        @Assert(hasBigram, true)
+        // 掩码按字符而非字节，中文首尾各留 1 字
+        let m = maskValue("市公安局", 2)
+        @Assert(m.startsWith("市"), true)
+        @Assert(m.endsWith("局"), true)
+        // 高亮分段 JSON 命中与未命中都在
+        let j = highlightJson("清华大学硕士学位证书", "硕士")
+        @Assert(j.contains("\"hit\":true"), true)
+        @Assert(j.contains("学位证书"), true)
+    }
+
+    @TestCase
+    public func testCsvColumnTemplateMappingAndDefaults() {
+        let mapping = HashMap<String, String>()
+        mapping["姓名"] = "title"
+        mapping["编号"] = "external_id"
+        let defaults = HashMap<String, String>()
+        defaults["status"] = "1"
+        let t = CsvColumnTemplate(["姓名", "编号", "备注"], mapping, defaults)
+        @Assert(t.hasField("title"), true)
+        @Assert(t.hasField("备注"), false)
+        @Assert(t.resolve("title", ["张三", "A001", "x"]), "张三")
+        @Assert(t.resolve("external_id", ["张三", "A001", "x"]), "A001")
+        // 未映射字段走默认值
+        @Assert(t.resolve("status", ["张三"]), "1")
+        // 已映射但缺列、且无默认值 → 空串（不抛异常）
+        @Assert(t.resolve("title", []), "")
+    }
+
+    @TestCase
+    public func testCsvColumnTemplateDuplicateHeaderFirstWins() {
+        let mapping = HashMap<String, String>()
+        mapping["姓名"] = "title"
+        let t = CsvColumnTemplate(["姓名", "姓名"], mapping, HashMap<String, String>())
+        @Assert(t.resolve("title", ["第一列", "第二列"]), "第一列")
     }
 }

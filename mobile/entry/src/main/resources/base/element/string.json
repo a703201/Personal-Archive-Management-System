@@ -1,0 +1,7 @@
+{
+  "string": [
+    { "name": "EntryAbility_label", "value": "档案库" },
+    { "name": "module_desc", "value": "AMS 移动端" },
+    { "name": "internet_reason", "value": "连接档案服务以同步与检索个人档案" }
+  ]
+}

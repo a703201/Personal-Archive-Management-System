@@ -8,7 +8,7 @@
  * 前端只做非空与一致性提示，并以实时清单提示策略，降低提交失败率。
  * 成功 → Toast 提示 → 跳登录页。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { t } from '../i18n'
 import { useRouter, useRoute } from 'vue-router'
 import { api } from '../api/client'
@@ -27,6 +27,39 @@ const confirm = ref('')
 
 const submitting = ref(false)
 const serverError = ref('')
+
+/**
+ * 图形验证码（FR-AUTH-011）：注册接口强制要求，故本页常显。
+ * SVG 用 <img :src> 渲染，禁止 v-html 注入。
+ */
+const captchaId = ref('')
+const captchaSvg = ref('')
+const captchaCode = ref('')
+const captchaSrc = computed(() =>
+  captchaSvg.value ? 'data:image/svg+xml,' + encodeURIComponent(captchaSvg.value) : '',
+)
+
+/** 拉取（或刷新）验证码；带 old=<旧 ID> 让后端作废旧挑战。 */
+async function refreshCaptcha(): Promise<void> {
+  const old = captchaId.value
+  try {
+    const q = old ? `?old=${encodeURIComponent(old)}` : ''
+    const res = await api<{ captchaId: string; svg: string; expiresAt: number }>(
+      `/auth/captcha${q}`,
+      { auth: false },
+    )
+    captchaId.value = res.captchaId
+    captchaSvg.value = res.svg
+    captchaCode.value = ''
+  } catch {
+    // 静默降级：用户可点图片/刷新按钮重试
+  }
+}
+
+// 注册页常显验证码，进入即加载一张
+onMounted(() => {
+  void refreshCaptcha()
+})
 
 /** 口令策略实时清单（与后端策略对齐的轻量前端校验） */
 const policy = computed(() => {
@@ -58,19 +91,19 @@ const phoneValid = computed(() => {
 async function onSubmit(): Promise<void> {
   serverError.value = ''
   if (!username.value || !password.value) {
-    serverError.value = '请输入用户名和口令'
+    serverError.value = t('RegisterView.x5a6056', '请输入用户名和口令')
     return
   }
   if (!passwordOk.value) {
-    serverError.value = '口令不满足安全策略，请检查下方提示'
+    serverError.value = t('RegisterView.x3a044b', '口令不满足安全策略，请检查下方提示')
     return
   }
   if (!emailValid.value) {
-    serverError.value = '邮箱格式不正确'
+    serverError.value = t('RegisterView.x75262e', '邮箱格式不正确')
     return
   }
   if (!phoneValid.value) {
-    serverError.value = '手机号格式不正确'
+    serverError.value = t('RegisterView.x19c896', '手机号格式不正确')
     return
   }
 
@@ -85,6 +118,9 @@ async function onSubmit(): Promise<void> {
         nickname: nickname.value || undefined,
         email: email.value || undefined,
         phone: phone.value || undefined,
+        // FR-AUTH-011：注册强制图形验证码
+        captchaId: captchaId.value,
+        captchaCode: captchaCode.value.trim(),
       },
     })
     success(t('viewsRegisterView.5fcfe1', '注册成功，请登录'))
@@ -93,6 +129,8 @@ async function onSubmit(): Promise<void> {
   } catch (e) {
     serverError.value = (e as Error).message || t('viewsRegisterView.ff3a15', '注册失败，请稍后重试')
     toastError(serverError.value)
+    // challenge 一次性消费 / 错误 / 过期后都需换新图
+    void refreshCaptcha()
   } finally {
     submitting.value = false
   }
@@ -104,12 +142,12 @@ async function onSubmit(): Promise<void> {
     <aside class="auth__hero stagger">
       <div class="auth__brand">AMS</div>
       <p class="auth__eyebrow">GET STARTED</p>
-      <h1 class="auth__headline">几步创建，<br />长久安心。</h1>
-      <p class="auth__tagline">本地优先、最小暴露 —— 你的档案只属于你。</p>
+      <h1 class="auth__headline">{{ t('RegisterView.heroHeadlineA', '几步创建，') }}<br />{{ t('RegisterView.heroHeadlineB', '长久安心。') }}</h1>
+      <p class="auth__tagline">{{ t('RegisterView.heroTagline', '本地优先、最小暴露 —— 你的档案只属于你。') }}</p>
       <ul class="auth__points">
-        <li>12 位以上强口令策略</li>
-        <li>双因子可选，会话可控</li>
-        <li>数据归你，随时导出</li>
+        <li>{{ t('RegisterView.heroPoint1', '12 位以上强口令策略') }}</li>
+        <li>{{ t('RegisterView.heroPoint2', '双因子可选，会话可控') }}</li>
+        <li>{{ t('RegisterView.heroPoint3', '数据归你，随时导出') }}</li>
       </ul>
     </aside>
 
@@ -157,15 +195,39 @@ async function onSubmit(): Promise<void> {
             <span v-if="policy.match === false" class="reg-err">{{ t('RegisterView.3e2b22', '两次输入的口令不一致') }}</span>
           </label>
 
+          <div class="auth__field">
+            <span class="auth__label">{{ t('RegisterView.captchaLabel', '验证码') }} <em>*</em></span>
+            <div class="captcha-row">
+              <img
+                v-if="captchaSrc"
+                class="captcha-img"
+                :src="captchaSrc"
+                :alt="t('RegisterView.captchaAlt', '验证码，点击可刷新')"
+                @click="refreshCaptcha"
+              />
+              <button class="captcha-refresh" type="button" @click="refreshCaptcha">
+                {{ t('RegisterView.captchaRefresh', '刷新') }}
+              </button>
+            </div>
+            <input
+              v-model="captchaCode"
+              class="field-control"
+              type="text"
+              maxlength="6"
+              autocomplete="off"
+              :placeholder="t('RegisterView.captchaPlaceholder', '请输入上图中的字符')"
+            />
+          </div>
+
           <p v-if="serverError" class="reg-error">{{ serverError }}</p>
 
           <button class="btn-primary auth__submit" type="submit" :disabled="submitting">
-            {{ submitting ? '注册中…' : '注册' }}
+            {{ submitting ? t('RegisterView.x24d8b3', '注册中…') : t('RegisterView.xfe0e8b', '注册') }}
           </button>
         </form>
 
         <p class="auth__switch">
-          已有账号？<RouterLink to="/login">{{ t('RegisterView.6c01b0', '返回登录') }}</RouterLink>
+          {{ t('RegisterView.xc3b432', '已有账号？') }}<RouterLink to="/login">{{ t('RegisterView.6c01b0', '返回登录') }}</RouterLink>
         </p>
       </div>
     </main>
@@ -218,5 +280,27 @@ async function onSubmit(): Promise<void> {
   text-align: center;
   font-size: 13px;
   color: var(--text-muted);
+}
+.captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.captcha-img {
+  width: 180px;
+  height: 52px;
+  border: 1px solid var(--border, #d7dce3);
+  border-radius: var(--g3-sm);
+  cursor: pointer;
+  background: #fff;
+}
+.captcha-refresh {
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px;
 }
 </style>

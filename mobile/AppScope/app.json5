@@ -1,0 +1,14 @@
+{
+  // bundleName 已改为 com.ams.mobile（不再借用 Lumio 身份）。
+  // 注意：调试签名证书需与 bundleName 一致，当前 signing/ 下仍是
+  // 借用来的 com.Lumio.music 证书，请在 DevEco → Project Structure
+  // → Signing Configs 中自动生成本应用（com.ams.mobile）自己的调试/发布签名。
+  "app": {
+    "bundleName": "com.ams.mobile",
+    "vendor": "AMS",
+    "versionCode": 1000000,
+    "versionName": "1.0.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
+}

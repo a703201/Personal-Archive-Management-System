@@ -132,8 +132,13 @@ build.failed/
 tools/cangjie.old.*/
 .tmpcap/
 dist/
-.tmpcap/
-dist/
+# vite build --outDir 临时验证产物（gitignore 不支持行内注释）
+dist_*/
+
+# ---- 单元测试临时目录（deployment_test.cj 运行时生成，含假凭据字面量，不入仓）----
+ams_deploy_test_*/
+# 根目录的一次性 i18n 提取脚本（非源码）
+.tmp_*.py
 
 # ---- 运行期数据目录（启动自动生成，不入仓）----
 .tmp/

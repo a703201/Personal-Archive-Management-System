@@ -31,7 +31,10 @@ public func rateLimitMiddleware(
     perIpWindowMillis!: Int64 = 60000
 ): Middleware {
     return { req: ApiRequest =>
-        let ip = if (req.remoteAddr.isEmpty()) { "unknown" } else { req.remoteAddr }
+        // 反代部署下按可配置策略解析客户端 IP；默认仍用 socket 对端地址，
+        // 避免客户端伪造 X-Forwarded-For 绕过限流（见 ams.api.http.ClientIp）。
+        let rawIp = ClientIp.resolve(req)
+        let ip = if (rawIp.isEmpty()) { "unknown" } else { rawIp }
         let now = Times.nowMillis()
         let ok = limiter.allow("api:ip", ip, perIpMax, perIpWindowMillis, 1, now)
         if (!ok) {

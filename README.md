@@ -7,7 +7,7 @@
 [![Backend](https://img.shields.io/badge/backend-Cangjie-1f6feb)](./packages)
 [![Frontend](https://img.shields.io/badge/frontend-Vue%203%20%2B%20TS-42b883)](./web)
 [![Database](https://img.shields.io/badge/database-openGauss-orange)](./db/migrations)
-[![Tests](https://img.shields.io/badge/tests-338%20passed-brightgreen)](./scripts/test.sh)
+[![Tests](https://img.shields.io/badge/tests-523%20passed-brightgreen)](./scripts/test.sh)
 
 ---
 
@@ -45,19 +45,20 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 
 | 批次 | 规模 | 已实现 | 降级交付 | 未开始 | 台账 |
 | --- | --- | --- | --- | --- | --- |
-| **P0/P1/P2** 需求落地 | 111 | **110（99%）** | 5（附件水印 / 缩略图 / OCR / 短信 / 图形验证码，均已降级交付） | 0 | [docs/10](./docs/10-实现状态核对.md) |
+| **P0/P1/P2** 需求落地 | 111 | **111（100%）** | 0（附件水印 / 缩略图 / OCR / 短信 / 图形验证码 5 项能力边界项已于 2026-11-07 全部转正） | 0 | [docs/10](./docs/10-实现状态核对.md) |
 
 工程面实测数据（本机验证，非估算）：
 
 | 指标 | 数值 |
 | --- | --- |
-| 后端源码 | 115 个 `.cj`，约 3.76 万行（含测试） |
-| 前端源码 | 29 个 `.vue` / `.ts`，约 1.24 万行 |
-| 数据库迁移 | 19 个 SQL 文件 |
-| HTTP 路由 | 152 条（启动日志 `server.ready` 打印） |
-| 单元测试 | **272 passed / 0 failed** |
+| 后端源码 | 135 个 `.cj` / 48,091 行；测试 43 个 `.cj` / 9,027 行 |
+| 前端源码 | 47 个源文件（21 视图 / 7 组件 / composables、i18n、样式、api、router、config、入口等） |
+| 数据库迁移 | 26 个 SQL（编号 001–025，`007` 重号两个文件：`007_p1_foundation.sql` / `007_scheduler_ops.sql`；约 47 张表） |
+| HTTP 路由 | 206 条声明（29 个 routes 文件）；OpenAPI 规范 206 个 operation / 160 个 path，静态门禁逐条断言 206/206 覆盖 |
+| 单元测试 | **523 passed / 0 failed**（后端全量 `test.sh`）；前端 typecheck / 16 例单测 / build 全绿 |
 
-> 门禁：`bash scripts/build.sh` → 0 error、`npm run build` → 0 error、`bash scripts/test.sh` → 0 fail。
+> 门禁：`bash scripts/build.sh` → 0 error、`bash scripts/test.sh` → 0 fail、`cd web && npm test && npm run build` → 0 error；
+> 另有无需数据库的静态门禁 `python3 scripts/ci/check-consistency.py`（CI 必跑）。
 > 三者未同时通过不算完成。
 
 > **前端界面（Apple 设计语言 · 2026-11-05 完整重做）**：以 `apple.com` 当前站点实测参数为准 —— 卡片零投影（靠白卡浮在雾灰画布上的明度差分层）、交互元素胶囊几何、17px 正文与超大 display 字阶、单一强调蓝、字重只用 400/600/700、单色线性图标；并配套 `styles/motion.css` 交互动效层（可打断的按下反馈、对称路由转场、交错入场、滚动显现、材质化弹层）与三类无障碍偏好降级。容器化部署见 `deploy/README.md`，变更明细见 `CHANGELOG.md` 的 `[1.2.0]`。
@@ -84,7 +85,9 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 - 逐块加密存储、版本管理（新版本复用 DEK）、版本元数据对比
 - **ZIP 批量导入**（自研 ZIP 读取器：store + deflate、CRC32 校验、GBK/UTF-8 文件名双解码、路径穿越与解压炸弹防护）
 - 批量下载（自研 ZIP 写入器）/ 打标签 / 删除
-- 预览**动态水印**（访问者 + 服务端时间 + 追踪号，落审计）
+- **纯仓颉媒体引擎 `ams.core.media`**（`packages/ams-core/src/media/`，全部在 `ams-server` 进程内同步完成，不引入外部进程 / 独立 worker）：PNG 解码 / 编码、`bmp.cj` BMP 解码、`jpeg.cj` baseline + 渐进式 JPEG 解码、`pdftext.cj` 文本型 PDF 抽文本 + `pdfimage.cj` 图像型扫描 PDF 的图像流抽取、**三路 OCR 路由**（5×7 印刷体 → CJK 220 字点阵字典 → 手写风格数字，`MediaOcr.recognizeAutoWithEngine` 返回实际命中引擎）、缩略图与像素水印；CJK / 手写字模由构建期生成器 `scripts/gen-media-glyphs.py`（Windows GDI 字体渲染）产出 `glyphdata.cj`，运行时零依赖（不读系统字体 / 不启外部进程）
+- 预览**动态水印**：签票 + 审计可追溯 + 前端叠加；PNG 由服务端把访问者 / 时间 / 追踪号**烧进像素**（仍不阻止截图 / 翻拍）
+- 4 条附件媒体路由：`GET /api/attachments/:id/thumbnail`（PNG 缩略图）、`GET /api/attachments/:id/watermarked`（烧写水印后的 PNG）、`GET /api/attachments/:id/ocr`（OCR 结果）、`POST /api/attachments/:id/media`（手动触发一次媒体处理）
 
 ### 导入导出
 
@@ -112,6 +115,8 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 - 审计自审计（谁看了审计本身也留痕）、留存策略、导出报告
 - 数据级别 L1–L4 分级、敏感字段清单、导出四层管控
 - 多语言框架（zh-CN / en）、免打扰与通知偏好、登录页品牌定制
+- **媒体处理默认关闭**：`AMS_MEDIA_ENABLED` 与 `AMS_OCR_CONSENT` 需同时为 `true` 才自动处理（OCR 隐私显式同意）；`POST /api/attachments/:id/media` 可手动触发
+- **异地备份 / 恢复演练 / cron 与 systemd timer 脚本**（默认未启用，见 `deploy/RUNBOOK.md`）
 
 ---
 
@@ -122,9 +127,10 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 | 后端语言 | **仓颉 Cangjie**（SDK 1.2.0） | 静态编译、原生二进制；子包粒度手写构建脚本（`cjpm` 在本机 Windows 触发堆损坏，故本机构建走 `scripts/build.sh`，CI 用 `cjpm`） |
 | 密码学扩展 | **stdx 1.2.0.1** | 提供 SM3 / SM4；`bash scripts/verify-stdx.sh` 可一键复现 14 项国标向量校验 |
 | 数据库 | **openGauss** | 通过自编译的 `tpc` 驱动接入（`tools/vendor/opengauss-driver`） |
-| 前端 | **Vue 3.5 + TypeScript + Vite 6** | 零 UI 框架依赖，手写设计系统（深浅色、四档响应式断点、Apple 质感动效） |
+| 前端 | **Vue 3.5 + TypeScript + Vite 7** | 零 UI 框架依赖，手写设计系统（深浅色、四档响应式断点、Apple 质感动效） |
 | 状态管理 | 组合式 API + `AppStorage` 式信号 | 不引入 Pinia，规模未到需要 |
-| 测试 | 仓颉 `std.unittest` | 272 个用例，按包分层 |
+| 测试 | 仓颉 `std.unittest` + Vitest | 后端全量 `test.sh` **419 通过 / 0 失败**，按包分层；前端 typecheck / test / build 全绿 |
+| 媒体处理 | **`ams.core.media`（纯仓颉）** | PNG 解码 / 编码（自写 CRC-32 / Adler-32）、`bmp.cj` BMP 解码、`jpeg.cj` baseline + 渐进式 JPEG 解码、`pdftext.cj` 文本型 PDF 抽文本 + `pdfimage.cj` 图像型扫描 PDF 图像流抽取、**三路 OCR**（5×7 印刷体 → CJK 220 字点阵 → 手写风格数字，返回实际命中引擎）、缩略图与像素水印；`scripts/gen-media-glyphs.py` 构建期用 Windows GDI 生成 `glyphdata.cj` 字模，运行时零依赖。全部在 `ams-server` 进程内完成，无外部进程 / 独立 worker |
 
 ### 分层依赖（严格单向，`scripts/build.sh` 按拓扑序编译）
 
@@ -189,7 +195,7 @@ ams-server   ← 入口：装配依赖、启动
 | 仓颉 SDK | 1.2.0，`CANGJIE_HOME` 指向安装目录（或放 `tools/cangjie/`） |
 | stdx | 1.2.0.1，`bash scripts/install-stdx.sh` 安装，`bash scripts/verify-stdx.sh` 校验 |
 | openGauss | 一个可连实例（本地开发常用容器，默认端口 `15432`） |
-| Node.js | ≥ 20（前端 Vite 6 / vue-tsc） |
+| Node.js | ≥ 20（前端 Vite 7 / vue-tsc） |
 | 平台 | 本机已验证 Windows + Git Bash；CI 覆盖 Linux |
 
 ### 1. 装载环境
@@ -203,7 +209,7 @@ bash   scripts/verify-stdx.sh       # 验证 14 项国标向量
 ### 2. 初始化数据库
 
 ```bash
-# 逐个执行迁移（001 ~ 019，顺序不可打乱；均幂等，可重复执行）
+# 逐个执行迁移（编号 001 ~ 022，其中 007 重号两个文件；顺序不可打乱；均幂等，可重复执行）
 for f in db/migrations/*.sql; do python scripts/db.py exec "$f"; done
 
 # 核对表是否齐全
@@ -223,6 +229,7 @@ bash scripts/build.sh               # 首次会自动编译 opengauss 驱动，�
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
+| `AMS_ENV` | `dev` | 运行环境：`dev`（默认，可用本地开发默认值）/ `production`（生产，见下方 SEC-001） |
 | `AMS_HTTP_HOST` / `AMS_HTTP_PORT` | `127.0.0.1` / `8080` | 监听地址与端口（前端与接口共用） |
 | `AMS_WEB_DIR` | `web` | 前端静态目录；生产包内即为 `web/` |
 | `AMS_TOKEN_SECRET` | 本地开发默认值 | 令牌签名密钥，**生产必填**，≥ 32 字节 |
@@ -230,11 +237,20 @@ bash scripts/build.sh               # 首次会自动编译 opengauss 驱动，�
 | `AMS_DB_HOST` / `AMS_DB_NAME` / `AMS_DB_USER` / `AMS_DB_PASSWORD` | `127.0.0.1` / `ams` / `gaussdb` / 开发默认 | 数据库连接 |
 | `AMS_DB_APP_USER` / `AMS_DB_APP_PASSWORD` | 空 | 指定后以**受限角色**连接（业务表 DML、审计表仅 SELECT/INSERT） |
 | `AMS_LOG_LEVEL` | `info` | 日志级别 |
+| `AMS_MEDIA_ENABLED` | `false` | 媒体处理总开关；与 `AMS_OCR_CONSENT` 须**同时为 `true`** 才自动处理附件（OCR 隐私显式同意），默认关闭 |
+| `AMS_OCR_CONSENT` | `false` | OCR 隐私显式同意开关；默认关闭，附件明文只在 `ams-server` 进程内内存处理、不落临时文件 |
+
+> **媒体处理与 OCR 隐私**：`AMS_MEDIA_ENABLED` 与 `AMS_OCR_CONSENT` 默认均为 `false`，须**同时显式为 `true`** 才在上传后自动处理（OCR 需隐私显式同意）；也可由 `POST /api/attachments/:id/media` 手动触发一次。迁移 `023_media.sql` 为 `arc_attachments` 增 `ocr_text / ocr_status / ocr_engine / media_error` 四列。附件明文仅在进程内内存解码 / 识别，不落临时文件、不起外部进程或 worker。
+
+> **SEC-001 · 生产凭据门禁**：`AMS_ENV=production` 时，`AMS_TOKEN_SECRET` / `AMS_KEK` /
+> `AMS_DB_PASSWORD` 必须由环境变量或部署配置显式提供，缺失任一项后端**拒绝启动**（失败关闭），
+> 不再回落到本地开发默认值。compose 中这三项已改为必填（`:?` 语法）；
+> 本地开发请复制 `deploy/compose/.env.example` 为 `.env` 后填写。
 
 启动成功日志形如：
 
 ```json
-{"action":"server.ready","routes":"152","startedAt":"…","webDir":"web"}
+{"action":"server.ready","routes":"206","startedAt":"…","webDir":"web"}
 ```
 
 ### 4. 生产模式：一个进程、一个端口 ★
@@ -321,6 +337,7 @@ Vite dev server 把 `/api` 代理到 `8080`（见 `web/vite.config.ts`），
 | `scripts/verify-stdx.sh` | 国密能力 14 项向量校验 |
 | `scripts/db.py` | 数据库辅助：`exec <sql文件>` / `sql -s "<SQL>"` / `tables` / `count <表>` |
 | `scripts/gen-gbk-table.py` | 生成 GBK 码表（ZIP 中文文件名解码用） |
+| `scripts/gen-media-glyphs.py` | **构建期字模生成器**：用 Windows GDI 字体渲染生成 `packages/ams-core/src/media/glyphdata.cj`（220 常用汉字 × 8 字体原型 + 10 手写风格数字 × 9 原型），供 CJK / 手写 OCR 运行时查表；运行时零依赖（不需字体 / GDI / Python / 外部进程） |
 | `scripts/verify-audit-chain.py` | 审计哈希链外部校验 |
 | `scripts/ci/verify-family.py` | 家庭协作端到端验收（90 项断言：邀请闭环 + 失效语义 + 可见性 + 主体级授权与列表下推 + 条目级授权隔离 + 同端口静态托管）。自带启停服务，`AMS_VERIFY_PORT` 可换端口 |
 | `scripts/release.sh` | 打包发布产物 |
@@ -345,8 +362,8 @@ Archive_manager/
 │   ├── ams-server/           # 入口装配
 │   └── ams-native/           # C++ 侧（预留，当前为空）
 ├── web/                      # Vue 3 前端（src/views 页面、src/components 组件、src/composables 复用逻辑；dist/ 由 npm run build 产出并被后端直接托管）
-├── db/migrations/            # 19 个 SQL 迁移（001 ~ 019）
-├── docs/                     # 15 份设计/台账文档（另含 docs/README.md 索引）
+├── db/migrations/            # 23 个 SQL 迁移（编号 001 ~ 022，007 重号两个文件）
+├── docs/                     # 16 个文件：01–15 编号文档（14 为 .yaml）+ docs/README.md 索引
 ├── scripts/                  # 构建、测试、部署、验收脚本
 ├── deploy/                   # systemd / docker / windows 部署模板
 ├── tools/vendor/             # opengauss-driver（自编译依赖）
@@ -378,8 +395,8 @@ Archive_manager/
 | 11 | [前端技术栈选型分析](./docs/11-前端技术栈选型分析.md) | 为什么是 Vue 3？备选方案为何被否？ |
 | 12 | [家庭成员邀请（设计 + 方案评估）](./docs/12-家庭成员邀请.md) | 家庭协作安全设计（10 原则 / 14 威胁 / API 草案）与授权粒度·审批流·分批取舍（含推荐结论） |
 | 13 | [信创与国家密码标准参考](./docs/13-信创与国家密码标准参考.md) | 国密 GM/T·GB/T 对齐、已落地/未实现能力、信创适配现状 |
-| 14 | [对外 API 规范（OpenAPI）](./docs/14-对外API规范-OpenAPI.yaml) | 156 个接口的 OpenAPI 3.1 基线规范（schema 待补全） |
-| 15 | [架构演进路线（方案候选）](./docs/15-架构演进路线-方案候选.md) | 提炼通用框架 / SaaS·微服务化的 A/B/C 候选方案（待拍板） |
+| 14 | [对外 API 规范（OpenAPI）](./docs/14-对外API规范-OpenAPI.yaml) | 206 个 operation / 160 个 path 的 OpenAPI 3.1 基线；与后端 206 条路由声明一一对应，静态门禁强制 206/206 覆盖 |
+| 15 | [架构演进路线（方案候选）](./docs/15-架构演进路线-方案候选.md) | 提炼通用框架 / SaaS·微服务化的 A/B/C 候选方案（已拍板，见 §三） |
 
 变更记录见 [CHANGELOG.md](./CHANGELOG.md)。
 
@@ -395,13 +412,15 @@ Archive_manager/
 | --- | --- | --- |
 | **SM2 未实现** | SDK 无非对称国密实现 | 导出包签名用 HMAC-SM3（对称共享密钥），不是公钥签名，无法做到"验签方不持有签名密钥" |
 | **SM4-GCM 不可用**，改用 CBC + HMAC-SM3 | stdx 实测 `create tag error` | 已是 EtM（先加密后认证）的正确构造，但非 AEAD，随机数管理需更小心 |
-| **附件水印无法烧进像素** | SDK 无图像 / PDF 渲染库 | 只在预览层叠加，无法阻止截图或另存原图 |
-| **缩略图、全文 OCR 未实现** | 同上（无图像编解码 / OCR 引擎） | 大图预览耗流量；扫描件不可检索 |
-| **短信通知未接入** | 无短信网关 | 仅站内信 + 邮件 |
+| **像素水印仍不阻止截图 / 翻拍** | 服务端已把访问者 / 时间 / 追踪号烧进 PNG 像素，但截图 / 翻拍发生在像素之外 | PNG 由 `GET /api/attachments/:id/watermarked` 返回烧写图；PDF 与不支持格式仍走签票 + 审计 + 前端叠加 |
+| **OCR 有字体与版式边界** | 内置 5×7 点阵字模面向等宽印刷体数字 / 大写字母；CJK / 手写为构建期字体点阵字典，非训练模型 | PNG / BMP / baseline + 渐进式 JPEG / 文本型 PDF / 图像型扫描 PDF 的图像流均可处理（图像型 PDF 经 `pdfimage.cj` 抽图后走三路 OCR）；CJK 仅覆盖字典内 220 汉字且为字体点阵、手写仅 10 个近似手写风格数字；真实草书 / 生僻字 / 强倾斜 / 复杂排版 / 加密 PDF / CMYK 不支持，高精度识别仍需外部模型；阈值来自跨字体验收夹具，真实扫描件泛化未验证 |
+| **短信 / 图形验证码 / 图像格式边界** | 网关需运维配置、path 轮廓仍可被专用 OCR 解析、图像格式有剩余边界 | 短信默认关闭，需运维配置 `SMS_*`；图形验证码 SVG 已改为**纯 path 轮廓**（内嵌点阵字模 + 旋转 / 倾斜 + 干扰线 / 噪点，不含 `<text>` / `aria-label` / `data-*` / 答案明文），但字符轮廓仍可被专用 OCR 解析，强对抗建议换图片 / 滑块，challenge TTL / 一次性 / 3 次尝试 / 单实例内存态不变；缩略图与像素水印支持 PNG / BMP / baseline + 渐进式 JPEG（其余格式与加密 PDF / CMYK 仍不支持）；E2E `devHint` 测试通道仅当 `AMS_ENV` 非 production/prod 且 `AMS_E2E_CAPTCHA_HINT=true` 时可用，生产环境恒不返回 |
 | **C++ 侧（ams-native）为空** | 当前性能不构成瓶颈 | 纯仓颉实现；C++ 通道留作后续优化 |
 | **本机构建不走 `cjpm`** | `cjpm 1.0.5` 在本机 Windows 触发堆损坏（`0xC0000374`） | 本地用 `scripts/build.sh`，CI 仍用 `cjpm`；两条路径都需保持通过 |
 | **家庭协作只读** | docs/12 §1.3 非目标：本期不做写协作 | 家庭成员可查看被授权条目，不能编辑 / 导出 / 再分享；无邀请审批流（组内有邀请权的人即可直接拉人） |
-| **P2 已全部落地（23/23）** | 见 [docs/10（P2）](./docs/10-实现状态核对.md) | 23/23 已实现或降级交付；缩略图 / OCR / 短信 / 图形验证码 4 项能力边界项均已降级交付（详见 docs/10 §4（P2））；FR-IMP-005（导入模板管理）已按方案 C（全量字段定义域）落地（详见 docs/10 §6（P2）） |
+| **P2 已全部落地（23/23）** | 见 [docs/10（P2）](./docs/10-实现状态核对.md) | 23/23 已实现；缩略图 / OCR / 短信 / 图形验证码 4 项能力边界项及 P1 像素水印均已于 2026-11-07 转正（详见 docs/10 §4（P2）、CHANGELOG）；FR-IMP-005（导入模板管理）已按方案 C（全量字段定义域）落地（详见 docs/10 §6（P2）） |
+| **本地开发默认值仅适用于 dev 环境** | SEC-001：`production` 下凭据必须显式提供，否则后端拒绝启动 | 内置的 `AMS_TOKEN_SECRET` / `AMS_KEK` / `AMS_DB_PASSWORD` 开发默认值仅在 `AMS_ENV=dev` 下生效；生产部署须通过环境变量或部署配置显式注入（compose 用 `:?` 必填），本地开发复制 `deploy/compose/.env.example` 为 `.env` |
+| **npm audit 9 个漏洞已修复** | 已 major 升级 `vite ^6.0.7→^7.3.7` / `@vitejs/plugin-vue ^5.2.1→^6.0.10` / `vitest ^2.1.9→^5.1.0` / `vue-tsc ^2.2.0→^3.3.14`（`version 1.2.0` 与 scripts 未动） | `npm audit` 已为 **0 vulnerabilities**；`AppSheet.vue` 因 vue-tsc 3 对模板 ref 不再计入使用而报的 TS6133 已用 `root.value` 守卫修正；历史「9 个漏洞未修」记录保留在 `CHANGELOG.md`，不改写 |
 
 ---
 

@@ -12,13 +12,24 @@
 //   是那个「可独立发布的框架库」。ams.kit 负责统一入口与后续扩展点。
 //
 // 约束：框架层严禁 import 任何 AMS 业务包（ams.app / ams.data / ams.api）。
+//
+// 【Phase 3（docs/15 §4.1）】再纳入三块与业务解耦的纯能力：
+//   ① 审计哈希链 —— ams.security.audit 的 AuditService（只依赖 CryptoProvider）；
+//   ② 检索纯逻辑 —— ams.core.search 的分词 / 掩码 / 高亮分段；
+//   ③ 导入模板框架 —— 表头映射的**纯字符串内核**在 kit 内独立实现，
+//      不 import ams.app.importer（那是业务包），从而保持框架层洁净。
+//   三者都只依赖 ams.core / ams.security / ams.crypto，符合单向分层。
 // ============================================================
 package ams.kit
+
+import std.collection.*
 
 import ams.crypto.provider.*
 import ams.crypto.impl.*
 import ams.crypto.key.*
 import ams.crypto.blindindex.*
+import ams.security.audit.*
+import ams.core.search.*
 
 // 框架版本（与 CHANGELOG 对齐；独立发版后由 cjpm 版本号接管）
 public let KIT_VERSION: String = "0.1.0-alpha"
@@ -38,4 +49,101 @@ public func newKeyManager(provider: CryptoProvider, kek: Array<Byte>): KeyManage
 // 构造盲索引服务（基于 HMAC-SM3 的可检索加密）。
 public func newBlindIndex(provider: CryptoProvider): BlindIndex {
     return BlindIndex(provider)
+}
+
+// ============================================================
+// Phase 3 · ① 审计哈希链
+// ============================================================
+
+/** 构造审计哈希链服务（computeHash / buildRecord / verifyChain 全可用）。 */
+public func newAuditChain(provider: CryptoProvider): AuditService {
+    return AuditService(provider)
+}
+
+/** 创世记录的 prev_hash（32 字节全 0）。 */
+public func auditGenesisHash(): Array<Byte> {
+    return AuditService.genesisHash()
+}
+
+// ============================================================
+// Phase 3 · ② 检索纯逻辑
+// ============================================================
+
+/** 中文二元切分（bigram），中英混合；供检索索引构建复用。 */
+public func tokenizeForSearch(text: String): Array<String> {
+    return ChineseTokenizer.tokenize(text)
+}
+
+/** 按敏感度掩码（按 UTF-8 字符计，不切碎中文）。 */
+public func maskValue(value: String, sensitivity: Int64): String {
+    return Masker.mask(value, sensitivity)
+}
+
+/**
+ * 检索命中高亮分段 JSON（前端按段渲染 <mark>，不用 v-html）。
+ * 形如 [{"text":"清华","hit":false},{"text":"硕士","hit":true}]
+ */
+public func highlightJson(text: String, keyword: String): String {
+    return SearchHighlighter.toJson(text, keyword)
+}
+
+// ============================================================
+// Phase 3 · ③ 导入模板框架（纯字符串内核）
+//
+// 与 ams.app.importer.ImportService 的 mapping 语义一致：
+//   mapping = 「CSV 表头 → 字段键」；defaults = 「字段键 → 默认值」。
+// 抽到框架层后，任何项目都能按表头名取列，不必绑定 AMS 的条目模型。
+// ============================================================
+public class CsvColumnTemplate {
+    private let fieldToIndex: HashMap<String, Int64>
+    private let defaults: HashMap<String, String>
+
+    /**
+     * @param header   CSV 首行切分后的表头数组
+     * @param mapping  CSV 表头 → 字段键；未列出的表头列一律忽略
+     * @param defaults 字段键 → 默认值（缺列 / 空单元格时回落）
+     */
+    public init(header: Array<String>, mapping: HashMap<String, String>,
+                defaults: HashMap<String, String>) {
+        this.fieldToIndex = HashMap<String, Int64>()
+        this.defaults = HashMap<String, String>()
+        var i: Int64 = 0
+        while (i < header.size) {
+            match (mapping.get(header[i])) {
+                case Some(key) =>
+                    if (!key.isEmpty()) {
+                        // 同名表头以**首次出现**为准，避免后列覆盖前列
+                        match (this.fieldToIndex.get(key)) {
+                            case Some(_) => ()
+                            case None => this.fieldToIndex[key] = i
+                        }
+                    }
+                case None => ()
+            }
+            i = i + 1
+        }
+        for ((k, v) in defaults) {
+            this.defaults[k] = v
+        }
+    }
+
+    /** 取某字段在当前行的值：缺列 / 越界 / 空串时回落默认值。 */
+    public func resolve(fieldKey: String, cells: Array<String>): String {
+        match (this.fieldToIndex.get(fieldKey)) {
+            case Some(idx) =>
+                if (idx >= 0 && idx < cells.size && !cells[idx].isEmpty()) {
+                    return cells[idx]
+                }
+            case None => ()
+        }
+        match (this.defaults.get(fieldKey)) {
+            case Some(v) => return v
+            case None => return ""
+        }
+    }
+
+    /** 是否已映射到该字段（供调用方判断模板覆盖率）。 */
+    public func hasField(fieldKey: String): Bool {
+        return this.fieldToIndex.contains(fieldKey)
+    }
 }

@@ -1,0 +1,17 @@
+# HarmonyOS build / dependency artifacts
+build/
+.hvigor/
+.preview/
+oh_modules/
+node_modules/
+entry/build/
+*.hap
+*.app
+
+# 调试签名材料（含调试证书/密钥，勿提交；正式发布前在 DevEco 生成自有签名）
+signing/
+
+# IDE / 本机 SDK 路径（DevEco 自动生成，文件头明确标注不应提交）
+.idea/
+.vscode/
+local.properties

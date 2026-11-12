@@ -32,7 +32,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { t } from '../i18n'
 import { api, ApiError } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
-import { CATEGORY_DEFS, categoryName, formatTime, sensitivityName, statusName } from '../composables/useCatalog'
+import { CATEGORY_DEFS, catName, formatTime, statusLabel, sensitivityLabel } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
 
 const { success, error: toastError } = useToast()
@@ -164,8 +164,8 @@ function inviteStateLabel(code: string): string {
 
 /** 授权范围的一句话描述（与后端 resourceTypeOf 的判定同序） */
 function grantScopeText(g: Grant): string {
-  if (g.resourceType === 'item') return t('viewsFamilyView.da0bb5', `单条条目 #${g.itemId}`)
-  if (g.resourceType === 'category') return t('viewsFamilyView.be189d', `分类：${categoryName(g.category)}`)
+  if (g.resourceType === 'item') return t('viewsFamilyView.da0bb5', `单条条目 #${g.itemId}`, { id: g.itemId })
+  if (g.resourceType === 'category') return t('viewsFamilyView.be189d', `分类：${catName(g.category)}`, { category: catName(g.category) })
   return t('viewsFamilyView.ef996c', '整个主体')
 }
 
@@ -224,7 +224,7 @@ function openCreate(): void {
 async function submitCreate(): Promise<void> {
   const name = newName.value.trim()
   if (!name) {
-    createError.value = '请填写家庭组名称'
+    createError.value = t('FamilyView.fillGroupName', '请填写家庭组名称')
     return
   }
   creating.value = true
@@ -265,7 +265,7 @@ const invites = ref<Invite[]>([])
 const memberName = computed<Record<string, string>>(() => {
   const map: Record<string, string> = {}
   for (const m of members.value) {
-    map[m.userId] = m.nickname || m.username || t('viewsFamilyView.8aa5b4', `用户 ${m.userId}`)
+    map[m.userId] = m.nickname || m.username || t('viewsFamilyView.8aa5b4', t('FamilyView.userFallback', '用户 {id}', { id: m.userId }), { id: m.userId })
   }
   return map
 })
@@ -348,12 +348,12 @@ function closeDetail(): void {
 async function dissolve(): Promise<void> {
   const g = detail.value
   if (!g) return
-  if (!window.confirm(t('viewsFamilyView.93c22b', `解散「${g.name}」？组内成员将立即失去所有由此组授出的访问权。`))) return
+  if (!window.confirm(t('viewsFamilyView.93c22b', `解散「${g.name}」？组内成员将立即失去所有由此组授出的访问权。`, { name: g.name }))) return
   try {
     const r = await api<{ revokedGrants: number }>(`/family/groups/${g.groupId}`, {
       method: 'DELETE',
     })
-    success(t('viewsFamilyView.1aa133', `已解散，撤销 ${r.revokedGrants} 条授权`))
+    success(t('viewsFamilyView.1aa133', `已解散，撤销 ${r.revokedGrants} 条授权`, { count: r.revokedGrants }))
     closeDetail()
   } catch (e) {
     toastError((e as ApiError).message || t('viewsFamilyView.5f28be', '解散失败'))
@@ -365,14 +365,14 @@ async function dissolve(): Promise<void> {
 async function removeMember(m: Member): Promise<void> {
   const g = detail.value
   if (!g) return
-  const name = m.nickname || m.username || t('viewsFamilyView.8aa5b4', `用户 ${m.userId}`)
-  if (!window.confirm(t('viewsFamilyView.ee8187', `把「${name}」移出家庭组？该成员由此组获得的授权会一并撤销。`))) return
+  const name = m.nickname || m.username || t('viewsFamilyView.8aa5b4', t('FamilyView.userFallback', '用户 {id}', { id: m.userId }), { id: m.userId })
+  if (!window.confirm(t('viewsFamilyView.ee8187', `把「${name}」移出家庭组？该成员由此组获得的授权会一并撤销。`, { name: name }))) return
   try {
     const r = await api<{ revokedGrants: number }>(
       `/family/groups/${g.groupId}/members/${m.userId}`,
       { method: 'DELETE' },
     )
-    success(t('viewsFamilyView.49e17d', `已移除，撤销 ${r.revokedGrants} 条授权`))
+    success(t('viewsFamilyView.49e17d', `已移除，撤销 ${r.revokedGrants} 条授权`, { count: r.revokedGrants }))
     await refreshDetail()
     await load()
   } catch (e) {
@@ -520,15 +520,15 @@ async function submitGrant(): Promise<void> {
   const g = detail.value
   if (!g) return
   if (!grantGrantee.value) {
-    grantError.value = '请选择被授权人'
+    grantError.value = t('FamilyView.pickGrantee', '请选择被授权人')
     return
   }
   if (!grantSubject.value) {
-    grantError.value = '请选择档案主体'
+    grantError.value = t('FamilyView.pickSubject', '请选择档案主体')
     return
   }
   if (grantScope.value === 'item' && !grantItem.value) {
-    grantError.value = '请选择要共享的条目'
+    grantError.value = t('FamilyView.pickItem', '请选择要共享的条目')
     return
   }
   creatingGrant.value = true
@@ -544,7 +544,13 @@ async function submitGrant(): Promise<void> {
         expiresInHours: Number(grantHours.value) || 0,
       },
     })
-    success(t('viewsFamilyView.5da210', `已授权（${r.resourceType === 'item' ? '单条条目' : r.resourceType === 'category' ? '某分类' : '整个主体'}）`))
+    const granted =
+      r.resourceType === 'item'
+        ? { key: 'viewsFamilyView.grantCreatedItem', text: t('FamilyView.x3a3e83', '已授权（单条条目）') }
+        : r.resourceType === 'category'
+          ? { key: 'viewsFamilyView.grantCreatedCategory', text: t('FamilyView.x14d630', '已授权（某分类）') }
+          : { key: 'viewsFamilyView.grantCreatedSubject', text: t('FamilyView.x86199d', '已授权（整个主体）') }
+    success(t(granted.key, granted.text))
     showGrantForm.value = false
     await loadGrants(g.groupId)
   } catch (e) {
@@ -555,8 +561,8 @@ async function submitGrant(): Promise<void> {
 }
 
 async function revokeGrant(g: Grant): Promise<void> {
-  const who = memberName.value[g.granteeId] ?? t('viewsFamilyView.c5187a', `用户 ${g.granteeId}`)
-  if (!window.confirm(t('viewsFamilyView.a5d9b2', `撤销「${who}」的这条授权？对方将立即无法再访问。`))) return
+  const who = memberName.value[g.granteeId] ?? t('viewsFamilyView.c5187a', t('FamilyView.userFallback', '用户 {id}', { id: g.granteeId }), { id: g.granteeId })
+  if (!window.confirm(t('viewsFamilyView.a5d9b2', `撤销「${who}」的这条授权？对方将立即无法再访问。`, { name: who }))) return
   try {
     await api(`/family/grants/${g.grantId}`, { method: 'DELETE' })
     success(t('viewsFamilyView.5b3056', '授权已撤销'))
@@ -640,12 +646,11 @@ onMounted(async () => {
       <div>
         <h1 class="page-title">{{ t('FamilyView.e686bb', '家庭协作') }}</h1>
         <p class="page-desc">
-          把家人拉进家庭组，再按「整个主体 / 某分类 / 单条条目」逐级缩小范围授予只读权限。
-          成员不会因此获得系统角色，也看不到任何未被授权的档案。
+          {{ t('FamilyView.intro', '把家人拉进家庭组，再按「整个主体 / 某分类 / 单条条目」逐级缩小范围授予只读权限。\n          成员不会因此获得系统角色，也看不到任何未被授权的档案。') }}
         </p>
       </div>
       <button v-if="canManage" class="btn-primary" type="button" @click="openCreate">
-        创建家庭组
+        {{ t('FamilyView.ee508f', '创建家庭组') }}
       </button>
     </header>
 
@@ -658,7 +663,7 @@ onMounted(async () => {
         :aria-selected="tab === 'groups'"
         @click="tab = 'groups'"
       >
-        我的家庭组
+        {{ t('FamilyView.myGroups', '我的家庭组') }}
         <span v-if="groups.length" class="seg__count">{{ groups.length }}</span>
       </button>
       <button
@@ -669,7 +674,7 @@ onMounted(async () => {
         :aria-selected="tab === 'shared'"
         @click="tab = 'shared'"
       >
-        共享给我的
+        {{ t('FamilyView.sharedToMe', '共享给我的') }}
         <span v-if="sharedTotal" class="seg__count">{{ sharedTotal }}</span>
       </button>
     </div>
@@ -679,7 +684,7 @@ onMounted(async () => {
       <p v-if="loading" class="hint">{{ t('FamilyView.300ee3', '加载中…') }}</p>
       <p v-else-if="loadError" class="hint hint--error">{{ loadError }}</p>
       <p v-else-if="groups.length === 0" class="hint">
-        你还没有加入任何家庭组。创建一个，或让组所有者把邀请码发给你。
+        {{ t('FamilyView.noGroups', '你还没有加入任何家庭组。创建一个，或让组所有者把邀请码发给你。') }}
       </p>
 
       <ul v-else class="grp-list">
@@ -692,7 +697,7 @@ onMounted(async () => {
               </span>
             </span>
             <span class="grp-item__meta">
-              <span>{{ g.memberCount }} 位成员</span>
+              <span>{{ t('FamilyView.memberCount', '{n} 位成员', { n: g.memberCount }) }}</span>
               <span>{{ t('FamilyView.f3b01f', '创建于') }} {{ formatTime(g.createdAt) }}</span>
             </span>
           </button>
@@ -706,7 +711,7 @@ onMounted(async () => {
       <p v-if="sharedLoading" class="hint">{{ t('FamilyView.300ee3', '加载中…') }}</p>
       <p v-else-if="sharedError" class="hint hint--error">{{ sharedError }}</p>
       <p v-else-if="shared.length === 0" class="hint">
-        还没有人向你共享档案。当家庭成员为你授权后，这里会出现对应条目（只读）。
+        {{ t('FamilyView.noShared', '还没有人向你共享档案。当家庭成员为你授权后，这里会出现对应条目（只读）。') }}
       </p>
 
       <ul v-else class="grp-list">
@@ -714,13 +719,13 @@ onMounted(async () => {
           <button class="grp-item__main" type="button" @click="openSharedItem(it)">
             <span class="grp-item__top">
               <span class="grp-item__name">{{ it.title }}</span>
-              <span class="chip">{{ categoryName(it.category) }}</span>
+              <span class="chip">{{ catName(it.category) }}</span>
               <span class="chip" :class="`chip--sens${it.sensitivity}`">
-                {{ sensitivityName(it.sensitivity) }}
+                {{ sensitivityLabel(it.sensitivity) }}
               </span>
             </span>
             <span class="grp-item__meta">
-              <span>{{ statusName(it.status) }}</span>
+              <span>{{ statusLabel(it.status) }}</span>
               <span v-if="it.issuer">{{ t('FamilyView.89de45', '签发：') }}{{ it.issuer }}</span>
               <span>{{ t('FamilyView.1e1ed7', '更新于') }} {{ formatTime(it.updatedAt) }}</span>
             </span>
@@ -757,7 +762,7 @@ onMounted(async () => {
             role="tab"
             @click="detailTab = 'members'"
           >
-            成员 {{ members.length }}
+            {{ t('FamilyView.membersTab', '成员 {n}', { n: members.length }) }}
           </button>
           <button
             v-if="detail.canGrant"
@@ -767,7 +772,7 @@ onMounted(async () => {
             role="tab"
             @click="detailTab = 'grants'"
           >
-            授权 {{ grants.length }}
+            {{ t('FamilyView.grantsTab', '授权 {n}', { n: grants.length }) }}
           </button>
           <button
             v-if="detail.canInvite"
@@ -777,7 +782,7 @@ onMounted(async () => {
             role="tab"
             @click="detailTab = 'invites'"
           >
-            邀请 {{ invites.length }}
+            {{ t('FamilyView.invitesTab', '邀请 {n}', { n: invites.length }) }}
           </button>
         </div>
 
@@ -787,7 +792,7 @@ onMounted(async () => {
             <li v-for="m in members" :key="m.userId" class="row">
               <div class="row__main">
                 <span class="row__title">
-                  {{ m.nickname || m.username || `用户 ${m.userId}` }}
+                  {{ m.nickname || m.username || t('FamilyView.userFallback', '用户 {id}', { id: m.userId }) }}
                   <span class="chip">{{ roleLabel(m.role) }}</span>
                 </span>
                 <span class="row__meta">
@@ -801,35 +806,35 @@ onMounted(async () => {
                 type="button"
                 @click="removeMember(m)"
               >
-                移出
+                {{ t('FamilyView.removeMember', '移出') }}
               </button>
             </li>
           </ul>
           <p class="hint hint--foot">
-            成员之间彼此可见昵称与用户名，用于核对「谁被授权了什么」。
+            {{ t('FamilyView.membersVisible', '成员之间彼此可见昵称与用户名，用于核对「谁被授权了什么」。') }}
           </p>
         </div>
 
         <!-- 授权 -->
         <div v-else-if="detailTab === 'grants'" class="pane">
           <button class="btn-primary pane__action" type="button" @click="openGrantForm">
-            新增授权
+            {{ t('FamilyView.f31d07', '新增授权') }}
           </button>
 
           <p v-if="grants.length === 0" class="hint">
-            还没有授权。点「新增授权」后，对方刷新页面即可看到被共享的内容。
+            {{ t('FamilyView.noGrants', '还没有授权。点「新增授权」后，对方刷新页面即可看到被共享的内容。') }}
           </p>
           <ul v-else class="row-list">
             <li v-for="g in grants" :key="g.grantId" class="row">
               <div class="row__main">
                 <span class="row__title">
-                  {{ memberName[g.granteeId] ?? `用户 ${g.granteeId}` }}
+                  {{ memberName[g.granteeId] ?? t('FamilyView.userFallback', '用户 {id}', { id: g.granteeId }) }}
                   <span class="chip">{{ grantScopeText(g) }}</span>
                   <span v-if="!g.active" class="chip chip--off">{{ t('FamilyView.a09345', '已失效') }}</span>
                 </span>
                 <span class="row__meta">
                   <span>{{ t('FamilyView.e88715', '主体 #') }}{{ g.subjectId }}</span>
-                  <span>{{ g.expiresAt ? `到期 ${formatTime(g.expiresAt)}` : '长期有效' }}</span>
+                  <span>{{ g.expiresAt ? t('FamilyView.expiresAt', '到期 {t}', { t: formatTime(g.expiresAt) }) : t('FamilyView.longTerm', '长期有效') }}</span>
                   <span>{{ t('FamilyView.1d4d5d', '授予于') }} {{ formatTime(g.grantedAt) }}</span>
                 </span>
               </div>
@@ -839,7 +844,7 @@ onMounted(async () => {
                 type="button"
                 @click="revokeGrant(g)"
               >
-                撤销
+                {{ t('FamilyView.revoke', '撤销') }}
               </button>
             </li>
           </ul>
@@ -855,10 +860,10 @@ onMounted(async () => {
             <div class="invite-new__code">{{ createdInvite.code }}</div>
             <div class="invite-new__acts">
               <button class="btn-text" type="button" @click="copy(createdInvite.code, 'code')">
-                {{ copied === 'code' ? '已复制' : '复制邀请码' }}
+                {{ copied === 'code' ? t('FamilyView.copied', '已复制') : t('FamilyView.copyCode', '复制邀请码') }}
               </button>
               <button class="btn-text" type="button" @click="copy(inviteUrl, 'link')">
-                {{ copied === 'link' ? '已复制' : '复制链接' }}
+                {{ copied === 'link' ? t('FamilyView.copied', '已复制') : t('FamilyView.copyLink', '复制链接') }}
               </button>
             </div>
             <p class="invite-new__link">{{ inviteUrl }}</p>
@@ -869,11 +874,11 @@ onMounted(async () => {
           </div>
 
           <button class="btn-primary pane__action" type="button" @click="openInviteForm">
-            {{ createdInvite ? '再生成一条' : '生成邀请' }}
+            {{ createdInvite ? t('FamilyView.regenOne', '再生成一条') : t('FamilyView.83dc50', '生成邀请') }}
           </button>
 
           <p v-if="invites.length === 0" class="hint">
-            还没有邀请记录。生成后把 8 位邀请码当面或电话告知对方。
+            {{ t('FamilyView.noInvites', '还没有邀请记录。生成后把 8 位邀请码当面或电话告知对方。') }}
           </p>
           <ul v-else class="row-list">
             <li v-for="inv in invites" :key="inv.inviteId" class="row">
@@ -896,7 +901,7 @@ onMounted(async () => {
                 type="button"
                 @click="revokeInvite(inv)"
               >
-                撤销
+                {{ t('FamilyView.revoke', '撤销') }}
               </button>
             </li>
           </ul>
@@ -926,10 +931,10 @@ onMounted(async () => {
       <p v-if="createError" class="hint hint--error">{{ createError }}</p>
       <template #footer>
         <button class="btn-text" type="button" :disabled="creating" @click="showCreate = false">
-          取消
+          {{ t('common.cancel', '取消') }}
         </button>
         <button class="btn-primary" type="button" :disabled="creating" @click="submitCreate">
-          {{ creating ? '创建中…' : '创建' }}
+          {{ creating ? t('FamilyView.creating', '创建中…') : t('FamilyView.create', '创建') }}
         </button>
       </template>
     </AppSheet>
@@ -944,10 +949,10 @@ onMounted(async () => {
         <div class="invite-new__code">{{ createdInvite.code }}</div>
         <div class="invite-new__acts">
           <button class="btn-text" type="button" @click="copy(createdInvite.code, 'code2')">
-            {{ copied === 'code2' ? '已复制' : '复制邀请码' }}
+            {{ copied === 'code2' ? t('FamilyView.copied', '已复制') : t('FamilyView.copyCode', '复制邀请码') }}
           </button>
           <button class="btn-text" type="button" @click="copy(inviteUrl, 'link2')">
-            {{ copied === 'link2' ? '已复制' : '复制链接' }}
+            {{ copied === 'link2' ? t('FamilyView.copied', '已复制') : t('FamilyView.copyLink', '复制链接') }}
           </button>
         </div>
         <p class="invite-new__link">{{ inviteUrl }}</p>
@@ -1013,7 +1018,7 @@ onMounted(async () => {
           :disabled="creatingInvite"
           @click="showInviteForm = false"
         >
-          {{ createdInvite ? '完成' : '取消' }}
+          {{ createdInvite ? t('FamilyView.done', '完成') : t('common.cancel', '取消') }}
         </button>
         <button
           v-if="!createdInvite"
@@ -1022,7 +1027,7 @@ onMounted(async () => {
           :disabled="creatingInvite"
           @click="submitInvite"
         >
-          {{ creatingInvite ? '生成中…' : '生成' }}
+          {{ creatingInvite ? t('FamilyView.generating', '生成中…') : t('FamilyView.generate', '生成') }}
         </button>
       </template>
     </AppSheet>
@@ -1035,11 +1040,11 @@ onMounted(async () => {
           <select id="gr-grantee" v-model="grantGrantee" class="field-control">
             <option value="">{{ t('FamilyView.257d2c', '请选择成员') }}</option>
             <option v-for="m in granteeOptions" :key="m.userId" :value="m.userId">
-              {{ m.nickname || m.username }}（{{ roleLabel(m.role) }}）
+              {{ m.nickname || m.username }}{{ t('FamilyView.roleParen', '（{r}）', { r: roleLabel(m.role) }) }}
             </option>
           </select>
           <p v-if="granteeOptions.length === 0" class="field__hint">
-            组内还没有其他成员，先邀请再授权。
+            {{ t('FamilyView.noOtherMembers', '组内还没有其他成员，先邀请再授权。') }}
           </p>
         </div>
         <div class="field">
@@ -1047,7 +1052,7 @@ onMounted(async () => {
           <select id="gr-subject" v-model="grantSubject" class="field-control">
             <option value="">{{ t('FamilyView.518358', '请选择主体') }}</option>
             <option v-for="s in subjects" :key="s.id" :value="s.id">
-              {{ s.name }}{{ s.isPrimary ? '（本人）' : '' }}
+              {{ s.name }}{{ s.isPrimary ? t('FamilyView.self', t('FamilyView.self', '（本人）')) : '' }}
             </option>
           </select>
           <p class="field__hint">{{ t('FamilyView.4b82ee', '只能授权自己名下的主体。') }}</p>
@@ -1075,7 +1080,7 @@ onMounted(async () => {
           <label class="field__label" for="gr-cat">{{ t('FamilyView.435c52', '分类') }}</label>
           <select id="gr-cat" v-model.number="grantCategory" class="field-control">
             <option v-for="c in CATEGORY_DEFS" :key="c.code" :value="c.code">
-              {{ c.name }}
+              {{ catName(c.code) }}
             </option>
           </select>
         </div>
@@ -1084,10 +1089,10 @@ onMounted(async () => {
           <label class="field__label" for="gr-item">{{ t('FamilyView.4e5f90', '条目') }} <em>*</em></label>
           <select id="gr-item" v-model="grantItem" class="field-control" :disabled="grantItemsLoading">
             <option value="">
-              {{ grantItemsLoading ? '加载中…' : grantSubject ? '请选择条目' : '请先选择档案主体' }}
+              {{ grantItemsLoading ? t('FamilyView.300ee3', '加载中…') : grantSubject ? t('FamilyView.pickItemHint', '请选择条目') : t('FamilyView.pickSubjectFirst', '请先选择档案主体') }}
             </option>
             <option v-for="it in grantItems" :key="it.id" :value="it.id">
-              {{ it.title }}（{{ categoryName(it.category) }}）
+              {{ it.title }}{{ t('FamilyView.catParen', '（{c}）', { c: catName(it.category) }) }}
             </option>
           </select>
         </div>
@@ -1108,10 +1113,10 @@ onMounted(async () => {
 
       <template #footer>
         <button class="btn-text" type="button" :disabled="creatingGrant" @click="showGrantForm = false">
-          取消
+          {{ t('common.cancel', '取消') }}
         </button>
         <button class="btn-primary" type="button" :disabled="creatingGrant" @click="submitGrant">
-          {{ creatingGrant ? '授权中…' : '确认授权' }}
+          {{ creatingGrant ? t('FamilyView.granting', '授权中…') : t('FamilyView.confirmGrant', '确认授权') }}
         </button>
       </template>
     </AppSheet>
@@ -1122,10 +1127,10 @@ onMounted(async () => {
       <p v-else-if="sharedDetailError" class="hint hint--error">{{ sharedDetailError }}</p>
       <div v-else-if="sharedDetail" class="shared-detail">
         <div class="shared-detail__tags">
-          <span class="chip">{{ categoryName(sharedDetail.category) }}</span>
-          <span class="chip">{{ statusName(sharedDetail.status) }}</span>
+          <span class="chip">{{ catName(sharedDetail.category) }}</span>
+          <span class="chip">{{ statusLabel(sharedDetail.status) }}</span>
           <span class="chip" :class="`chip--sens${sharedDetail.sensitivity}`">
-            {{ sensitivityName(sharedDetail.sensitivity) }}
+            {{ sensitivityLabel(sharedDetail.sensitivity) }}
           </span>
         </div>
         <dl class="kv">

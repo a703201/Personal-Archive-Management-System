@@ -1,0 +1,50 @@
+# ============================================================
+# AMS · systemd 单元「示例」（物理机发布包路径）
+#
+# 参考 docs/09-部署与发布指南.md §4.2：那里 EnvironmentFile 指向
+# /opt/ams/config/application.env；本例改用 /etc/ams/ams.env，
+# 目的是把凭据与程序目录分离、单独设权限。
+#
+# [!] 这是样例：尚未与 scripts/package.sh 发布包集成、未实机验证。
+#     容器化部署是本仓库主路径（见 deploy/README.md），
+#     Windows 服务封装同样未落地（见 deploy/windows/README.md）。
+# [!] 行尾：本文件按仓库 Windows 工作区风格为 CRLF；拷到 Linux 前
+#     请先转成 LF（dos2unix /etc/systemd/system/ams.service），否则
+#     systemd 可能把行尾 CR 读进配置值里。
+#
+# 前提：
+#   - 发布包已解压到 /opt/ams（bin/ams-server、web/、config/ 就位），
+#     运行时 .so 与 bin/ams-server 同目录或已在 LD_LIBRARY_PATH；
+#   - 已建立系统用户：useradd -r -s /usr/sbin/nologin ams
+#
+# 部署：
+#   sudo install -d -m 0750 /etc/ams
+#   sudo cp deploy/config/ams.env.example /etc/ams/ams.env
+#   sudo chmod 600 /etc/ams/ams.env
+#   sudo $EDITOR /etc/ams/ams.env     # 填三必填凭据，并设 AMS_ENV=production
+#   sudo cp deploy/systemd/ams.service /etc/systemd/system/ams.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ams
+#   sudo systemctl status ams
+#   journalctl -u ams -f
+#
+# 凭据（SEC-001）：AMS_DB_PASSWORD / AMS_TOKEN_SECRET / AMS_KEK
+#   必须写在 /etc/ams/ams.env（600），不要在单元文件里明文写密钥。
+#   见 deploy/RUNBOOK.md §1.1。
+# ============================================================
+
+[Unit]
+Description=AMS Server
+After=network.target
+
+[Service]
+Type=simple
+User=ams
+WorkingDirectory=/opt/ams
+EnvironmentFile=/etc/ams/ams.env
+ExecStart=/opt/ams/bin/ams-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

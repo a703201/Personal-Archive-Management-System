@@ -11,6 +11,12 @@ import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { t } from '../i18n'
 import { api } from '../api/client'
 
+/** 后端返回的高亮分段：hit 段渲染为 <mark>，绝不用 v-html（防 XSS） */
+interface HighlightSegment {
+  text: string
+  hit: boolean
+}
+
 interface SearchItem {
   id: number
   category: number
@@ -22,6 +28,10 @@ interface SearchItem {
   expiresDate: string
   attachmentCount: number
   updatedAt: number
+  highlight?: {
+    title: HighlightSegment[]
+    issuer: HighlightSegment[]
+  }
 }
 
 interface SearchData {
@@ -39,6 +49,14 @@ const loading = ref(false)
 const error = ref('')
 let timer: number | undefined
 let controller: AbortController | undefined
+
+/** 无高亮数据（旧后端 / 空关键词）时退化为单段纯文本，保证渲染稳定 */
+function titleSegs(it: SearchItem): HighlightSegment[] {
+  return it.highlight?.title?.length ? it.highlight.title : [{ text: it.title, hit: false }]
+}
+function issuerSegs(it: SearchItem): HighlightSegment[] {
+  return it.highlight?.issuer?.length ? it.highlight.issuer : [{ text: it.issuer, hit: false }]
+}
 
 const SENS_LABEL: Record<number, string> = { 1: t('componentsGlobalSearch.7cda07', '普通'), 2: t('componentsGlobalSearch.e4d1f0', '敏感'), 3: t('componentsGlobalSearch.4bdda7', '高敏') }
 const SENS_CLASS: Record<number, string> = {
@@ -153,10 +171,15 @@ watch(open, (v) => {
 
           <ul v-else class="results">
             <li v-for="it in items" :key="it.id" class="result">
-              <div class="result__title">{{ it.title }}</div>
+              <div class="result__title">
+                <template v-for="(s, si) in titleSegs(it)" :key="`t${si}`">
+                  <mark v-if="s.hit" class="hit">{{ s.text }}</mark>
+                  <template v-else>{{ s.text }}</template>
+                </template>
+              </div>
               <div class="result__meta">
                 <span :class="SENS_CLASS[it.sensitivity]">{{ SENS_LABEL[it.sensitivity] }}</span>
-                <span v-if="it.issuer">· {{ it.issuer }}</span>
+                <span v-if="it.issuer">· <template v-for="(s, si) in issuerSegs(it)" :key="`i${si}`"><mark v-if="s.hit" class="hit">{{ s.text }}</mark><template v-else>{{ s.text }}</template></template></span>
                 <span v-if="it.expiresDate">{{ t('GlobalSearch.fe3baf', '· 到期') }} {{ it.expiresDate }}</span>
                 <span>{{ t('GlobalSearch.af31a0', '· 附件') }} {{ it.attachmentCount }}</span>
               </div>
@@ -290,6 +313,14 @@ watch(open, (v) => {
 .result__title {
   font-weight: 600;
   margin-bottom: var(--sp-1);
+}
+
+/* 命中片段：warning-soft 在明暗两套主题里都有定义，自动跟随主题 */
+.hit {
+  background: var(--warning-soft);
+  color: var(--text-primary);
+  border-radius: 2px;
+  padding: 0 1px;
 }
 
 .result__meta {

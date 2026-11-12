@@ -21,6 +21,7 @@ import ams.api.http.*
 import ams.app.auth.*
 import ams.kernel.error.*
 import ams.kernel.log.*
+import ams.kernel.time.*
 import ams.kernel.util.*
 
 /**
@@ -312,8 +313,10 @@ public class AuthRoutes {
         router.post("/api/auth/refresh", { req: ApiRequest => this.refresh(req) }, isPublic: true)
         router.post("/api/auth/logout", { req: ApiRequest => this.logout(req) })
         router.post("/api/auth/logout-all", { req: ApiRequest => this.logoutAll(req) })
-        // 自助注册（FR-AUTH-001）：公开接口，不要求令牌；captcha 为 P1 暂未接入
+        // 自助注册（FR-AUTH-001 / FR-AUTH-011）：公开接口，不要求令牌，强制图形验证码
         router.post("/api/auth/register", { req: ApiRequest => this.register(req) }, isPublic: true)
+        // 图形验证码下发（FR-AUTH-011）：公开接口，刷新时作废上一个 ID
+        router.get("/api/auth/captcha", { req: ApiRequest => this.captcha(req) }, isPublic: true)
         // 自助找回口令（FR-AUTH-008）：三步链路，均公开
         router.post("/api/auth/password/forgot", { req: ApiRequest => this.forgotPassword(req) }, isPublic: true)
         router.post("/api/auth/password/verify", { req: ApiRequest => this.verifyResetCode(req) }, isPublic: true)
@@ -330,6 +333,75 @@ public class AuthRoutes {
     }
 
     /**
+     * GET /api/auth/captcha —— 下发图形验证码（公开，FR-AUTH-011）。
+     *
+     * 响应只含 captchaId / svg / expiresAt，**绝不含答案**。
+     * 前端刷新时用 ?old=<上一个 captchaId> 作废旧 ID（刷新即作废旧 ID）。
+     */
+    private func captcha(req: ApiRequest): ApiResponse {
+        let oldId = req.queryParam("old") ?? ""
+        if (!oldId.isEmpty()) {
+            CaptchaStore.invalidate(oldId)
+        }
+        // 反代部署下按可配置策略解析客户端 IP；默认不信任 XFF（见 ClientIp）。
+        let ch = CaptchaStore.issueForIp(ClientIp.resolve(req), Times.nowMillis())
+        // devHint 由 CaptchaStore 严格门禁：仅「非 production + 显式测试开关」时非空，
+        // 生产恒为空串，因此响应里不会出现该字段（见 captcha.cj devHintAllowed）。
+        let data = "{\"captchaId\":\"${ApiResponse.escape(ch.captchaId)}\"," +
+            "\"svg\":\"${ApiResponse.escape(ch.svg)}\"," +
+            "\"expiresAt\":${ch.expiresAt}" + CaptchaStore.devHintJson(ch) + "}"
+        return ApiResponse.ok(data, req.requestId)
+    }
+
+    /**
+     * 强制校验图形验证码。
+     *
+     * 登录在命中触发条件时调用；注册 / 找回第一步无条件调用。
+     * 失败统一抛 validationError(field="captchaCode")：对外是
+     * VALIDATION_FAILED + 明确的中文提示，不泄漏正确答案；每次失败写日志。
+     * （不改 ams-kernel.error 的错误种类表，故用既有 ValidationFailed +
+     * 专属 field 与文案承载明确语义。）
+     */
+    private func enforceCaptcha(json: SimpleJson, req: ApiRequest): Unit {
+        let id = json.get("captchaId") ?? ""
+        let code = json.get("captchaCode") ?? ""
+        if (id.isEmpty() || code.isEmpty()) {
+            Log.get().warn("auth.captcha.missing", None, [
+                ("ip", req.remoteAddr)
+            ])
+            throw validationError("captchaCode", "请输入验证码")
+        }
+        let result = CaptchaStore.verify(id, code, Times.nowMillis())
+        match (result) {
+            case CaptchaVerify.Ok =>
+                Log.get().info("auth.captcha.ok", None, [
+                    ("ip", req.remoteAddr)
+                ])
+                return
+            case CaptchaVerify.NotFound =>
+                Log.get().warn("auth.captcha.invalid", None, [
+                    ("ip", req.remoteAddr), ("reason", "notfound")
+                ])
+                throw validationError("captchaCode", "验证码已失效，请刷新后重试")
+            case CaptchaVerify.Expired =>
+                Log.get().warn("auth.captcha.invalid", None, [
+                    ("ip", req.remoteAddr), ("reason", "expired")
+                ])
+                throw validationError("captchaCode", "验证码已过期，请刷新后重试")
+            case CaptchaVerify.Exhausted =>
+                Log.get().warn("auth.captcha.invalid", None, [
+                    ("ip", req.remoteAddr), ("reason", "exhausted")
+                ])
+                throw validationError("captchaCode", "验证码错误次数过多，请刷新后重试")
+            case CaptchaVerify.Wrong(_) =>
+                Log.get().warn("auth.captcha.invalid", None, [
+                    ("ip", req.remoteAddr), ("reason", "wrong")
+                ])
+                throw validationError("captchaCode", "验证码不正确，请刷新后重试")
+        }
+    }
+
+    /**
      * POST /api/auth/login
      */
     private func login(req: ApiRequest): ApiResponse {
@@ -343,6 +415,11 @@ public class AuthRoutes {
         let ua = req.header("user-agent") ?? ""
         // FR-AUTH-009：已启用双因子的账号必须带 totpCode
         let totpCode = json.get("totpCode") ?? ""
+        // FR-AUTH-011：该账号连续失败达到阈值时，本次登录必须先过图形验证码；
+        // 未命中触发条件时完全不校验 captchaId/captchaCode（零回归友好）。
+        if (this.authService.captchaRequired(username)) {
+            this.enforceCaptcha(json, req)
+        }
         let result = this.authService.login(username, password, req.remoteAddr, ua, totpCode: totpCode)
         let data = "{\"accessToken\":\"${ApiResponse.escape(result.accessToken)}\"," +
             "\"refreshToken\":\"${ApiResponse.escape(result.refreshToken)}\"," +
@@ -362,6 +439,8 @@ public class AuthRoutes {
         let svc = this.reset()
         let account = json.get("account") ?? ""
         let ua = req.header("user-agent") ?? ""
+        // FR-AUTH-011：找回口令第一步强制图形验证码（防枚举 / 邮件轰炸）
+        this.enforceCaptcha(json, req)
         let r = svc.request(account, req.remoteAddr, ua)
         let data = "{\"sent\":${if (r.sent) { "true" } else { "false" }}," +
             "\"channel\":\"${ApiResponse.escape(r.channel)}\"," +
@@ -478,6 +557,8 @@ public class AuthRoutes {
         let email = json.get("email") ?? ""
         let phone = json.get("phone") ?? ""
         let nickname = json.get("nickname") ?? ""
+        // FR-AUTH-011：注册接口强制图形验证码（防注册洪泛）
+        this.enforceCaptcha(json, req)
         let id = this.authService.register(username, password, email, phone, nickname)
         return ApiResponse.ok("{\"id\":${id}}", req.requestId)
     }

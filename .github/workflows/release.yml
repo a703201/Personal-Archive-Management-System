@@ -70,6 +70,10 @@ jobs:
           echo "version=${VER}" >> "$GITHUB_OUTPUT"
           echo "发布版本：${VER}"
 
+      - name: 静态一致性门禁（无需数据库 / SDK）
+        shell: bash
+        run: python3 scripts/ci/check-consistency.py
+
       - name: 缓存工具链
         uses: actions/cache@v4
         with:
@@ -94,7 +98,7 @@ jobs:
 
       - name: 构建前端
         shell: bash
-        run: cd web && npm ci && npm run build
+        run: cd web && npm ci && npm test && npm run build
 
       - name: 打包二进制发布包
         shell: bash

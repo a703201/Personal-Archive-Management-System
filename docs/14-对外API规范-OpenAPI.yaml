@@ -1,19 +1,22 @@
 # ============================================================
 # AMS · 对外 API 规范（OpenAPI 3.1）
 #
-# 本文件由 scripts/ci 之外的路由源码自动提取生成（基线版），
-# 覆盖 packages/ams-api/src/routes 下 156 个 method+path 组合。
-# 各操作的 request/response schema 暂以 UntypedObject 占位，
-# 需按后端 DTO（每个 route 文件的 handler 入参/出参）逐步补全。
+# 核心资源 schema 已定义，部分动态字段以 additionalProperties 保留，字段以代码为准。
+# 覆盖 packages/ams-api/src/routes 下 206 个 method+path 组合。
+# request/response 按路径语义引用 components.schemas 中的结构化定义；
+# 无法判定语义的动态字段以 type: object + additionalProperties: true 保留。
+# 所有 2xx 响应实际由 ApiEnvelope 包裹（见 http.cj ApiResponse.ok），
+# 此处各操作的 response schema 描述 data 主体，字段以代码为准。
+# 版本 0.2.0：由 0.1.0 基线补全核心资源 schema 并替换全部占位。
 # ============================================================
 openapi: 3.1.0
 info:
   title: 档案管理系统（AMS）对外 API
-  version: 0.1.0
+  version: 0.2.0
   description: |
     个人/家庭档案全生命周期管理后端。单进程同时提供 /api/* 与前端 SPA。
     鉴权：Bearer Token（登录后由 /api/auth/login 下发 access/refresh token）。
-    本规范为基线版，schema 待补全；路由以代码为准。
+    核心资源 schema 已定义，部分动态字段以 additionalProperties 保留，字段以代码为准。
   license:
     name: Apache-2.0
     identifier: Apache-2.0
@@ -50,6 +53,9 @@ tags:
   - name: subjects
   - name: tags
   - name: users
+  - name: grants
+  - name: setup
+  - name: storage
 
 paths:
   /api/admin/backup:
@@ -62,14 +68,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -91,14 +99,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -121,7 +131,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -144,7 +156,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -165,7 +177,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -185,14 +199,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -215,7 +231,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/HealthStatus'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -238,7 +254,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -266,14 +284,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -296,7 +316,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -324,14 +346,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -359,14 +383,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -388,14 +414,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -418,7 +446,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -440,14 +470,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -469,14 +501,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -499,7 +533,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -519,14 +553,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Attachment'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -555,7 +589,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -566,10 +600,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/ServerError'
-    patch:
-      operationId: patch_attachments_by_id
+    put:
+      operationId: put_attachments_by_id
       tags: [attachments]
-      summary: PATCH /api/attachments/:id
+      summary: PUT /api/attachments/:id
       parameters:
         - name: id
           in: path
@@ -581,14 +615,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Attachment'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -617,7 +651,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -646,7 +680,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -672,14 +706,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Attachment'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -712,14 +746,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Attachment'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -748,7 +782,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -777,7 +811,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -799,14 +833,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Attachment'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -828,14 +862,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Attachment'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -857,14 +891,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Attachment'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Attachment'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -887,7 +921,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -910,7 +944,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/AuditLog'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -932,14 +966,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/AuthTokens'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -961,14 +997,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -990,14 +1028,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1019,14 +1059,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1048,14 +1090,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1077,14 +1121,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1106,14 +1152,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/AuthTokens'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1135,14 +1183,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1165,7 +1215,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1188,7 +1240,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1208,14 +1262,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1237,14 +1293,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ExportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ExportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1267,7 +1323,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1287,14 +1343,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ExportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ExportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1323,7 +1379,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ExportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1351,14 +1407,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ExportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ExportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1387,7 +1443,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ExportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1409,14 +1465,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ExportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ExportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1445,7 +1501,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1468,7 +1524,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1488,14 +1544,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/FamilyGroup'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1524,7 +1580,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1551,7 +1607,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1580,7 +1636,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1606,14 +1662,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/FamilyGroup'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1642,7 +1698,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1668,14 +1724,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/FamilyGroup'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1704,7 +1760,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1738,7 +1794,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1767,7 +1823,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1796,7 +1852,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1818,14 +1874,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/FamilyGroup'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1848,7 +1904,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1877,7 +1933,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/FamilyGroup'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1890,27 +1946,6 @@ paths:
           $ref: '#/components/responses/ServerError'
 
   /api/field-defs:
-    delete:
-      operationId: delete_field-defs
-      tags: [field defs]
-      summary: DELETE /api/field-defs
-      responses:
-        '200':
-          description: 成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UntypedObject'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/ServerError'
     get:
       operationId: get_field-defs
       tags: [field defs]
@@ -1921,7 +1956,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1941,14 +1978,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -1977,7 +2016,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2003,14 +2042,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2033,7 +2074,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/HealthStatus'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2056,7 +2097,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2079,7 +2122,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2099,14 +2144,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2135,7 +2184,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2161,14 +2212,18 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2190,14 +2245,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ImportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2219,14 +2274,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ImportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2254,14 +2309,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ImportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2283,14 +2338,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ImportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2312,14 +2367,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ImportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2341,14 +2396,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ImportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2371,7 +2426,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2391,14 +2446,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ImportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2427,7 +2482,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2455,14 +2510,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ImportTask'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2491,7 +2546,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2514,7 +2569,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ImportTask'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2537,7 +2592,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2557,14 +2614,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2593,7 +2652,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2619,14 +2678,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2654,14 +2715,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2684,7 +2747,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2704,14 +2767,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Item'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2740,7 +2803,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2767,7 +2830,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2793,14 +2856,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Item'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2829,7 +2892,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2855,14 +2918,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Item'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2890,14 +2953,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Item'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2925,14 +2988,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Item'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -2960,14 +3023,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Item'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3001,7 +3064,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3030,7 +3093,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3063,14 +3126,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Item'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Item'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3093,7 +3156,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3116,7 +3179,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3136,14 +3199,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/User'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3166,7 +3229,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3188,14 +3251,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/User'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3217,14 +3280,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/User'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3246,14 +3309,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/User'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3275,14 +3338,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/User'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3305,7 +3368,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3326,7 +3389,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3355,7 +3418,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3378,7 +3441,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3401,7 +3464,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3429,14 +3494,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3458,14 +3525,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3488,7 +3557,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3511,7 +3582,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3531,14 +3604,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3561,7 +3636,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3584,7 +3661,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3607,7 +3686,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3618,7 +3697,28 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/ServerError'
-
+
+    post:
+      operationId: post_roles
+      tags: [roles]
+      summary: POST /api/roles
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
   /api/roles/{code}/perms:
     post:
       operationId: post_roles_by_code_perms
@@ -3635,14 +3735,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Role'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Role'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3665,7 +3765,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3688,7 +3790,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3709,7 +3811,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3731,14 +3835,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3761,7 +3867,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3784,7 +3892,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3804,14 +3914,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3840,7 +3952,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3863,7 +3975,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3883,14 +3995,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ShareLink'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ShareLink'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3919,7 +4031,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ShareLink'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3948,7 +4060,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ShareLink'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -3974,14 +4086,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/ShareLink'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ShareLink'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4004,7 +4116,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4024,14 +4136,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Subject'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Subject'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4060,7 +4172,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Subject'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4086,14 +4198,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/Subject'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/Subject'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4116,7 +4228,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                type: object
+                additionalProperties: true
+                description: 动态字段，字段按后端 DTO 细化（以代码为准）
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4136,14 +4250,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4172,7 +4288,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4198,14 +4314,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4233,14 +4351,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              type: object
+              additionalProperties: true
+              description: 动态字段，字段按后端 DTO 细化（以代码为准）
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/ActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4263,7 +4383,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/PageInfo'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4283,14 +4403,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/User'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4319,7 +4439,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4330,7 +4450,34 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/ServerError'
-
+
+    get:
+      operationId: get_users_by_id
+      tags: [users]
+      summary: GET /api/users/:id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
   /api/users/{id}/password:
     post:
       operationId: post_users_by_id_password
@@ -4347,14 +4494,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/User'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4382,14 +4529,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/User'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4417,14 +4564,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UntypedObject'
+              $ref: '#/components/schemas/User'
       responses:
         '200':
           description: 成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UntypedObject'
+                $ref: '#/components/schemas/User'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -4436,6 +4583,1440 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /api/admin/deployment:
+    get:
+      operationId: get_admin_deployment
+      tags: [admin]
+      summary: GET /api/admin/deployment
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/deployment/database:
+    delete:
+      operationId: delete_admin_deployment_database
+      tags: [admin]
+      summary: DELETE /api/admin/deployment/database
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    put:
+      operationId: put_admin_deployment_database
+      tags: [admin]
+      summary: PUT /api/admin/deployment/database
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/deployment/mail:
+    put:
+      operationId: put_admin_deployment_mail
+      tags: [admin]
+      summary: PUT /api/admin/deployment/mail
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/deployment/test-db:
+    post:
+      operationId: post_admin_deployment_test_db
+      tags: [admin]
+      summary: POST /api/admin/deployment/test-db
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/deployment/test-mail:
+    post:
+      operationId: post_admin_deployment_test_mail
+      tags: [admin]
+      summary: POST /api/admin/deployment/test-mail
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/storage/config:
+    get:
+      operationId: get_admin_storage_config
+      tags: [admin]
+      summary: GET /api/admin/storage/config
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    put:
+      operationId: put_admin_storage_config
+      tags: [admin]
+      summary: PUT /api/admin/storage/config
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/storage/providers:
+    get:
+      operationId: get_admin_storage_providers
+      tags: [admin]
+      summary: GET /api/admin/storage/providers
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/tenants/{id}/audit-summary:
+    get:
+      operationId: get_admin_tenants_by_id_audit_summary
+      tags: [admin]
+      summary: GET /api/admin/tenants/:id/audit-summary
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/tenants/{id}/quota:
+    get:
+      operationId: get_admin_tenants_by_id_quota
+      tags: [admin]
+      summary: GET /api/admin/tenants/:id/quota
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    put:
+      operationId: put_admin_tenants_by_id_quota
+      tags: [admin]
+      summary: PUT /api/admin/tenants/:id/quota
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/tenants/{id}/settings:
+    get:
+      operationId: get_admin_tenants_by_id_settings
+      tags: [admin]
+      summary: GET /api/admin/tenants/:id/settings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    put:
+      operationId: put_admin_tenants_by_id_settings
+      tags: [admin]
+      summary: PUT /api/admin/tenants/:id/settings
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/attachments/{id}/media:
+    post:
+      operationId: post_attachments_by_id_media
+      tags: [attachments]
+      summary: POST /api/attachments/:id/media
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/attachments/{id}/ocr:
+    get:
+      operationId: get_attachments_by_id_ocr
+      tags: [attachments]
+      summary: GET /api/attachments/:id/ocr
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/attachments/{id}/thumbnail:
+    get:
+      operationId: get_attachments_by_id_thumbnail
+      tags: [attachments]
+      summary: GET /api/attachments/:id/thumbnail
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/attachments/{id}/watermarked:
+    get:
+      operationId: get_attachments_by_id_watermarked
+      tags: [attachments]
+      summary: GET /api/attachments/:id/watermarked
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/attachments/upload/sessions:
+    post:
+      operationId: post_attachments_upload_sessions
+      tags: [attachments]
+      summary: POST /api/attachments/upload/sessions
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/attachments/upload/sessions/{id}:
+    delete:
+      operationId: delete_attachments_upload_sessions_by_id
+      tags: [attachments]
+      summary: DELETE /api/attachments/upload/sessions/:id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    get:
+      operationId: get_attachments_upload_sessions_by_id
+      tags: [attachments]
+      summary: GET /api/attachments/upload/sessions/:id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/attachments/upload/sessions/{id}/chunks/{index}:
+    put:
+      operationId: put_attachments_upload_sessions_by_id_chunks_by_index
+      tags: [attachments]
+      summary: PUT /api/attachments/upload/sessions/:id/chunks/:index
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/attachments/upload/sessions/{id}/complete:
+    post:
+      operationId: post_attachments_upload_sessions_by_id_complete
+      tags: [attachments]
+      summary: POST /api/attachments/upload/sessions/:id/complete
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/audit/report:
+    get:
+      operationId: get_audit_report
+      tags: [audit]
+      summary: GET /api/audit/report
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/auth/captcha:
+    get:
+      operationId: get_auth_captcha
+      tags: [auth]
+      summary: GET /api/auth/captcha
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/dict/{code}/items:
+    get:
+      operationId: get_dict_by_code_items
+      tags: [dict]
+      summary: GET /api/dict/:code/items
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      operationId: post_dict_by_code_items
+      tags: [dict]
+      summary: POST /api/dict/:code/items
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/grants:
+    get:
+      operationId: get_grants
+      tags: [grants]
+      summary: GET /api/grants
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      operationId: post_grants
+      tags: [grants]
+      summary: POST /api/grants
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/grants/{id}:
+    delete:
+      operationId: delete_grants_by_id
+      tags: [grants]
+      summary: DELETE /api/grants/:id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/items/{id}/clone:
+    post:
+      operationId: post_items_by_id_clone
+      tags: [items]
+      summary: POST /api/items/:id/clone
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/items/batch/edit:
+    post:
+      operationId: post_items_batch_edit
+      tags: [items]
+      summary: POST /api/items/batch/edit
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/items/timeline:
+    get:
+      operationId: get_items_timeline
+      tags: [items]
+      summary: GET /api/items/timeline
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/roles/{code}:
+    delete:
+      operationId: delete_roles_by_code
+      tags: [roles]
+      summary: DELETE /api/roles/:code
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    put:
+      operationId: put_roles_by_code
+      tags: [roles]
+      summary: PUT /api/roles/:code
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/setup/admin:
+    post:
+      operationId: post_setup_admin
+      tags: [setup]
+      summary: POST /api/setup/admin
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/setup/database:
+    post:
+      operationId: post_setup_database
+      tags: [setup]
+      summary: POST /api/setup/database
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/setup/mail:
+    post:
+      operationId: post_setup_mail
+      tags: [setup]
+      summary: POST /api/setup/mail
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/setup/status:
+    get:
+      operationId: get_setup_status
+      tags: [setup]
+      summary: GET /api/setup/status
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/setup/test-db:
+    post:
+      operationId: post_setup_test_db
+      tags: [setup]
+      summary: POST /api/setup/test-db
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/setup/test-mail:
+    post:
+      operationId: post_setup_test_mail
+      tags: [setup]
+      summary: POST /api/setup/test-mail
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/tags/{id}/merge:
+    post:
+      operationId: post_tags_by_id_merge
+      tags: [tags]
+      summary: POST /api/tags/:id/merge
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/tags/stats:
+    get:
+      operationId: get_tags_stats
+      tags: [tags]
+      summary: GET /api/tags/stats
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/users/{id}/roles:
+    get:
+      operationId: get_users_by_id_roles
+      tags: [users]
+      summary: GET /api/users/:id/roles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      operationId: post_users_by_id_roles
+      tags: [users]
+      summary: POST /api/users/:id/roles
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/users/{id}/roles/{roleCode}:
+    delete:
+      operationId: delete_users_by_id_roles_by_roleCode
+      tags: [users]
+      summary: DELETE /api/users/:id/roles/:roleCode
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: roleCode
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/tenants:
+    get:
+      operationId: get_admin_tenants
+      tags: [admin]
+      summary: GET /api/admin/tenants (租户列表, acl:manage)
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    post:
+      operationId: post_admin_tenants
+      tags: [admin]
+      summary: POST /api/admin/tenants (建租户并播种默认配额, acl:manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: 租户编码已存在或创建失败
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/tenants/{id}/bootstrap-admin:
+    post:
+      operationId: post_admin_tenants_by_id_bootstrap_admin
+      tags: [admin]
+      summary: POST /api/admin/tenants/:id/bootstrap-admin (一次性建首个 org_admin, acl:manage)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 该租户已有用户, 首次引导只允许执行一次
+        '500':
+          $ref: '#/components/responses/ServerError'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -4443,48 +6024,278 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
-    UntypedObject:
+    ApiEnvelope:
       type: object
-      description: 占位 schema，需按后端 DTO 补全字段（见各 route 文件 handler）。
-      additionalProperties: true
-    ErrorEnvelope:
-      type: object
+      description: 统一成功响应信封（http.cj ApiResponse.ok）。所有 2xx 响应外层均为该结构。
       properties:
-        code:
-          type: string
-          description: 业务错误码（如 AUTH_FAILED / ACL_DENIED）
-        message:
-          type: string
-        traceId:
-          type: string
+        code: { type: string, description: 业务码，成功固定为 OK }
+        message: { type: string, description: 描述，成功固定为 success }
+        data: { type: object, additionalProperties: true, description: 业务数据主体，具体结构见各资源 schema 与对应操作 }
+        requestId: { type: string, description: 请求 ID }
+      required: [code, message, requestId]
+      additionalProperties: true
+    ErrorResponse:
+      type: object
+      description: 统一错误响应体（http.cj ApiResponse.error）。
+      properties:
+        code: { type: string, description: 业务错误码，如 AUTH_FAILED / ACL_DENIED / VALIDATION_FAILED }
+        message: { type: string, description: 错误描述 }
+        field: { type: string, description: 触发校验错误的字段名 }
+        requestId: { type: string, description: 请求 ID }
+        details: { type: object, additionalProperties: true, description: RFC 7807 风格附加明细 }
+      required: [code, message, requestId]
+      additionalProperties: true
+    ActionResult:
+      type: object
+      description: 通用动作结果（创建 / 更新 / 删除 / 状态流转等）。具体字段由各 handler 决定。
+      properties:
+        id: { type: string }
+        status: { type: integer }
+        updated: { type: boolean }
+        deleted: { type: boolean }
+        restored: { type: boolean }
+        cancelled: { type: boolean }
+      additionalProperties: true
+    AuthTokens:
+      type: object
+      description: 登录 / 刷新下发的令牌（auth.cj login / refresh）。
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        sid: { type: string, description: 会话 ID }
+        expiresAt: { type: integer, format: int64, description: 过期时间，epoch 毫秒 }
+      additionalProperties: true
+    PageInfo:
+      type: object
+      description: 分页列表响应主体（items.cj / audit.cj / family.cj 的 total / page / size / items 结构）。
+      properties:
+        total: { type: integer, format: int64, description: 总条数 }
+        page: { type: integer, description: 当前页码，从 1 起 }
+        size: { type: integer, description: 每页条数 }
+        items:
+          type: array
+          items: { type: object, additionalProperties: true }
+          description: 当前页数据，元素结构见对应资源 schema
+      additionalProperties: true
+    Item:
+      type: object
+      description: 档案条目（items.cj toJson / toJsonOf）。ID 以字符串承载，时间戳为 epoch 毫秒整数。
+      properties:
+        id: { type: string, description: 条目 ID }
+        subjectId: { type: string, description: 归属主体 ID }
+        category: { type: integer, description: 分类码，1-11 }
+        title: { type: string }
+        status: { type: integer, description: 状态码 }
+        sensitivity: { type: integer, description: 敏感度码，1 普通 / 2 敏感 / 3 高 }
+        issuedDate: { type: string, description: 签发日期 YYYY-MM-DD }
+        expiresAt: { type: string, description: 有效期 YYYY-MM-DD }
+        issuer: { type: string }
+        remark: { type: string }
+        version: { type: integer, description: 乐观锁版本号 }
+        source: { type: integer, description: 来源系统码 }
+        shared: { type: boolean, description: 是否来自家庭共享授权 }
+        createdAt: { type: integer, format: int64, description: 创建时间，epoch 毫秒 }
+        updatedAt: { type: integer, format: int64, description: 更新时间，epoch 毫秒 }
+        extra: { type: object, additionalProperties: true, description: 自定义扩展字段，后端以 extraJson 文本承载 }
+      additionalProperties: true
+    Subject:
+      type: object
+      description: 档案主体（subjects.cj SubjectView.toJson）。
+      properties:
+        id: { type: string }
+        name: { type: string }
+        alias: { type: string }
+        relation: { type: integer, description: 与本人的关系码 }
+        isPrimary: { type: boolean, description: 是否「本人」主体 }
+        status: { type: integer }
+        completeness: { type: integer, description: 资料完整度 }
+        summary: { type: string }
+        version: { type: integer, description: 乐观锁版本号 }
+        createdAt: { type: integer, format: int64 }
+        updatedAt: { type: integer, format: int64 }
+      additionalProperties: true
+    Attachment:
+      type: object
+      description: 附件（attachments.cj attachmentJson）。大小 / 计数为整数，时间戳为 epoch 毫秒。
+      properties:
+        id: { type: integer, format: int64 }
+        subjectId: { type: integer, format: int64 }
+        itemId: { type: integer, format: int64 }
+        category: { type: integer }
+        title: { type: string }
+        currentVersionId: { type: integer, format: int64 }
+        versionCount: { type: integer }
+        fileSize: { type: integer, format: int64, description: 当前版本字节数 }
+        fileExt: { type: string }
+        mimeType: { type: string }
+        status: { type: integer }
+        downloadCount: { type: integer }
+        summary: { type: string }
+        keywords: { type: string }
+      additionalProperties: true
+    ShareLink:
+      type: object
+      description: 分享链接（share.cj 创建返回 / 列表项）。
+      properties:
+        id: { type: string }
+        token: { type: string }
+        url: { type: string, description: 相对分享路径 }
+        itemId: { type: string }
+        protected: { type: boolean, description: 是否口令保护 }
+        maxFails: { type: integer }
+        expiresAt: { type: integer, format: int64, description: 过期时间，epoch 毫秒 }
+        revoked: { type: boolean }
+        expired: { type: boolean }
+        viewCount: { type: integer }
+      additionalProperties: true
+    AuditLog:
+      type: object
+      description: 审计日志条目（audit.cj auditJson）。
+      properties:
+        chainSeq: { type: integer, format: int64, description: 哈希链序号 }
+        actorId: { type: string, description: 操作者 ID }
+        action: { type: string }
+        actionDesc: { type: string }
+        targetType: { type: string }
+        targetId: { type: string }
+        subjectId: { type: string }
+        category: { type: integer }
+        result: { type: integer, description: 结果码 }
+        errorCode: { type: string }
+        clientIp: { type: string }
+        traceId: { type: string }
+        occurredAt: { type: integer, format: int64, description: 发生时间，epoch 毫秒 }
+      additionalProperties: true
+    User:
+      type: object
+      description: 用户档案（me.cj me()）。管理端用户列表经 rowsToJson 输出，动态列以 additionalProperties 保留；邮箱与手机为掩码值。
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+        nickname: { type: string }
+        email: { type: string, description: 掩码后的邮箱 }
+        phone: { type: string, description: 掩码后的手机号 }
+        status: { type: integer }
+        perms:
+          type: array
+          items: { type: string }
+          description: 当前会话权限点集合
+      additionalProperties: true
+    Role:
+      type: object
+      description: 角色（management.cj 角色管理）。数据库行经 rowsToJson 输出，动态列以 additionalProperties 保留。
+      properties:
+        code: { type: string, description: 角色编码 }
+        name: { type: string }
+        description: { type: string }
+      additionalProperties: true
+    FamilyGroup:
+      type: object
+      description: 家庭组（family.cj 组列表 / 详情）。
+      properties:
+        groupId: { type: string }
+        name: { type: string }
+        ownerId: { type: string }
+        myRole: { type: string, description: 当前成员在组内的角色 }
+        role: { type: string }
+        memberCount: { type: integer }
+        canInvite: { type: boolean }
+        canGrant: { type: boolean }
+        canDissolve: { type: boolean }
+        createdAt: { type: integer, format: int64 }
+      additionalProperties: true
+    ImportTask:
+      type: object
+      description: 导入任务（import.cj / export.cj ExportRoutes.taskJson，导入与导出共用任务视图）。
+      properties:
+        id: { type: string }
+        taskNo: { type: string, description: 任务号 }
+        type: { type: string, description: 任务类型 }
+        status: { type: integer, description: 任务状态码 }
+        total: { type: integer }
+        done: { type: integer }
+        failed: { type: integer }
+        percent: { type: integer }
+        format: { type: string }
+        rows: { type: integer }
+        expiresAt: { type: integer, format: int64 }
+        error: { type: string }
+        createdAt: { type: integer, format: int64 }
+        updatedAt: { type: integer, format: int64 }
+      additionalProperties: true
+    ExportTask:
+      type: object
+      description: 导出任务（export.cj ExportRoutes.taskJson，字段与 ImportTask 一致）。
+      properties:
+        id: { type: string }
+        taskNo: { type: string, description: 任务号 }
+        type: { type: string, description: 任务类型 }
+        status: { type: integer, description: 任务状态码 }
+        total: { type: integer }
+        done: { type: integer }
+        failed: { type: integer }
+        percent: { type: integer }
+        format: { type: string }
+        rows: { type: integer }
+        expiresAt: { type: integer, format: int64 }
+        error: { type: string }
+        createdAt: { type: integer, format: int64 }
+        updatedAt: { type: integer, format: int64 }
+      additionalProperties: true
+    HealthStatus:
+      type: object
+      description: 健康状态。/api/health 返回 status=ok；/api/admin/health 额外返回进程指标（system.cj health）。
+      properties:
+        status: { type: string, description: 服务状态，公开检查固定为 ok }
+        uptimeMs: { type: integer, format: int64, description: 进程运行时长，毫秒 }
+        windowStart: { type: integer, format: int64 }
+        requests: { type: integer, format: int64, description: 窗口内请求数 }
+        error4xx: { type: integer, format: int64 }
+        error5xx: { type: integer, format: int64 }
+        errorRatePermille: { type: integer, description: 5xx 千分比 }
+        onlineSessions: { type: integer }
+        dbLatencyMs: { type: integer, description: 数据库往返延迟，毫秒 }
+        storageBytes: { type: integer, format: int64 }
+        storageFiles: { type: integer }
+        tables:
+          type: array
+          items: { type: object, additionalProperties: true }
+          description: 核心表行数，元素含 table 与 rows
+      additionalProperties: true
   responses:
+    Success:
+      description: 成功
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiEnvelope'
     BadRequest:
       description: 请求参数错误
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            $ref: '#/components/schemas/ErrorResponse'
     Unauthorized:
       description: 未认证或令牌失效
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            $ref: '#/components/schemas/ErrorResponse'
     Forbidden:
       description: 无权限（对象级鉴权拒绝）
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            $ref: '#/components/schemas/ErrorResponse'
     NotFound:
       description: 资源不存在
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            $ref: '#/components/schemas/ErrorResponse'
     ServerError:
       description: 服务端内部错误
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorEnvelope'
+            $ref: '#/components/schemas/ErrorResponse'

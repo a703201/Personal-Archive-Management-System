@@ -15,7 +15,7 @@ import { onMounted, ref } from 'vue'
 import { t } from '../i18n'
 import { useRoute } from 'vue-router'
 import { api, ApiError } from '../api/client'
-import { categoryName, formatTime as fmtTime, sensitivityName, statusName } from '../composables/useCatalog'
+import { catName, formatTime as fmtTime, sensitivityLabel, statusLabel } from '../composables/useCatalog'
 
 const route = useRoute()
 const token = String(route.params.token ?? '')
@@ -47,7 +47,7 @@ function handleError(e: unknown): void {
   const err = e as ApiError
   if (err.status === 404) {
     dead.value = true
-    errorText.value = '链接不存在或已失效'
+    errorText.value = t('ShareView.xa09359', '链接不存在或已失效')
     return
   }
   errorText.value = err.message || t('viewsShareView.f6b7a4', '加载失败')
@@ -73,7 +73,7 @@ async function load(): Promise<void> {
 
 async function submit(): Promise<void> {
   if (!password.value) {
-    errorText.value = '请输入访问密码'
+    errorText.value = t('ShareView.xc7ef6f', '请输入访问密码')
     return
   }
   submitting.value = true
@@ -91,7 +91,7 @@ async function submit(): Promise<void> {
     const err = e as ApiError
     if (err.status === 404) {
       dead.value = true
-      errorText.value = '链接不存在或已失效'
+      errorText.value = t('ShareView.xa09359', '链接不存在或已失效')
     } else {
       errorText.value = err.message || t('viewsShareView.42a70c', '密码不正确')
     }
@@ -117,7 +117,7 @@ onMounted(load)
       <div v-else-if="dead" class="share-dead">
         <p class="share-dead__title">{{ errorText }}</p>
         <p class="share-dead__desc">
-          该链接可能已过期、已被撤销，或分享的档案已被删除。请联系分享者重新生成。
+          {{ t('ShareView.x856951', '该链接可能已过期、已被撤销，或分享的档案已被删除。请联系分享者重新生成。') }}
         </p>
       </div>
 
@@ -135,7 +135,7 @@ onMounted(load)
         />
         <p v-if="errorText" class="share-error">{{ errorText }}</p>
         <button class="btn-primary share-pwd__btn" type="submit" :disabled="submitting">
-          {{ submitting ? '校验中…' : '查看档案' }}
+          {{ submitting ? t('ShareView.x6e89b2', '校验中…') : t('ShareView.x6c531f', '查看档案') }}
         </button>
       </form>
 
@@ -143,10 +143,10 @@ onMounted(load)
       <article v-else-if="item" class="share-item">
         <h1 class="share-item__title">{{ item.title }}</h1>
         <div class="share-item__tags">
-          <span class="chip">{{ categoryName(item.category) }}</span>
-          <span class="chip">{{ statusName(item.status) }}</span>
+          <span class="chip">{{ catName(item.category) }}</span>
+          <span class="chip">{{ statusLabel(item.status) }}</span>
           <span class="chip" :class="`chip--sens${item.sensitivity}`">
-            {{ sensitivityName(item.sensitivity) }}
+            {{ sensitivityLabel(item.sensitivity) }}
           </span>
         </div>
 

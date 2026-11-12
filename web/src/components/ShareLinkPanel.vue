@@ -157,12 +157,12 @@ defineExpose({ load })
     <div class="share__head">
       <h3 class="share__title">{{ t('ShareLinkPanel.e7b1c3', '共享链接') }}</h3>
       <button class="btn-ghost share__new" type="button" @click="showForm = !showForm">
-        {{ showForm ? '收起' : '+ 创建链接' }}
+        {{ showForm ? t('ShareLinkPanel.xdef9e9', '收起') : t('ShareLinkPanel.x83ca75', '+ 创建链接') }}
       </button>
     </div>
 
     <p class="share__desc">
-      生成一个免登录只读链接。默认 7 天有效，可设访问密码；密码错误达到上限后链接立即失效。
+      {{ t('ShareLinkPanel.x1d1c7f', '生成一个免登录只读链接。默认 7 天有效，可设访问密码；密码错误达到上限后链接立即失效。') }}
     </p>
 
     <!-- 创建表单 -->
@@ -202,7 +202,7 @@ defineExpose({ load })
           :disabled="creating"
           @click="create"
         >
-          {{ creating ? '创建中…' : '创建链接' }}
+          {{ creating ? t('ShareLinkPanel.xd156b3', '创建中…') : t('ShareLinkPanel.x44dfd2', '创建链接') }}
         </button>
       </div>
     </div>
@@ -210,7 +210,7 @@ defineExpose({ load })
     <!-- 新建结果 -->
     <div v-if="created" class="share__result">
       <div class="share__result-top">
-        <span class="share__result-badge">{{ created.protected ? '密码保护' : '公开只读' }}</span>
+        <span class="share__result-badge">{{ created.protected ? t('ShareLinkPanel.x37b7f4', '密码保护') : t('ShareLinkPanel.xf6de97', '公开只读') }}</span>
         <button class="btn-text" type="button" @click="created = null">{{ t('ShareLinkPanel.6c14bd', '关闭') }}</button>
       </div>
       <code class="share__url">{{ created.fullUrl }}</code>
@@ -229,7 +229,7 @@ defineExpose({ load })
             <span class="chip" :class="stateOf(l).cls">{{ stateOf(l).text }}</span>
             <span class="u-sub">{{ t('ShareLinkPanel.ef23ea', '浏览') }} {{ l.viewCount }} {{ t('ShareLinkPanel.5e5b81', '次') }}</span>
             <span v-if="l.failCount > 0" class="u-sub u-sub--warn">
-              密码错误 {{ l.failCount }} 次
+              {{ t('ShareLinkPanel.x5a5368', '密码错误') }} {{ l.failCount }} {{ t('ShareLinkPanel.x7229ec', '次') }}
             </span>
           </div>
           <code class="share__token">{{ fullUrlOf(l.token) }}</code>
@@ -244,7 +244,7 @@ defineExpose({ load })
             :disabled="revoking === l.id"
             @click="revoke(l)"
           >
-            {{ revoking === l.id ? '撤销中…' : '撤销' }}
+            {{ revoking === l.id ? t('ShareLinkPanel.xab3418', '撤销中…') : t('ShareLinkPanel.xbd9fcf', '撤销') }}
           </button>
         </div>
       </li>

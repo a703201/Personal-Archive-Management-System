@@ -94,7 +94,7 @@ async function setup2fa(): Promise<void> {
     })
     totpSecret.value = res.secret
     totpUrl.value = res.otpauthUrl
-    twofaMsg.value = '密钥已生成，请用验证器录入后输入动态码完成绑定'
+    twofaMsg.value = t('ProfileView.xaa4b30', '密钥已生成，请用验证器录入后输入动态码完成绑定')
   } catch (e) {
     twofaErr.value = (e as Error).message || t('viewsProfileView.fba06d', '生成密钥失败')
   } finally {
@@ -121,7 +121,7 @@ async function enable2fa(): Promise<void> {
   twofaErr.value = ''
   twofaMsg.value = ''
   if (!/^\d{6}$/.test(totpCode.value.trim())) {
-    twofaErr.value = '请输入 6 位动态码'
+    twofaErr.value = t('ProfileView.x8e732b', '请输入 6 位动态码')
     return
   }
   twofaBusy.value = true
@@ -131,7 +131,7 @@ async function enable2fa(): Promise<void> {
       twofaErr.value = r.msg || t('viewsProfileView.b8a2f0', '启用失败')
       return
     }
-    twofaMsg.value = '双因子已启用，下次登录需输入动态码'
+    twofaMsg.value = t('ProfileView.x0d14a0', '双因子已启用，下次登录需输入动态码')
     totpSecret.value = ''
     totpUrl.value = ''
     totpCode.value = ''
@@ -153,7 +153,7 @@ async function disable2fa(): Promise<void> {
       twofaErr.value = r.msg || t('viewsProfileView.fe3a1a', '停用失败')
       return
     }
-    twofaMsg.value = '双因子已停用'
+    twofaMsg.value = t('ProfileView.x592bed', '双因子已停用')
     await load2fa()
   } finally {
     twofaBusy.value = false
@@ -209,7 +209,7 @@ async function kickOthers(): Promise<void> {
   sessionBusy.value = '__others'
   try {
     const res = await api<{ revoked: number }>('/me/sessions', { method: 'DELETE' })
-    toast.success(t('viewsProfileView.8ea73b', `已登出其他 ${res.revoked} 台设备`))
+    toast.success(t('viewsProfileView.8ea73b', `已登出其他 ${res.revoked} 台设备`, { count: res.revoked }))
     await loadSessions()
   } catch (e) {
     toast.error((e as Error).message)
@@ -403,7 +403,7 @@ async function changePassword(): Promise<void> {
           <dt>{{ t('ProfileView.5a9cc5', '手机号') }}</dt>
           <dd>{{ me.phone || '—' }}</dd>
           <dt>{{ t('ProfileView.67104f', '账号状态') }}</dt>
-          <dd>{{ Number(me.status) === 0 ? '正常' : '已停用' }}</dd>
+          <dd>{{ Number(me.status) === 0 ? t('ProfileView.xfd6e80', '正常') : t('ProfileView.x69b0f6', '已停用') }}</dd>
         </dl>
         <p class="hint">{{ t('ProfileView.24a0f1', '联系方式默认掩码展示，完整值需在各自业务场景中按权限查看。') }}</p>
       </div>
@@ -413,16 +413,16 @@ async function changePassword(): Promise<void> {
         <div class="sec-row">
           <div>
             <div class="sec-row__title">
-              双因子认证（TOTP）
+              {{ t('ProfileView.x78f03c', '双因子认证（TOTP）') }}
               <span class="sec-row__tag" :class="{ 'sec-row__tag--on': twofa.enabled }">
-                {{ twofa.enabled ? '已启用' : '未启用' }}
+                {{ twofa.enabled ? t('ProfileView.x53ace4', '已启用') : t('ProfileView.x463776', '未启用') }}
               </span>
             </div>
             <div class="sec-row__sub">
               {{
                 twofa.enabled
-                  ? '登录时除口令外还需输入验证器上的 6 位动态码'
-                  : '建议启用：口令泄露时仍有一道动态码保护'
+                  ? t('ProfileView.x375cd5', '登录时除口令外还需输入验证器上的 6 位动态码')
+                  : t('ProfileView.x0c6335', '建议启用：口令泄露时仍有一道动态码保护')
               }}
             </div>
           </div>
@@ -433,7 +433,7 @@ async function changePassword(): Promise<void> {
             :disabled="twofaBusy"
             @click="disable2fa"
           >
-            停用
+            {{ t('ProfileView.x5c56a8', '停用') }}
           </button>
           <button
             v-else
@@ -442,13 +442,13 @@ async function changePassword(): Promise<void> {
             :disabled="twofaBusy"
             @click="setup2fa"
           >
-            开始绑定
+            {{ t('ProfileView.x368660', '开始绑定') }}
           </button>
         </div>
 
         <div v-if="totpSecret" class="sec-setup">
           <p class="hint">
-            ① 在验证器 App（如 Microsoft Authenticator / Google Authenticator）中手动添加密钥：
+            {{ t('ProfileView.xf9e9dc', '① 在验证器 App（如 Microsoft Authenticator / Google Authenticator）中手动添加密钥：') }}
           </p>
           <code class="sec-setup__secret">{{ totpSecret }}</code>
           <p class="hint">{{ t('ProfileView.05a4a2', '② 录入后输入 App 显示的 6 位动态码完成绑定：') }}</p>
@@ -462,7 +462,7 @@ async function changePassword(): Promise<void> {
               placeholder="000000"
             />
             <button class="btn-ghost" type="button" :disabled="twofaBusy" @click="enable2fa">
-              确认启用
+              {{ t('ProfileView.x38f75a', '确认启用') }}
             </button>
           </div>
           <p class="hint sec-setup__url">{{ totpUrl }}</p>
@@ -473,7 +473,7 @@ async function changePassword(): Promise<void> {
       </div>
 
       <h2 class="section-title">
-        会话与设备（{{ sessions.length }}）
+        {{ t('ProfileView.x12bcd9', '会话与设备（') }}{{ sessions.length }}）
         <button
           v-if="sessions.length > 1"
           class="btn-text section-title__action"
@@ -481,7 +481,7 @@ async function changePassword(): Promise<void> {
           :disabled="sessionBusy === '__others'"
           @click="kickOthers"
         >
-          {{ sessionBusy === '__others' ? '处理中…' : '登出其他设备' }}
+          {{ sessionBusy === '__others' ? t('ProfileView.xcf978c', '处理中…') : t('ProfileView.xd2fa54', '登出其他设备') }}
         </button>
       </h2>
       <div class="card">
@@ -489,10 +489,10 @@ async function changePassword(): Promise<void> {
         <div v-for="s in sessions" :key="s.sid" class="sess">
           <div class="sess__main">
             <div class="sess__title">
-              {{ s.userAgent || '未知设备' }}
+              {{ s.userAgent || t('ProfileView.x3c1584', '未知设备') }}
               <span v-if="s.current === true || s.current === 'true'" class="sess__tag">{{ t('ProfileView.25e74d', '当前') }}</span>
             </div>
-            <div class="sess__sub">{{ s.ip }} · 最近活动 {{ fmtTime(s.lastActiveAt) }}</div>
+            <div class="sess__sub">{{ s.ip }} {{ t('ProfileView.xcff2f3', '· 最近活动') }} {{ fmtTime(s.lastActiveAt) }}</div>
           </div>
           <button
             v-if="!(s.current === true || s.current === 'true')"
@@ -501,7 +501,7 @@ async function changePassword(): Promise<void> {
             :disabled="sessionBusy === s.sid"
             @click="kick(s)"
           >
-            {{ sessionBusy === s.sid ? '处理中…' : '登出' }}
+            {{ sessionBusy === s.sid ? t('ProfileView.xcf978c', '处理中…') : t('ProfileView.x75c856', '登出') }}
           </button>
         </div>
       </div>
@@ -561,7 +561,7 @@ async function changePassword(): Promise<void> {
 
         <div class="sheet-actions">
           <button class="btn-primary" type="button" :disabled="notifyBusy" @click="saveNotifyPrefs">
-            {{ notifyBusy ? '保存中…' : '保存偏好' }}
+            {{ notifyBusy ? t('ProfileView.x9b5d32', '保存中…') : t('ProfileView.x0529a5', '保存偏好') }}
           </button>
         </div>
       </div>
@@ -613,7 +613,7 @@ async function changePassword(): Promise<void> {
           取消
         </button>
         <button class="btn-primary" type="button" :disabled="savingProfile" @click="saveProfile">
-          {{ savingProfile ? '保存中…' : '保存' }}
+          {{ savingProfile ? t('ProfileView.x9b5d32', '保存中…') : t('ProfileView.xbe5fbb', '保存') }}
         </button>
       </div>
     </AppSheet>
@@ -664,7 +664,7 @@ async function changePassword(): Promise<void> {
           取消
         </button>
         <button class="btn-primary" type="button" :disabled="savingPwd || !pwdOk" @click="changePassword">
-          {{ savingPwd ? '保存中…' : '保存' }}
+          {{ savingPwd ? t('ProfileView.x9b5d32', '保存中…') : t('ProfileView.xbe5fbb', '保存') }}
         </button>
       </div>
     </AppSheet>

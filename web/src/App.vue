@@ -96,7 +96,7 @@ onMounted(async () => {
           <RouterLink class="nav__item" to="/archive">{{ t('App.3ca928', '档案') }}</RouterLink>
           <RouterLink class="nav__item" to="/overview">{{ t('App.506042', '概览') }}</RouterLink>
           <RouterLink class="nav__item" to="/notifications">
-            通知
+            {{ t('App.notificationsNav', '通知') }}
             <span v-if="unread > 0" class="nav__badge">{{ unread > 99 ? '99+' : unread }}</span>
           </RouterLink>
           <RouterLink class="nav__item" to="/import">{{ t('App.14b196', '批量导入') }}</RouterLink>
@@ -126,7 +126,7 @@ onMounted(async () => {
           <RouterLink class="nav__item" to="/archive">{{ t('App.3ca928', '档案') }}</RouterLink>
           <RouterLink class="nav__item" to="/overview">{{ t('App.506042', '概览') }}</RouterLink>
           <RouterLink class="nav__item" to="/notifications">
-            通知
+            {{ t('App.notificationsNav', '通知') }}
             <span v-if="unread > 0" class="nav__badge">{{ unread > 99 ? '99+' : unread }}</span>
           </RouterLink>
           <RouterLink class="nav__item" to="/import">{{ t('App.60e2bc', '导入') }}</RouterLink>
@@ -145,7 +145,7 @@ onMounted(async () => {
           <RouterLink
             to="/notifications"
             class="bell"
-            :aria-label="`通知（${unread} 条未读）`"
+            :aria-label="t('App.e1bb0c', `通知（${unread} 条未读）`, { count: unread })"
           >
             <svg class="bell__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
@@ -157,7 +157,7 @@ onMounted(async () => {
           <button
             class="theme-btn"
             type="button"
-            :aria-label="resolved === 'dark' ? '切换到浅色' : '切换到深色'"
+            :aria-label="resolved === 'dark' ? t('App.themeToLight', '切换到浅色') : t('App.themeToDark', '切换到深色')"
             @click="toggle"
           >
             <svg v-if="resolved === 'dark'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
@@ -184,7 +184,7 @@ onMounted(async () => {
             :aria-label="t('App.cd99b2', '语言')"
             @change="setLocale(($event.target as HTMLSelectElement).value as 'zh-CN' | 'en' | 'fr')"
           >
-            <option v-for="l in supported" :key="l" :value="l">{{ l === 'zh-CN' ? '中文' : l === 'en' ? 'English' : 'Français' }}</option>
+            <option v-for="l in supported" :key="l" :value="l">{{ l === 'zh-CN' ? t('App.xa7bac2', '中文') : l === 'en' ? 'English' : 'Français' }}</option>
           </select>
         </div>
       </header>

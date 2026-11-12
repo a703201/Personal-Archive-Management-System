@@ -10,18 +10,23 @@
 # 启动（单条命令，产生单个分组）：
 #   docker compose -p ams -f deploy/compose/docker-compose.yml up -d
 #   # 访问 http://localhost:8080  健康检查 http://localhost:8080/api/health
-#   # 注：单一 ams 容器同时托管新前端(ams:1.2.0 内 /app/web)与 /api；前端已并入镜像。
+#   # 注：单一 ams 容器同时托管新前端(ams:1.3.0 内 /app/web)与 /api；前端已并入镜像。
 #
 # 数据保护：
 #   - 数据库数据在命名卷 ams_ogdata（external，不随容器删除而消失），
 #     无论怎么重建 db 容器，演示数据都在。
-#   - 迁移脚本 /migrations 幂等：检测到 sys_users 已存在即跳过。
+#   - 迁移由 deploy/scripts/migrate.sh 按「逐文件台账 _ams_migrations」执行，
+#     不再依赖「sys_users 是否存在」整体跳过（那会漏掉 020/021 等增量迁移）。
 #
 # ⚠️ 仓颉(Cangjie)网络层只认 IP 字面量，不解析服务名 / /etc/hosts，
 #    故 AMS_DB_HOST 必须填 db 的静态 IP 172.28.0.10（详见 deploy/README.md §4.3）。
 #
-# ⚠️ 生产部署务必覆盖 AMS_TOKEN_SECRET / AMS_KEK / AMS_DB_PASSWORD，
-#    不要把口令写进本文件，改用 env_file 或 Docker secrets。
+# ⚠️ 三个凭据在本文件里是「必填变量」（:? 语法），未设置时 compose 直接拒绝启动：
+#      AMS_DB_PASSWORD / AMS_TOKEN_SECRET / AMS_KEK
+#    请把它们写进 deploy/compose/.env（本目录的 .env 会被 compose 自动读取，
+#    已被 .gitignore 屏蔽），或用 env_file / Docker secrets 注入，切勿提交。
+#    本地开发可复制 deploy/compose/.env.example 为 .env。
+#    ams 服务默认 AMS_ENV=production，后端 SEC-001 会二次校验并拒绝默认密钥。
 # ============================================================
 services:
   db:
@@ -29,7 +34,7 @@ services:
     image: enmotech/opengauss:5.0.0
     container_name: ams_opengauss
     environment:
-      GS_PASSWORD: "${AMS_DB_PASSWORD:-Ams@Gauss2026}"
+      GS_PASSWORD: "${AMS_DB_PASSWORD:?set AMS_DB_PASSWORD via .env / env_file / Docker secrets}"
       GS_USERNAME: gaussdb
       GS_DBNAME: ams
       # gs_ctl / gsql 依赖此 lib 路径（健康检查与迁移脚本都靠它找 libxml2.so.2）
@@ -52,6 +57,9 @@ services:
       - ams_ogdata:/var/lib/opengauss
       # 只读挂载迁移脚本，供 init 服务在容器内执行
       - ../../db/migrations:/migrations:ro
+      # 备份产物卷：backup.sh 在 db 容器内 gs_dump 到此路径，
+      # 与 ams 服务共用同一命名卷，容器重建不丢
+      - ams-backups:/app/data-backups
     # 仓颉只认 IP 字面量 → 在自定义网络上给 db 分配静态 IP
     networks:
       ams-net:
@@ -66,6 +74,13 @@ services:
       retries: 20
       start_period: 60s
     restart: unless-stopped
+    mem_limit: 2g
+    cpus: 2.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   init:
     # 与 db 同源镜像，自带 gsql 客户端；跑完迁移即退出（对应 rg_realdb_init）
@@ -79,7 +94,7 @@ services:
       AMS_DB_PORT: "5432"
       AMS_DB_NAME: ams
       AMS_DB_USER: gaussdb
-      AMS_DB_PASSWORD: "${AMS_DB_PASSWORD:-Ams@Gauss2026}"
+      AMS_DB_PASSWORD: "${AMS_DB_PASSWORD:?set AMS_DB_PASSWORD via .env / env_file / Docker secrets}"
     volumes:
       - ../../db/migrations:/migrations:ro
       # 容器内迁移执行脚本（相对路径相对本 compose 文件目录）
@@ -93,7 +108,7 @@ services:
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.prebuilt
-    image: ams:1.2.0
+    image: ams:1.3.0
     container_name: ams-server
     depends_on:
       # 等迁移任务成功跑完再起应用（对应 returnguard 的 app 依赖 init）
@@ -109,9 +124,10 @@ services:
       AMS_DB_PORT: "5432"
       AMS_DB_NAME: ams
       AMS_DB_USER: gaussdb
-      AMS_DB_PASSWORD: "${AMS_DB_PASSWORD:-Ams@Gauss2026}"
-      AMS_TOKEN_SECRET: "${AMS_TOKEN_SECRET:-change-me-in-production-at-least-32-bytes}"
-      AMS_KEK: "${AMS_KEK:-change-me-in-production}"
+      AMS_DB_PASSWORD: "${AMS_DB_PASSWORD:?set AMS_DB_PASSWORD via .env / env_file / Docker secrets}"
+      AMS_TOKEN_SECRET: "${AMS_TOKEN_SECRET:?set AMS_TOKEN_SECRET to 32+ random bytes}"
+      AMS_KEK: "${AMS_KEK:?set AMS_KEK to a random value}"
+      AMS_ENV: "${AMS_ENV:-production}"
       AMS_WEB_DIR: /app/web
       # 部署配置文件目录（持久卷，向导与「部署配置」页写入 deployment.env）
       AMS_CONFIG_DIR: /app/config
@@ -121,6 +137,17 @@ services:
       AMS_STORAGE_DIR: /app/data-attachments
       AMS_EXPORT_DIR: /app/data-exports
       AMS_BACKUP_DIR: /app/data-backups
+      # 媒体处理在 ams-server 进程内完成（纯仓颉引擎）；两个开关默认关闭
+      AMS_MEDIA_ENABLED: "${AMS_MEDIA_ENABLED:-false}"
+      AMS_OCR_CONSENT: "${AMS_OCR_CONSENT:-false}"
+      AMS_SMS_SPOOL_DIR: /app/data-sms/spool
+      # 反向代理下的客户端 IP 解析：默认关闭（XFF 可伪造，绝不默认采信）。
+      # 仅当 ams 只接受来自可信反代的连接时设为 true；此时 nginx 必须
+      # 用 $remote_addr 覆盖 XFF（见 deploy/docker/nginx.conf 与 README §4.6）。
+      AMS_TRUST_PROXY_HEADERS: "${AMS_TRUST_PROXY_HEADERS:-false}"
+      # 可选：逗号分隔的可信直连代理 IP（留空表示不限制直连来源，
+      # 适用于容器网络内只有反代能访问后端的部署）。
+      AMS_TRUSTED_PROXY_IPS: "${AMS_TRUSTED_PROXY_IPS:-}"
     ports:
       - "8080:8080"
     volumes:
@@ -128,6 +155,10 @@ services:
       - ams-data:/app/data-attachments
       - ams-exports:/app/data-exports
       - ams-mail:/app/data-mail
+      # 备份独立落卷：此前 AMS_BACKUP_DIR 指向容器可写层，重建即丢
+      - ams-backups:/app/data-backups
+      # 短信 spool 落盘
+      - ams-sms:/app/data-sms
     networks:
       - ams-net
     healthcheck:
@@ -136,6 +167,51 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    restart: unless-stopped
+    mem_limit: 2g
+    cpus: 2.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # OCR / 缩略图 / 像素水印由 ams-server 进程内的 ams.core.media 完成，
+  # 不需要独立 worker、文件队列或额外容器。
+
+  # ---- Q2 方案 A · 可选 S3 兼容后端（多厂商驱动已真实落地）----
+  # 只有 `docker compose -p ams --profile s3 up -d` 才会创建该容器，
+  # 默认 up -d 完全不变化（仍是 ams + openGauss 两容器 + 一次性 init）。
+  #
+  # 【Q2 最终选型 · 2026-11-12 定稿】默认「本地 FS(local)」或「自建 MinIO(minio)」，
+  #   并在管理页 / 配置提供「华为云 OBS(huawei)」等云对象存储作为**可选**接入项，
+  #   对外共 8 选 1（local/minio/huawei/aliyun/qiniu/tencent/aws/s3）。
+  #   业务层零改动即可切换；切换前置见 docs/16 迁移方案。
+  #
+  # 【驱动已真实可用】SigV4 签名（sigv4.cj）+ 真实 HTTP/1.1 传输层
+  #   （http_transport.cj 的 HttpS3Transport，std.net + stdx.net.tls，
+  #   http/https 均可用）均已落地：选非 local 平台且 AMS_S3_* 配齐时即构建
+  #   真实传输层、真正读写；配置缺失/连接/签名/响应失败一律**失败关闭**
+  #   （抛 StorageFailure），绝不静默回落 FS 或明文写入。
+  # 端到端验证：`bash scripts/ci/verify-minio.sh`（起本容器 + 跑
+  #   ams-storage 集成测试真实 MinIO 往返 PUT/GET/404/DELETE）。
+  minio:
+    profiles: ["s3"]
+    image: minio/minio:latest
+    container_name: ams_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-ams-dev-minio}"
+      # 用 :- 而非 :? —— 带 profile 的服务也会被 compose 插值，
+      # 用 :? 会让「未启用 s3 的默认起栈」直接失败。
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-dev-only-minio-change-me}"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ams-minio-data:/data
+    networks:
+      - ams-net
     restart: unless-stopped
 
 networks:
@@ -154,3 +230,9 @@ volumes:
   ams-data:
   ams-exports:
   ams-mail:
+  # 备份卷：deploy/scripts/backup.sh 的产物落在这里
+  ams-backups:
+  # 短信 spool 落盘卷
+  ams-sms:
+  # Q2 可选 s3 profile 的 MinIO 数据卷（默认 profile 下不创建容器，卷可空置）
+  ams-minio-data:

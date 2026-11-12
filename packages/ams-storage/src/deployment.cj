@@ -34,7 +34,9 @@ public class DeploymentStore {
 
     /** 对外展示时必须脱敏的键 */
     private static let SECRET_KEYS: Array<String> = [
-        "DB_PASSWORD", "DB_APP_PASSWORD", "MAIL_PASSWORD", "TOKEN_SECRET", "KEK"
+        "DB_PASSWORD", "DB_APP_PASSWORD", "MAIL_PASSWORD", "TOKEN_SECRET", "KEK",
+        // Q2 多厂商 OBS 凭据：redactedJson() 必须遮住 SK，AK 也一并遮蔽更稳妥
+        "S3_SECRET_KEY", "S3_ACCESS_KEY"
     ]
 
     private let fs: LocalFileStorage

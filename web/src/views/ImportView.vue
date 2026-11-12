@@ -253,9 +253,9 @@ async function csvPrecheck(): Promise<void> {
       'text/csv; charset=utf-8',
     )
     csvPlan.value = plan
-    const dupTip = plan.duplicate > 0 ? `，${plan.duplicate} 行重复将跳过` : ''
-    if (plan.invalid === 0) success(tr('viewsImportView.cb6f6a', `预检通过：${plan.valid} 行可导入${dupTip}`))
-    else toastError(tr('viewsImportView.b3d888', `预检发现 ${plan.invalid} 行有问题${dupTip}，详见下方清单`))
+    const dupTip = plan.duplicate > 0 ? tr('ImportView.xe27555', '，{p1} 行重复将跳过', { p1: plan.duplicate }) : ''
+    if (plan.invalid === 0) success(tr('viewsImportView.cb6f6a', `预检通过：${plan.valid} 行可导入${dupTip}`, { count: plan.valid, note: dupTip }))
+    else toastError(tr('viewsImportView.b3d888', `预检发现 ${plan.invalid} 行有问题${dupTip}，详见下方清单`, { count: plan.invalid, note: dupTip }))
   } catch (e) {
     toastError((e as Error).message)
   } finally {
@@ -273,7 +273,7 @@ async function csvSubmit(): Promise<void> {
       new Blob([csvText.value], { type: 'text/csv' }),
       'text/csv; charset=utf-8',
     )
-    success(tr('viewsImportView.0ebe65', `已提交导入任务 ${r.taskNo}`))
+    success(tr('viewsImportView.0ebe65', `已提交导入任务 ${r.taskNo}`, { taskNo: r.taskNo }))
     csvPlan.value = null
     csvText.value = ''
     csvName.value = ''
@@ -312,9 +312,9 @@ async function bundlePrecheck(): Promise<void> {
       'application/json',
     )
     bundlePlan.value = plan
-    const dupTip = plan.duplicate > 0 ? `，${plan.duplicate} 行重复将跳过` : ''
-    if (plan.invalid === 0) success(tr('viewsImportView.e1baab', `验签通过：${plan.valid} 行可回导${dupTip}`))
-    else toastError(tr('viewsImportView.3881bc', `验签通过，但有 ${plan.invalid} 行有问题${dupTip}`))
+    const dupTip = plan.duplicate > 0 ? tr('ImportView.xe27555', '，{p1} 行重复将跳过', { p1: plan.duplicate }) : ''
+    if (plan.invalid === 0) success(tr('viewsImportView.e1baab', `验签通过：${plan.valid} 行可回导${dupTip}`, { count: plan.valid, note: dupTip }))
+    else toastError(tr('viewsImportView.3881bc', `验签通过，但有 ${plan.invalid} 行有问题${dupTip}`, { count: plan.invalid, note: dupTip }))
   } catch (e) {
     toastError((e as Error).message)
   } finally {
@@ -331,7 +331,7 @@ async function bundleSubmit(): Promise<void> {
       new Blob([bundleText.value], { type: 'application/json' }),
       'application/json',
     )
-    success(tr('viewsImportView.09f9d7', `已提交回导任务 ${r.taskNo}`))
+    success(tr('viewsImportView.09f9d7', `已提交回导任务 ${r.taskNo}`, { taskNo: r.taskNo }))
     bundlePlan.value = null
     bundleText.value = ''
     bundleName.value = ''
@@ -364,7 +364,7 @@ async function pickZip(ev: Event): Promise<void> {
   const f = input.files?.[0]
   if (!f) return
   if (f.size > MAX_ZIP_BYTES) {
-    toastError(tr('viewsImportView.0dea00', `压缩包 ${fmtSize(f.size)}，超过单包 ${fmtSize(MAX_ZIP_BYTES)} 上限，请拆分后分批导入`))
+    toastError(tr('viewsImportView.0dea00', `压缩包 ${fmtSize(f.size)}，超过单包 ${fmtSize(MAX_ZIP_BYTES)} 上限，请拆分后分批导入`, { size: fmtSize(f.size), limit: fmtSize(MAX_ZIP_BYTES) }))
     input.value = ''
     zipFile.value = null
     zipName.value = ''
@@ -398,9 +398,9 @@ async function zipPrecheck(): Promise<void> {
     attachPlan.value = plan
     resolutions.value = {}
     if (plan.conflicts.length > 0) {
-      info(tr('viewsImportView.943768', `有 ${plan.conflicts.length} 个目录重名，需手动指定目标条目`))
+      info(tr('viewsImportView.943768', `有 ${plan.conflicts.length} 个目录重名，需手动指定目标条目`, { count: plan.conflicts.length }))
     } else {
-      success(tr('viewsImportView.497cfe', `预检完成：${plan.match + plan.create} 个文件待导入`))
+      success(tr('viewsImportView.497cfe', `预检完成：${plan.match + plan.create} 个文件待导入`, { count: plan.match + plan.create }))
     }
   } catch (e) {
     toastError((e as Error).message)
@@ -424,7 +424,7 @@ async function zipSubmit(): Promise<void> {
   const plan = attachPlan.value
   if (!f || !plan) return
   if (unresolvedCount.value > 0) {
-    { toastError(tr('viewsImportView.dff0d9', `还有 ${unresolvedCount.value} 个重名目录未指定目标条目`)); return }
+    { toastError(tr('viewsImportView.dff0d9', `还有 ${unresolvedCount.value} 个重名目录未指定目标条目`, { count: unresolvedCount.value })); return }
   }
   busy.value = true
   try {
@@ -440,7 +440,7 @@ async function zipSubmit(): Promise<void> {
       frameBody(payload, await f.arrayBuffer()),
       'application/octet-stream',
     )
-    success(tr('viewsImportView.ce4780', `已提交附件导入任务 ${r.taskNo}`))
+    success(tr('viewsImportView.ce4780', `已提交附件导入任务 ${r.taskNo}`, { taskNo: r.taskNo }))
     attachPlan.value = null
     zipFile.value = null
     zipName.value = ''
@@ -461,7 +461,7 @@ async function zipSubmit(): Promise<void> {
 async function downloadReport(t: TaskRow): Promise<void> {
   try {
     const blob = await apiBlob(`/import/tasks/${encodeURIComponent(t.taskNo)}/report`)
-    triggerDownload(blob, tr('viewsImportView.c38ff1', `导入报告-${t.taskNo}.csv`))
+    triggerDownload(blob, tr('viewsImportView.c38ff1', `导入报告-${t.taskNo}.csv`, { taskNo: t.taskNo }))
   } catch (e) {
     toastError((e as Error).message)
   }
@@ -478,7 +478,7 @@ async function retryTask(t: TaskRow): Promise<void> {
       `/import/attachments/tasks/${encodeURIComponent(t.taskNo)}/retry`,
       { method: 'POST' },
     )
-    success(tr('viewsImportView.ac4290', `已提交重试任务 ${r.taskNo}（${r.total} 个文件）`))
+    success(tr('viewsImportView.ac4290', `已提交重试任务 ${r.taskNo}（${r.total} 个文件）`, { taskNo: r.taskNo, count: r.total }))
     await loadTasks()
   } catch (e) {
     toastError((e as Error).message)
@@ -596,7 +596,7 @@ async function applyTemplate(id: string): Promise<void> {
   tplDefaultCategory.value = t.defaults.category ?? ''
   tplDefaultStatus.value = t.defaults.status ?? ''
   tplDefaultSensitivity.value = t.defaults.sensitivity ?? ''
-  success(tr('viewsImportView.820dcf', `已套用模板「${t.name}」`))
+  success(tr('viewsImportView.820dcf', `已套用模板「${t.name}」`, { name: t.name }))
 }
 
 async function deleteTemplate(id: string): Promise<void> {
@@ -755,7 +755,7 @@ async function cloneTemplate(): Promise<void> {
   try {
     const r = await api<{ id: string }>('/import-templates', {
       method: 'POST',
-      body: { cloneFrom: Number(t.id), name: tr('viewsImportView.ad40e5', `${t.name} 副本`) },
+      body: { cloneFrom: Number(t.id), name: tr('viewsImportView.ad40e5', `${t.name} 副本`, { name: t.name }) },
     })
     await loadTemplates()
     activeTemplateId.value = String(r.id)
@@ -774,7 +774,7 @@ async function cloneTemplate(): Promise<void> {
       <div>
         <h1 class="page-title">{{ tr('ImportView.14b196', '批量导入') }}</h1>
         <p class="page-sub">
-          先预检、确认后再落库。附件包按「一级目录名 = 条目名」映射，重名条目需手动指定。
+          {{ tr('ImportView.x5379d7', '先预检、确认后再落库。附件包按「一级目录名 = 条目名」映射，重名条目需手动指定。') }}
         </p>
       </div>
       <div class="seg" role="tablist">
@@ -784,7 +784,7 @@ async function cloneTemplate(): Promise<void> {
           role="tab"
           @click="tab = 'zip'"
         >
-          附件包（ZIP）
+          {{ tr('ImportView.x8b1010', '附件包（ZIP）') }}
         </button>
         <button
           class="seg__btn"
@@ -792,7 +792,7 @@ async function cloneTemplate(): Promise<void> {
           role="tab"
           @click="tab = 'csv'"
         >
-          条目表（CSV）
+          {{ tr('ImportView.x032ba2', '条目表（CSV）') }}
         </button>
         <button
           class="seg__btn"
@@ -800,7 +800,7 @@ async function cloneTemplate(): Promise<void> {
           role="tab"
           @click="tab = 'bundle'"
         >
-          导出包回导
+          {{ tr('ImportView.x19c2c7', '导出包回导') }}
         </button>
       </div>
     </div>
@@ -810,7 +810,7 @@ async function cloneTemplate(): Promise<void> {
         <span class="field__label">{{ tr('ImportView.3a138d', '目标主体') }}</span>
         <select v-model="subjectId" class="field-control">
           <option v-for="s in subjects" :key="s.id" :value="s.id">
-            {{ s.name }}{{ s.isPrimary ? '（本人）' : '' }}
+            {{ s.name }}{{ s.isPrimary ? tr('ImportView.x0e0428', '（本人）') : '' }}
           </option>
         </select>
       </label>
@@ -827,9 +827,7 @@ async function cloneTemplate(): Promise<void> {
       <div class="card block">
         <h2 class="block__title">{{ tr('ImportView.26cc88', '① 选择压缩包') }}</h2>
         <p class="hint">
-          包内请按 <code>{{ tr('ImportView.3eac4f', '条目名/文件.jpg') }}</code> 组织。支持 jpg/jpeg/png/pdf，单文件 ≤ 50MB，
-          单个压缩包 ≤ 64MB（超出请拆分成多个包分批导入）；
-          文件名需为 UTF-8 或 GBK（7-Zip、macOS、Windows 资源管理器均可）。
+          {{ tr('ImportView.x4ce00f', '包内请按') }} <code>{{ tr('ImportView.3eac4f', '条目名/文件.jpg') }}</code> {{ tr('ImportView.xa5c6e9', '组织。支持 jpg/jpeg/png/pdf，单文件 ≤ 50MB，\n          单个压缩包 ≤ 64MB（超出请拆分成多个包分批导入）；\n          文件名需为 UTF-8 或 GBK（7-Zip、macOS、Windows 资源管理器均可）。') }}
         </p>
         <div class="picker">
           <input
@@ -847,7 +845,7 @@ async function cloneTemplate(): Promise<void> {
         </div>
         <div class="actions">
           <button class="btn-primary" :disabled="busy || !zipFile" @click="zipPrecheck">
-            {{ busy ? '解析中…' : '预检并查看映射' }}
+            {{ busy ? tr('ImportView.x019aa7', '解析中…') : tr('ImportView.x7639ea', '预检并查看映射') }}
           </button>
         </div>
       </div>
@@ -911,18 +909,17 @@ async function cloneTemplate(): Promise<void> {
             </tbody>
           </table>
           <p v-if="attachPlan.rowsTruncated" class="hint">
-            仅显示前 {{ attachPlan.rows.length }} 行（导入时会处理全部文件）。
+            {{ tr('ImportView.x9c1013', '仅显示前') }} {{ attachPlan.rows.length }} {{ tr('ImportView.x73282b', '行（导入时会处理全部文件）。') }}
           </p>
           <p v-if="attachPlan.indexTruncated" class="hint hint--error">
-            该主体条目过多，标题匹配可能不完整，请确认新建条目是否重复。
+            {{ tr('ImportView.xbdfc37', '该主体条目过多，标题匹配可能不完整，请确认新建条目是否重复。') }}
           </p>
         </div>
 
         <div v-if="attachPlan.conflicts.length" class="card block">
           <h2 class="block__title">{{ tr('ImportView.cdd9d8', '③ 指定重名目录的目标条目') }}</h2>
           <p class="hint">
-            下列目录名在库中存在多个同名条目，系统不做猜测，请逐个指定；
-            选择「新建条目」则会再建一个同名条目。
+            {{ tr('ImportView.xc1487b', '下列目录名在库中存在多个同名条目，系统不做猜测，请逐个指定；\n            选择「新建条目」则会再建一个同名条目。') }}
           </p>
           <div v-for="c in attachPlan.conflicts" :key="c.title" class="conflict">
             <div class="conflict__title">{{ c.title }}</div>
@@ -939,7 +936,7 @@ async function cloneTemplate(): Promise<void> {
         <div class="card block">
           <h2 class="block__title">{{ tr('ImportView.3c0d1f', '④ 确认导入') }}</h2>
           <p class="hint">
-            确认后才会建条目、写附件。执行是异步的，可在下方任务列表看进度与错误报告。
+            {{ tr('ImportView.x0395ff', '确认后才会建条目、写附件。执行是异步的，可在下方任务列表看进度与错误报告。') }}
           </p>
           <div class="actions">
             <button
@@ -947,10 +944,10 @@ async function cloneTemplate(): Promise<void> {
               :disabled="busy || unresolvedCount > 0"
               @click="zipSubmit"
             >
-              {{ busy ? '导入中…' : '确认导入' }}
+              {{ busy ? tr('ImportView.x9b1a86', '导入中…') : tr('ImportView.x3e36a9', '确认导入') }}
             </button>
             <span v-if="unresolvedCount > 0" class="hint hint--error">
-              还有 {{ unresolvedCount }} 个重名目录未指定
+              {{ tr('ImportView.x8a5139', '还有') }} {{ unresolvedCount }} {{ tr('ImportView.x81d8e9', '个重名目录未指定') }}
             </span>
           </div>
         </div>
@@ -964,7 +961,7 @@ async function cloneTemplate(): Promise<void> {
         <div class="block__head">
           <h2 class="block__title">{{ tr('ImportView.a939e0', '导入模板') }}</h2>
           <button class="btn-ghost" type="button" :disabled="busy || tplBusy" @click="openMapper">
-            {{ activeTemplate ? '编辑当前映射' : '新建模板' }}
+            {{ activeTemplate ? tr('ImportView.xbcab47', '编辑当前映射') : tr('ImportView.x156a04', '新建模板') }}
           </button>
         </div>
         <p class="hint">
@@ -1092,7 +1089,7 @@ async function cloneTemplate(): Promise<void> {
 
           <div class="actions">
             <button class="btn-primary" :disabled="tplBusy" @click="saveTemplate">
-              {{ tplBusy ? '保存中…' : (activeTemplate ? '更新模板' : '保存模板') }}
+              {{ tplBusy ? tr('ImportView.x9b5d32', '保存中…') : (activeTemplate ? tr('ImportView.x8c3cd4', '更新模板') : tr('ImportView.xbac205', '保存模板')) }}
             </button>
             <button class="btn-ghost" type="button" :disabled="tplBusy" @click="showMapper = false">
               取消
@@ -1128,7 +1125,7 @@ async function cloneTemplate(): Promise<void> {
         </div>
         <div class="actions">
           <button class="btn-primary" :disabled="busy || !csvText" @click="csvPrecheck">
-            {{ busy ? '校验中…' : '预检（只校验不落库）' }}
+            {{ busy ? tr('ImportView.x6e89b2', '校验中…') : tr('ImportView.xd68098', '预检（只校验不落库）') }}
           </button>
         </div>
       </div>
@@ -1195,7 +1192,7 @@ async function cloneTemplate(): Promise<void> {
 
         <div class="actions">
           <button class="btn-primary" :disabled="busy || csvPlan.valid === 0" @click="csvSubmit">
-            {{ busy ? '导入中…' : `确认导入 ${csvPlan.valid} 行` }}
+            {{ busy ? tr('ImportView.x9b1a86', '导入中…') : tr('ImportView.xbe55f8', '确认导入 {p1} 行', { p1: csvPlan.valid }) }}
           </button>
           <span v-if="csvPlan.duplicate > 0" class="hint">
             另有 {{ csvPlan.duplicate }} 行重复，不会重复建条目。
@@ -1228,7 +1225,7 @@ async function cloneTemplate(): Promise<void> {
         </div>
         <div class="actions">
           <button class="btn-primary" :disabled="busy || !bundleText" @click="bundlePrecheck">
-            {{ busy ? '校验中…' : '验签并预检' }}
+            {{ busy ? tr('ImportView.x6e89b2', '校验中…') : tr('ImportView.x12e4e0', '验签并预检') }}
           </button>
         </div>
       </div>
@@ -1275,7 +1272,7 @@ async function cloneTemplate(): Promise<void> {
             :disabled="busy || bundlePlan.valid === 0"
             @click="bundleSubmit"
           >
-            {{ busy ? '导入中…' : `确认回导 ${bundlePlan.valid} 条` }}
+            {{ busy ? tr('ImportView.x9b1a86', '导入中…') : tr('ImportView.x23a70d', '确认回导 {p1} 条', { p1: bundlePlan.valid }) }}
           </button>
           <span class="hint">{{ tr('ImportView.ac221e', '包内主体若不在你的可写范围，将统一落到上方选择的「目标主体」。') }}</span>
         </div>
@@ -1307,7 +1304,7 @@ async function cloneTemplate(): Promise<void> {
           <tr v-for="t in tasks" :key="t.id">
             <td class="mono">{{ t.taskNo }}</td>
             <td>
-              {{ t.format === 'zip-attach' ? '附件包' : t.format === 'bundle' ? '导出包' : '条目表' }}
+              {{ t.format === 'zip-attach' ? tr('ImportView.x31fe0c', '附件包') : t.format === 'bundle' ? tr('ImportView.x5ca95d', '导出包') : tr('ImportView.x1f1b95', '条目表') }}
             </td>
             <td>
               <span class="tag" :class="`st--${t.status}`">{{ STATUS_TEXT[t.status] || t.status }}</span>
