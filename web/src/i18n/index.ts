@@ -32,9 +32,21 @@ export const supported: Locale[] = ['zh-CN', 'en', 'fr']
 const STORAGE_KEY = 'ams.locale'
 
 function detectInitial(): Locale {
-  const saved = localStorage.getItem(STORAGE_KEY) as Locale | null
+  // 模块顶层即可能被执行（import 即触发），在 node / SSR / 隐私模式等
+  // 无 localStorage 或禁用存储的环境不能抛 ReferenceError。防御式读取：
+  // 缺失或抛错时回退到浏览器语言 / 默认，绝不阻断模块加载。
+  let saved: Locale | null = null
+  try {
+    if (typeof localStorage !== 'undefined') {
+      saved = localStorage.getItem(STORAGE_KEY) as Locale | null
+    }
+  } catch {
+    saved = null
+  }
   if (saved && (supported as string[]).includes(saved)) return saved
-  const nav = (navigator.language || 'zh-CN').toLowerCase()
+  const navLang =
+    typeof navigator !== 'undefined' && navigator.language ? navigator.language : 'zh-CN'
+  const nav = navLang.toLowerCase()
   if (nav.startsWith('zh')) return 'zh-CN'
   if (nav.startsWith('fr')) return 'fr'
   return 'en'
@@ -259,10 +271,21 @@ export function setLocale(v: Locale): void {
   locale.value = v
 }
 
+/** 仅浏览器环境同步 <html lang>；node / SSR 无 document 时安全跳过。 */
+function applyHtmlLang(v: Locale): void {
+  if (typeof document !== 'undefined' && document.documentElement) {
+    document.documentElement.setAttribute('lang', v)
+  }
+}
+
 watch(locale, (v) => {
-  localStorage.setItem(STORAGE_KEY, v)
-  document.documentElement.setAttribute('lang', v)
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEY, v)
+  } catch {
+    // 隐私模式 / 存储禁用时忽略，不影响切换逻辑
+  }
+  applyHtmlLang(v)
 })
 
 // 初始化时同步一次 <html lang>
-document.documentElement.setAttribute('lang', locale.value)
+applyHtmlLang(locale.value)
