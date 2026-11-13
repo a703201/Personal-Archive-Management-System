@@ -15,6 +15,31 @@
 
 ---
 
+## [1.3.1] — 2026-11-13（二进制发布包图形化启动器 · 方案 A 双平台 + 实测方案）
+
+> 版本号提升至 **1.3.1**（对 1.3.0 交付物的补强：补齐图形化启动器这一 3.2 评估项；并交付 Linux zenity 桌面 GUI 与容器形态 GUI 的可复现实测方案）。
+
+### 二进制发布包图形化启动器（方案 A，双平台）
+
+- 新增 `scripts/launcher/`：`AMS-Launcher.ps1` + `AMS-Launcher.cmd`（Windows，PowerShell 5.1 + WinForms 托盘，系统自带、无 C#/JVM 依赖）、`AMS-Launcher.sh`（Linux/macOS，zenity 自动探测、无桌面降级文本菜单）+ `AMS-Launcher.desktop`（Linux 桌面入口）。
+- 能力：配置向导、启动/停止/重启/状态日志/打开浏览器、**生成随机密钥**（显式点击 + 显式落盘 + 备份提示，满足 SEC-001）。
+- **不破坏失败关闭七红线**：预检缺 `AMS_TOKEN_SECRET` / `AMS_KEK` / `AMS_DB_PASSWORD` 或密钥 < 32 字节直接拒绝拉起；不吞退出码、不自动重启；`/api/health` 仅作 liveness；日志脱敏；不读写 `deployment.env` 与 `/setup`。
+- 打包接入：`scripts/package.sh` 在生成 CHECKSUMS 前拷贝 launcher；`scripts/ci/verify-package.sh` 断言 launcher 齐全 + 无硬编码密钥 + 无自动重启。
+- 实测：Windows 真实 GUI 实测通过（含日志框换行修复）；Linux 脚本级交互实测通过（预检拒绝 / 向导 / 启停 / 短令牌拦截）。
+
+### Linux zenity 桌面 GUI 与容器形态 GUI 实测方案
+
+- `scripts/launcher/test/`（Dockerfile + test-zenity.sh + run.sh + README.md）：用 Xvfb 虚拟显示器在 Ubuntu 容器跑真实 `zenity` 并 xdotool 驱动交互、截屏存证；同时验证 headless 降级、失败关闭语义与 shellcheck。宿主机无需装 X 服务器，有 Docker 即可复现。
+- 容器形态：生产 compose 仍刻意无 GUI（命令行 + 健康检查），headless 自动降级文本菜单；容器要 GUI 须显式提供显示（容器内 Xvfb 或转发 `DISPLAY`）。
+
+### 文档同步
+
+- `docs/09-部署与发布指南.md` §3.2.1 图形化启动器小节 + §2 交付物结构树补 `launcher/`；根 `README.md` 发布包说明、`docs/README.md` 导航描述同步。
+
+### 版本对齐
+
+- `web/package.json` / `web/package-lock.json` / `packages/ams-server/src/main.cj`（`version` 启动日志）/ `deploy/compose/docker-compose.yml` 镜像 tag / 部署文档示例统一升至 **1.3.1**。
+
 ## [1.3.0] — 2026-11-09（功能小缺口收口 + external OCR 生产化 + 架构演进阶段 3 + 安全收口）
 
 > 本批不改动业务功能完成度口径（P0 54 / P1 34 / P2 23 不变），属能力补强 + 安全收口。

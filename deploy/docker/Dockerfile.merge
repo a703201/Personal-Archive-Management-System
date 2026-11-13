@@ -1,15 +1,15 @@
 # ============================================================
 # AMS · 合并镜像（前端并入后端）
 # ------------------------------------------------------------
-# 在现有 ams:1.3.0（已含仓颉后端二进制 /app/bin/ams-server
+# 在现有 ams:1.3.1（已含仓颉后端二进制 /app/bin/ams-server
 # 与运行时 .so）之上，叠加最新重做后的前端 web/dist，使
 # 单个镜像 / 单个容器同时托管新 UI 与 /api/*。
 #
 # 构建（上下文须为仓库根，以便 COPY web/dist）：
-#   docker build -f deploy/docker/Dockerfile.merge -t ams:1.3.0 .
+#   docker build -f deploy/docker/Dockerfile.merge -t ams:1.3.1 .
 #
 # 说明：底层后端二进制保持不变，仅替换 /app/web 静态资源，
 #       因此不会引入后端回归；旧 web 的孤儿哈希文件无害。
 # ============================================================
-FROM ams:1.3.0
+FROM ams:1.3.1
 COPY web/dist/ /app/web/

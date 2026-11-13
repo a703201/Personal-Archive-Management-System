@@ -389,6 +389,28 @@ SHEOF
     chmod +x "$STAGE/scripts/healthcheck.sh"
 fi
 
+# ---- 5.5 桌面启动器（按平台分发，零新增运行时）----
+# 必须在「7. 校验和」之前落地：CHECKSUMS 由 Python 全量遍历目录生成，
+# zip 由 zipfile 全量打包，新增文件会自动纳入，无需改校验和/压缩逻辑。
+# Windows：PowerShell 5.1 + WinForms（系统自带，不编译、不分发任何 .NET 二进制）
+# Linux/macOS：Bash 交互向导（有 zenity 时弹图形界面，headless 自动退化文本）
+echo "[5.5/6] 桌面启动器..."
+if [ "$OS" = "windows" ]; then
+    mkdir -p "$STAGE/launcher"
+    cp scripts/launcher/AMS-Launcher.ps1 "$STAGE/launcher/" 2>/dev/null || {
+        echo "[WARN] 缺少 scripts/launcher/AMS-Launcher.ps1，跳过 Windows 启动器"; }
+    cp scripts/launcher/AMS-Launcher.cmd "$STAGE/launcher/" 2>/dev/null || {
+        echo "[WARN] 缺少 scripts/launcher/AMS-Launcher.cmd，跳过 Windows 启动器"; }
+elif [ "$OS" = "linux" ] || [ "$OS" = "darwin" ]; then
+    mkdir -p "$STAGE/launcher"
+    cp scripts/launcher/AMS-Launcher.sh "$STAGE/launcher/" 2>/dev/null || {
+        echo "[WARN] 缺少 scripts/launcher/AMS-Launcher.sh，跳过 Linux 启动器"; }
+    cp scripts/launcher/AMS-Launcher.desktop "$STAGE/launcher/" 2>/dev/null || true
+    chmod +x "$STAGE/launcher/AMS-Launcher.sh" 2>/dev/null || true
+else
+    echo "[WARN] 未知平台 $OS，跳过桌面启动器（命令行 start 脚本仍可用）"
+fi
+
 # ---- 6. 文档 ----
 # ⚠️ 包内**一律用 ASCII 文件名**。
 #   非 ASCII 文件名在 Windows 的 zip 工具链上支持不稳，
@@ -419,16 +441,20 @@ ${PKG_NAME}/
 ├── web/            前端 SPA（index.html + assets/）
 ├── config/         配置模板（application.env）
 ├── scripts/        启动与健康检查
+├── launcher/       桌面启动器（Windows: .ps1/.cmd；Linux: .sh/.desktop）
 └── docs/           变更说明
 \`\`\`
 
 ## 2. 快速开始
 
-\`\`\`bash
-# 1) 复制配置并填写（必填：AMS_TOKEN_SECRET、AMS_DB_PASSWORD）
-cp config/application.env config/application.env.local
+**方式 A · 命令行（权威入口，启动器也是调用它）**
 
-# 2) 启动（脚本会自动加载 config/application.env）
+\`\`\`bash
+# 1) 编辑配置（必填：AMS_TOKEN_SECRET、AMS_KEK、AMS_DB_PASSWORD）
+#    直接改 config/application.env —— start 脚本加载的就是这个文件
+#    （不要改成 application.env.local，那个名字不会被读取）
+
+# 2) 启动
 scripts/start.sh          # Linux/macOS
 scripts\\start.cmd        # Windows
 
@@ -437,11 +463,26 @@ scripts\\start.cmd        # Windows
 #    http://127.0.0.1:8080/api/health  ← 健康检查
 \`\`\`
 
+**方式 B · 桌面启动器（可选，不替代方式 A）**
+
+\`\`\`bash
+# Windows：双击 launcher/AMS-Launcher.cmd（仅需系统自带 PowerShell 5.1）
+# Linux  ：bash launcher/AMS-Launcher.sh
+#          （有桌面且装了 zenity 会用图形菜单，否则自动用文本菜单）
+\`\`\`
+
+> 启动器是「看得见的外壳」：**不生成/兜底密钥、不自动重启、不静默降级**。
+> 预检未通过就不会拉起进程；所有安全判定仍由 start 脚本与服务端 SEC-001 做出。
+> 密钥生成按钮必须显式点击 + 显式确认落盘 + 自行备份；日志按密钥键名脱敏。
+> 启动器只写 \`config/application.env\`，不写 \`deployment.env\`、不创建管理员
+> （管理员与 DB/SMTP 配置请在启动后由浏览器 \`/setup\` 向导完成）。
+
 ## 3. 必填配置
 
 | 变量 | 说明 |
 | --- | --- |
 | \`AMS_TOKEN_SECRET\` | 令牌签名密钥，**≥ 32 字节**。不设置则拒绝启动。生成：\`openssl rand -base64 48\` |
+| \`AMS_KEK\` | 字段加密密钥，生产模式必填（SEC-001 与 TOKEN_SECRET、DB_PASSWORD 一并校验） |
 | \`AMS_DB_PASSWORD\` | 数据库口令 |
 | \`AMS_DB_HOST\` / \`AMS_DB_PORT\` / \`AMS_DB_NAME\` / \`AMS_DB_USER\` | 数据库连接 |
 | \`AMS_HTTP_HOST\` / \`AMS_HTTP_PORT\` | 监听地址，默认 \`127.0.0.1:8080\` |

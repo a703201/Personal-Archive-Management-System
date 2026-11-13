@@ -101,9 +101,9 @@ COMPOSE="docker compose -p ams -f deploy/compose/docker-compose.yml"
 2. **准备镜像**（二选一）：
 
    ```bash
-   # A. 由脚本交叉编译 Linux 后端产物，再经 Dockerfile.prebuilt 构建 ams:1.3.0
+   # A. 由脚本交叉编译 Linux 后端产物，再经 Dockerfile.prebuilt 构建 ams:1.3.1
    bash deploy/scripts/build-linux-docker.sh
-   docker build -t ams:1.3.0 -f deploy/docker/Dockerfile.prebuilt .
+   docker build -t ams:1.3.1 -f deploy/docker/Dockerfile.prebuilt .
 
    # B. 直接带 --build 启动（compose 的 ams.build 指向 Dockerfile.prebuilt）
    bash deploy/scripts/run-app.sh --build
@@ -296,10 +296,10 @@ bash deploy/scripts/restore-drill.sh ./ams-20261107-120000.sql
 
    | 变更 | 构建方式 | 原因 |
    | --- | --- | --- |
-   | **仅前端** | `cd web && npm run build` → `docker build -f deploy/docker/Dockerfile.merge -t ams:1.3.0 .` → `$COMPOSE up -d --no-build ams` | `Dockerfile.merge` 以既有 `ams:1.3.0` 为基底，**只 `COPY web/dist/ /app/web/`**，不换后端二进制，不引入后端回归 |
-   | **后端 / 依赖 / 配置** | `bash deploy/scripts/build-linux-docker.sh` → `docker build -f deploy/docker/Dockerfile.prebuilt -t ams:1.3.0 .` → `$COMPOSE up -d --no-build ams` | 仓颉不支持交叉编译，**必须**先经 `build-linux-docker.sh` 在工具链镜像内重编出 Linux 产物，再经 `Dockerfile.prebuilt` 重建镜像 |
+   | **仅前端** | `cd web && npm run build` → `docker build -f deploy/docker/Dockerfile.merge -t ams:1.3.1 .` → `$COMPOSE up -d --no-build ams` | `Dockerfile.merge` 以既有 `ams:1.3.1` 为基底，**只 `COPY web/dist/ /app/web/`**，不换后端二进制，不引入后端回归 |
+   | **后端 / 依赖 / 配置** | `bash deploy/scripts/build-linux-docker.sh` → `docker build -f deploy/docker/Dockerfile.prebuilt -t ams:1.3.1 .` → `$COMPOSE up -d --no-build ams` | 仓颉不支持交叉编译，**必须**先经 `build-linux-docker.sh` 在工具链镜像内重编出 Linux 产物，再经 `Dockerfile.prebuilt` 重建镜像 |
 
-   > ⚠️ **绝不能**用 `Dockerfile.merge` 发布后端变更：它 `FROM ams:1.3.0` 只叠加前端，
+   > ⚠️ **绝不能**用 `Dockerfile.merge` 发布后端变更：它 `FROM ams:1.3.1` 只叠加前端，
    > 后端二进制仍是旧的。`Dockerfile.prebuilt` 里的 `FROM ubuntu:22.04` 会重新
    > `COPY build/linux/` 与 `web/dist/`，是后端变更的唯一正确入口。
 
@@ -309,7 +309,7 @@ bash deploy/scripts/restore-drill.sh ./ams-20261107-120000.sql
 
 ### 5.2 回滚
 
-- **镜像回滚**：保留上一版镜像并打 tag，`docker tag <上一版镜像> ams:1.3.0` 后
+- **镜像回滚**：保留上一版镜像并打 tag，`docker tag <上一版镜像> ams:1.3.1` 后
   `$COMPOSE up -d --no-build ams`；前端回滚即重新 `Dockerfile.merge` 上一版 `web/dist`。
   > 仓库**没有**版本化镜像仓库 / 回滚脚本，需自行保留上一版镜像或 digest（§8）。
 - **数据库回滚**：`_ams_migrations` **只增不减**，仓库**没有**自动 down 迁移。

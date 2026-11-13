@@ -5,7 +5,7 @@
 
 ## 1. 分发形态（方案 A，2026-11-08 已决策）
 
-`ams-kit` 以**静态库 + Cangjie 接口快照**打包分发，随 GitHub Release 发布：
+`ams-kit` 以**静态库 + Cangjie 接口快照**打包分发，由 CI（`release.yml`）随二进制发布包一同上传到 GitHub Release；也可本机 `bash scripts/package-kit.sh` 产出：
 
 ```
 ams-kit-<version>-<platform>/

@@ -37,6 +37,49 @@ if [ ! -d "$BIN_DIR" ]; then
     exit 1
 fi
 
+# ---- 桌面启动器静态断言（不参与启动判定，只防「失败关闭」被后续改动破坏）----
+# 按包内实际存在的 launcher 文件判定平台：不能用主程序后缀判断
+# （交叉打包 / 占位产物下 bin/ams-server.exe 与平台未必对应）。
+echo "=== 校验桌面启动器完整性 ==="
+if [ -f "${PKG_DIR_ABS}/launcher/AMS-Launcher.ps1" ] \
+   || [ -f "${PKG_DIR_ABS}/launcher/AMS-Launcher.cmd" ]; then
+    LAUNCHER_FILES="launcher/AMS-Launcher.ps1 launcher/AMS-Launcher.cmd"
+    LAUNCHER_PLATFORM="windows"
+elif [ -f "${PKG_DIR_ABS}/launcher/AMS-Launcher.sh" ]; then
+    LAUNCHER_FILES="launcher/AMS-Launcher.sh"
+    LAUNCHER_PLATFORM="linux"
+else
+    echo "  ✗ 包内没有任何桌面启动器文件（launcher/ 缺失）"
+    exit 1
+fi
+echo "  平台: ${LAUNCHER_PLATFORM}"
+for rel in $LAUNCHER_FILES; do
+    if [ ! -f "${PKG_DIR_ABS}/${rel}" ]; then
+        echo "  ✗ 缺少启动器文件：${rel}"
+        exit 1
+    fi
+    echo "  ✓ ${rel}"
+done
+
+# 红线：启动器里不得硬编码任何凭据默认值或开发兜底密钥，也不得自动重启服务。
+# 注意只匹配「赋值/默认值」形态，不误伤正常的键名读取与脱敏正则。
+for rel in $LAUNCHER_FILES; do
+    f="${PKG_DIR_ABS}/${rel}"
+    if grep -nEi \
+        '(TOKEN_SECRET|KEK|DB_PASSWORD)[[:space:]]*=[[:space:]]*["'"'"'][A-Za-z0-9+/=_-]{8,}["'"'"']' \
+        "$f" 2>/dev/null; then
+        echo "  ✗ 启动器含硬编码凭据默认值：${rel}"
+        exit 1
+    fi
+    if grep -nEi 'ams-dev-token-secret|auto[-_ ]?restart|自动重启' "$f" 2>/dev/null | \
+       grep -vqiE '不会|绝不|不自动|no auto|never|#|REM|不生成'; then
+        echo "  ✗ 启动器含开发兜底密钥或自动重启模式：${rel}"
+        exit 1
+    fi
+done
+echo "  ✓ 未发现硬编码凭据 / 自动重启模式"
+echo ""
+
 # 找主程序
 if   [ -f "${BIN_DIR}/ams-server.exe" ]; then SERVER="${BIN_DIR}/ams-server.exe"
 elif [ -f "${BIN_DIR}/ams-server" ];     then SERVER="${BIN_DIR}/ams-server"

@@ -273,8 +273,9 @@ cd web && npm run build && cd ..       # 产出 web/dist
 | `/x.js` 之类带扩展名但文件不存在 | 真正的 404（否则缺失 JS 会被 HTML 掩盖成语法错误） |
 
 发布包由 `bash scripts/package.sh` 生成，目录形如
-`bin/` + `web/` + `config/` + `scripts/`，解压后 `scripts/start.cmd`（或 `start.sh`）
-一条命令启动，`scripts/healthcheck.*` 会同时校验接口与前端页面。
+`bin/` + `web/` + `config/` + `scripts/`（含 `scripts/launcher/` 跨平台图形化启动器），
+解压后 `scripts/start.cmd`（或 `start.sh`）一条命令启动，或直接双击 `scripts/launcher/AMS-Launcher.cmd`
+（Windows）启动图形化托盘；`scripts/healthcheck.*` 会同时校验接口与前端页面。
 
 ### 5. 开发模式：前后端分别启动
 

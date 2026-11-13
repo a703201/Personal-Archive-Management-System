@@ -106,7 +106,23 @@ public class DbConfig {
      *   或改用**不含保留字符**的口令。本项目默认口令即遵循此约束。
      */
     public func url(): String {
-        return "opengauss://${this.user}:${this.password}@${this.host}:${this.port}/${this.database}?sslmode=${this.sslMode}"
+        // [FR-PERF / 稳定性] 显式设置连接与读写超时（毫秒）。
+        //
+        // 根因：openGauss 驱动默认**不给 socket 设 read/write/connection 超时**，
+        // 一旦 DB 出现抖动（连接池里混入了被服务端关掉的半开连接、网络瞬断、
+        // 或某条查询在 DB 侧被行锁/长事务阻塞），`st.query()` 会在 socket 上
+        // 无限挂起，工作线程被永久占住、连接也一直不还池。50 个连接被陆续占满后，
+        // 后续所有需要查库的请求都拿不到连接，服务端级联冻结 —— 表现为
+        // 「Exception: dead lock」+ 除 /api/health 外全部超时（2026-11-11、
+        // 2026-11-13 两次线上故障均为同一现象）。
+        //
+        // 设超时后：DB 抖动能让单个请求在数秒内快速失败（503）并释放线程/连接，
+        // 故障被隔离在「少量 503」而非「全站永久卡死」，可自恢复。
+        // 超时取值：建连 5s（DB 在容器网络内，正常 <100ms）、读写 15s（覆盖
+        // 检索/导出等较重的查询，又不至于无限挂起）。
+        return "opengauss://${this.user}:${this.password}@${this.host}:${this.port}" +
+            "/${this.database}?sslmode=${this.sslMode}" +
+            "&connection_timeout=5000&read_timeout=15000&write_timeout=15000"
     }
 
     /**

@@ -5,8 +5,16 @@ build/
 oh_modules/
 node_modules/
 entry/build/
-*.hap
 *.app
+*.hap
+
+# 路线 B：把签名发布包（App Pack）纳入仓库（本地构建后提交，随 v* tag 上传 Release）
+# git 不允许父目录被排除时单独放行子文件，故先重纳入目录链，再排除其余产物，最后放行签名 APP。
+!build/
+!build/outputs/
+!build/outputs/default/
+build/outputs/default/**
+!build/outputs/default/mobile-default-signed.app
 
 # 调试签名材料（含调试证书/密钥，勿提交；正式发布前在 DevEco 生成自有签名）
 signing/
