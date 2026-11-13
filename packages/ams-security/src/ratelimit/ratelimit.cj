@@ -11,6 +11,7 @@
 package ams.security.ratelimit
 
 import std.collection.*
+import std.sync.*
 
 /**
  * 单个命名限额的窗口状态（存于 HashMap，按引用共享，原地可改）。
@@ -40,6 +41,17 @@ public class WindowState {
  */
 public class RateLimiter {
     private let windows: HashMap<String, WindowState> = HashMap<String, WindowState>()
+    /**
+     * [并发安全] 保护 windows 的读写。
+     *
+     * 限流器是**单实例、被每请求中间件并发调用**的；此前 windows 是无锁
+     * HashMap，并发的 `get` 与 `this.windows[k] = ...`（插入可能触发再哈希）
+     * 会破坏哈希桶链表结构，使后续 `get()` 陷入死循环、占死工作线程，
+     * 最终拖垮整个 stdx 线程池（与 2026-11-11 LoginFailureCounter 全局
+     * dead lock 同一类隐患）。这里把所有读写收进一把 Mutex 串行化，
+     * 与 LoginFailureCounter / CaptchaStore 的范式一致。
+     */
+    private let lock: Mutex = Mutex()
 
     public init() {}
 
@@ -59,22 +71,27 @@ public class RateLimiter {
             return false
         }
         let k = "${limitName}:${key}"
-        match (this.windows.get(k)) {
-            case Some(w) =>
-                // 窗口滑动：重置起点与计数
-                if (now - w.start >= windowMillis) {
-                    w.start = now
-                    w.count = cost
+        this.lock.lock()
+        try {
+            match (this.windows.get(k)) {
+                case Some(w) =>
+                    // 窗口滑动：重置起点与计数
+                    if (now - w.start >= windowMillis) {
+                        w.start = now
+                        w.count = cost
+                        return true
+                    }
+                    if (w.count + cost <= max) {
+                        w.count = w.count + cost
+                        return true
+                    }
+                    return false
+                case None =>
+                    this.windows[k] = WindowState(now, cost)
                     return true
-                }
-                if (w.count + cost <= max) {
-                    w.count = w.count + cost
-                    return true
-                }
-                return false
-            case None =>
-                this.windows[k] = WindowState(now, cost)
-                return true
+            }
+        } finally {
+            this.lock.unlock()
         }
     }
 }

@@ -61,6 +61,31 @@ bash mobile/build_hap.sh
 
 ---
 
+## 发布到 GitHub Release（自动随 AMS 发行版上传）
+
+AMS 的 `release.yml` 在上传二进制发行包时，**会顺便把鸿蒙客户端 App Pack（`.app`）一并上传到同一个 Release**（重命名为 `ams-mobile-<version>.app`），逻辑在 `scripts/ci/upload-asset.sh`。
+
+**重要约束**：App Pack 不会被自动构建后上传，原因是：
+
+1. `mobile/.gitignore` 默认忽略 `*.app` 与 `build/` 下的构建产物（**不进仓库**），CI `checkout` 拿不到现成文件；**但已为签名发布包开了白名单**——`mobile/build/outputs/default/mobile-default-signed.app` 经否定规则放行，可直接 `git add` 纳入（见路线 B）；
+2. 鸿蒙构建依赖本机 DevEco Studio / 鸿蒙 SDK（路径硬编码、需 JBR + hvigor + 签名证书），**GitHub 托管 runner（windows-latest / ubuntu）没有鸿蒙 SDK，无法构建**。
+
+因此 `release.yml` 里「构建鸿蒙客户端（可选）」步骤设了 `continue-on-error: true`：
+
+- **自托管 runner（装了 DevEco / 鸿蒙 SDK）**：该步骤运行 `mobile/build_hap.sh`（`assembleHap`）构建 HAP；App Pack 需另行 `assembleApp` 构建或走路线 B 提交，`upload-asset.sh` 扫描到 `mobile-default-signed.app` 即上传为 `ams-mobile-<version>.app`；
+- **GitHub 托管 runner**：无鸿蒙 SDK，步骤失败被忽略，App Pack 缺失，`upload-asset.sh` 打印「未找到鸿蒙 App Pack → 跳过」，Release 其余资产正常。
+
+**想把 App Pack 随某次发版带上**，两种做法：
+
+- 路线 A（自托管 + 预置）：在装有 DevEco 的 Windows 自托管 runner 上跑 `release.yml`，构建后把 `mobile-default-signed.app`（经 `assembleApp`）放到 CI 工作区由 upload 扫描；
+- 路线 B（仓库内携带，可靠）：`.gitignore` 已对 `mobile-default-signed.app` 开白名单，本地 `assembleApp` 构建后直接执行
+  `git add mobile/build/outputs/default/mobile-default-signed.app`
+  再打 `v*` tag，CI `checkout` 即可拿到并上传（注意这会向仓库提交二进制，且正式发布前应替换为自己生成的签名）。
+
+> 正式发布前务必在 DevEco → Signing Configs 重新生成自有签名，替换借用的 `com.Lumio.music` 调试证书。
+
+---
+
 ## 后端接口契约（已逐条核对 `packages/ams-api/src/routes/*.cj`）
 
 | 用途 | 接口 | 易踩的坑 |

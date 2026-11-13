@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=AMS Launcher
+Name[zh_CN]=AMS 启动器
+Comment=Start and monitor the local AMS server (fail-closed, no auto-restart)
+Comment[zh_CN]=启动并监控本机 AMS 服务（失败关闭，不自动重启）
+Exec=/bin/bash -c 'cd "$(dirname "%k")" \&\& exec bash ./AMS-Launcher.sh'
+Terminal=true
+Categories=Utility;System;
+Icon=utilities-terminal
+StartupNotify=false

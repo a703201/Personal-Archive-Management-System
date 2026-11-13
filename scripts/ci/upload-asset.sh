@@ -53,3 +53,67 @@ if [ "$CODE" != "201" ] && [ "$CODE" != "200" ]; then
   exit 1
 fi
 echo "上传完成（HTTP ${CODE}）"
+
+# ---- 可选：ams-kit 框架静态库包（若存在则一并上传）----
+# 由 scripts/package-kit.sh 产出；若不存在（如未构建 kit），跳过不报错。
+for kz in dist/ams-kit-*.zip; do
+  [ -e "$kz" ] || continue
+  KNAME="$(basename "$kz")"
+  KOUT="$(mktemp)"
+  echo "上传 ${kz} → Release ${REL_ID} ..."
+  KCODE="$(curl -sS -o "$KOUT" -w "%{http_code}" \
+    --ssl-no-revoke \
+    --max-time 1800 \
+    -X POST \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "Content-Type: application/octet-stream" \
+    --data-binary "@${kz}" \
+    "https://uploads.github.com/repos/${REPO}/releases/${REL_ID}/assets?name=${KNAME}")"
+  if [ "$KCODE" != "201" ] && [ "$KCODE" != "200" ]; then
+    echo "::error:: kit 资产上传失败（HTTP ${KCODE}）"
+    head -c 500 "$KOUT"
+    echo ""
+    exit 1
+  fi
+  echo "kit 上传完成（HTTP ${KCODE}）"
+done
+
+# ---- 可选：鸿蒙客户端 App Pack 安装包（若存在则一并上传）----
+# 来源：鸿蒙构建产物 mobile/build/outputs/default/mobile-default-signed.app
+# 约束：build/ 与 *.app 在 mobile/.gitignore 中被忽略，且 GitHub 托管 runner
+#   无鸿蒙 SDK，故托管环境不会产出该文件 → 本段自动跳过（不影响 Release）。
+#   若需随 Release 发布，二选一：
+#     ① 使用装有 DevEco Studio / 鸿蒙 SDK 的自托管 runner（release.yml 的
+#        “构建鸿蒙客户端（可选）”步骤会成功，本段随之上传）；
+#     ② 本地构建后 `git add <app>` 纳入仓库再打 tag（CI checkout 即可拿到；
+#        .gitignore 已对 mobile-default-signed.app 开白名单，无需 -f）。
+APP_DIR="mobile/build/outputs/default"
+APP=""
+if [ -d "$APP_DIR" ]; then
+  APP="$(find "$APP_DIR" -maxdepth 1 -name 'mobile-default-signed.app' 2>/dev/null | head -1)"
+  [ -z "$APP" ] && APP="$(find "$APP_DIR" -maxdepth 1 -name '*.app' 2>/dev/null | head -1)"
+fi
+if [ -n "$APP" ]; then
+  ANAME="ams-mobile-${VER}.app"
+  AOUT="$(mktemp)"
+  echo "上传 ${APP} → Release ${REL_ID} (as ${ANAME}) ..."
+  ACODE="$(curl -sS -o "$AOUT" -w "%{http_code}" \
+    --ssl-no-revoke \
+    --max-time 1800 \
+    -X POST \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "Content-Type: application/octet-stream" \
+    --data-binary "@${APP}" \
+    "https://uploads.github.com/repos/${REPO}/releases/${REL_ID}/assets?name=${ANAME}")"
+  if [ "$ACODE" != "201" ] && [ "$ACODE" != "200" ]; then
+    echo "::error:: 鸿蒙 App Pack 资产上传失败（HTTP ${ACODE}）"
+    head -c 500 "$AOUT"
+    echo ""
+    exit 1
+  fi
+  echo "App Pack 上传完成（HTTP ${ACODE}）"
+else
+  echo "未找到鸿蒙 App Pack（mobile/.gitignore 忽略 *.app，且托管 runner 无鸿蒙 SDK）→ 跳过上传（不影响 Release）"
+fi

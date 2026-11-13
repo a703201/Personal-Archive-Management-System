@@ -4,7 +4,7 @@
  * 与 web/src/config/about.ts 保持同一口径：
  *   - 作者信息只保留「姓名 + 联系邮箱」，不再加署名 / 账号 / 身份；
  *   - 空字段统一渲染「待补充」（common.tbd）；未配置外链渲染「待配置」（about.tbd）；
- *   - 版本号与 web/package.json 对齐（当前 1.3.0），改版本时两处同步；
+ *   - 版本号与 web/package.json 对齐（当前 1.3.1），改版本时两处同步；
  *   - 外链 label / 描述在 I18n.ets 的 about.link* 键中按三语维护，
  *     这里只存 URL；href 留空即「待配置」，页面渲染为不可点击占位项。
  */
@@ -34,8 +34,8 @@ export const ABOUT: AboutInfo = {
   productName: 'AMS · 个人档案管理系统',
   productNameEn: 'AMS · Personal Archive Management System',
   productNameFr: 'AMS · Système de gestion d’archives personnelles',
-  version: '1.3.0',
-  releaseDate: '2026-11-05',
+  version: '1.3.1',
+  releaseDate: '2026-11-13',
   authorName: '何宇翔',
   authorEmail: 'Lumio_a7032@qq.com',
   license: 'Apache-2.0',

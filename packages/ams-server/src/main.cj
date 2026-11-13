@@ -271,7 +271,7 @@ main(): Int64 {
     // 版本号与 web/package.json、CHANGELOG 保持一致（唯一口径；此前硬编码 0.1.0）
     let envLabel = if (isProductionEnv()) { "production" } else { "dev" }
     log.info("server.boot", None, [
-        ("version", "1.3.0"),
+        ("version", "1.3.1"),
         ("env", envLabel),
         ("httpHost", config.httpHost),
         ("httpPort", "${config.httpPort}"),

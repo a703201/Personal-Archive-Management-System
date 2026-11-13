@@ -10,7 +10,7 @@
 #
 # ⚠️ 前提（只需在源码变更后重跑）：
 #   bash deploy/scripts/build-linux-docker.sh   # 产出 build/linux/ 与 web/dist/
-#   该脚本会经由 Dockerfile.prebuilt 自动构建 ams:1.3.0（若镜像已存在则不重建）。
+#   该脚本会经由 Dockerfile.prebuilt 自动构建 ams:1.3.1（若镜像已存在则不重建）。
 #
 # 用法：
 #   cp deploy/compose/.env.example deploy/compose/.env   # 首次必做，按需修改
