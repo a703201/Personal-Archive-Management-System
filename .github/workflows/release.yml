@@ -19,7 +19,7 @@
 #   ams-release-<version>-windows-x86_64.zip
 #   含：bin/（exe + 全部运行时 DLL）/ web/dist/ / config/ / scripts/ / docs/ / LICENSE / CHECKSUMS.sha256
 #   ams-kit-<KIT_VERSION>-windows-x86_64.zip   （方案 A 框架静态库包，由 package-kit.sh 产出）
-#   ams-mobile-<version>.app                   （鸿蒙客户端 App Pack；仅在装有鸿蒙 SDK 的环境构建，托管 runner 自动跳过）
+#   ams-mobile-<version>.zip                   （鸿蒙客户端 App Pack，zip 包装规避 GitHub 对 .app/.apk 扩展名的禁止；仅在装有鸿蒙 SDK 的环境构建，托管 runner 自动跳过）
 #
 # ⚠️ 工具链前提（编译后端需要仓颉 SDK）：
 #   本 job 默认在 windows-latest（GitHub 托管）运行，工具链来源见
@@ -159,6 +159,6 @@ jobs:
             echo "- 校验和：见包内 \`CHECKSUMS.sha256\`"
             echo "- 部署：见包内 \`DEPLOY.md\` / \`docs/09\`"
             echo "- 框架包：\`ams-kit-<KIT_VERSION>-windows-x86_64.zip\`（随 Release 一并上传，由 \`scripts/package-kit.sh\` 产出）"
-            echo "- 鸿蒙客户端：\`ams-mobile-${VERSION}.app\`（若构建环境含鸿蒙 SDK 则随 Release 上传，否则自动跳过）"
+            echo "- 鸿蒙客户端：\`ams-mobile-${VERSION}.zip\`（若构建环境含鸿蒙 SDK 则随 Release 上传为 zip 包，否则自动跳过）"
             echo "- Release 说明：自动取自 \`CHANGELOG.md\` 的 \`[${VERSION}]\` 段落"
           } >> "$GITHUB_STEP_SUMMARY"
