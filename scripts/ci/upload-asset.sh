@@ -98,14 +98,46 @@ if [ -d "$APP_DIR" ]; then
   [ -z "$APP" ] && APP="$(find "$APP_DIR" -maxdepth 1 -name '*.app' 2>/dev/null | head -1)"
 fi
 if [ -n "$APP" ]; then
-  AZIP="$(mktemp -u).zip"
+  mkdir -p dist
+  # 放到 dist/ 下、用相对路径，避免 Windows runner 上 /tmp 绝对路径被 powershell 误解析
+  AZIP="dist/ams-mobile-${VER}.tmp.zip"
+  rm -f "$AZIP"
   echo "打包 ${APP} → ${AZIP} ..."
-  if command -v zip >/dev/null 2>&1; then
-    zip -j -q "$AZIP" "$APP" || { echo "::error:: zip 打包失败"; rm -f "$AZIP"; exit 1; }
-  else
-    # Windows runner 无 zip 时用 powershell 兜底
-    powershell -NoProfile -Command "Compress-Archive -Path '${APP}' -DestinationPath '${AZIP}'" \
-      || { echo "::error:: 压缩失败"; rm -f "$AZIP"; exit 1; }
+  PK_OK=0
+  # 跨平台优先用 python（GitHub runner 自带；zipfile 路径处理最稳，规避 powershell 的 /tmp 问题）
+  PYBIN=""
+  command -v python3 >/dev/null 2>&1 && PYBIN=python3
+  [ -z "$PYBIN" ] && command -v python >/dev/null 2>&1 && PYBIN=python
+  if [ -n "$PYBIN" ]; then
+    if "$PYBIN" - "$APP" "$AZIP" <<'PY'
+import os, sys, zipfile
+app, out = sys.argv[1], sys.argv[2]
+base = os.path.basename(app.rstrip('/\\'))
+with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+    if os.path.isdir(app):
+        for root, _, files in os.walk(app):
+            for f in files:
+                full = os.path.join(root, f)
+                z.write(full, os.path.join(base, os.path.relpath(full, app)))
+    else:
+        z.write(app, base)
+PY
+    then
+      [ -f "$AZIP" ] && PK_OK=1
+    fi
+  fi
+  # 退而求其次用 zip（Linux runner 常见）
+  if [ "$PK_OK" != "1" ] && command -v zip >/dev/null 2>&1; then
+    if zip -j -q "$AZIP" "$APP"; then PK_OK=1; fi
+  fi
+  # 最后兜底 powershell（仅当 python/zip 均不可用时）
+  if [ "$PK_OK" != "1" ] && command -v powershell >/dev/null 2>&1; then
+    if powershell -NoProfile -Command "Compress-Archive -Path '${APP}' -DestinationPath '${AZIP}'"; then PK_OK=1; fi
+  fi
+  if [ "$PK_OK" != "1" ]; then
+    echo "::error:: 鸿蒙包压缩失败（python/zip/powershell 均不可用）"
+    rm -f "$AZIP"
+    exit 1
   fi
   ANAME="ams-mobile-${VER}.zip"
   echo "上传 ${AZIP} → Release ${REL_ID} (as ${ANAME}) ..."
