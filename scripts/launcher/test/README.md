@@ -6,7 +6,18 @@
 ## 为什么需要这个
 
 `AMS-Launcher.sh` 在有桌面且安装 `zenity` 时会弹图形菜单，否则自动降级为文本向导。
-但「真实 zenity 渲染」此前**从未在真实 Linux 桌面里实跑过**（开发机是 Windows，无 X/zenity）。
+「真实 zenity 渲染」在开发机（Windows，无 X/zenity）上无法直接验证，故用本方案在
+真实 Linux 内核 + 真实 zenity 二进制上实测。**2026-11-15 已实跑通过：PASS=17 FAIL=0**，
+产出 6 张 1280×1024 真实渲染截图（详见 `docs/17` §3.2.3 与 §5.3.1）。
+
+## 中文字体（避免截屏中文变方框）
+
+Ubuntu 基础镜像没有 CJK 字体，中文会渲染成 `□`。`run.sh` 会**只读挂载宿主机单个
+中文字体文件**（Windows 优先 `C:/Windows/Fonts/simhei.ttf`，Linux/macOS 有对应探测分支），
+容器侧执行 `fc-cache`，并由 `test-zenity.sh` 的**中文字体可用性断言**保证物证有效：
+`fc-list :lang=zh` 为空直接判 FAIL，不会出现「交互全过但截图乱码」被放过的情况。
+挂载单文件而非整个字体目录（808 个文件会把 `fc-cache` 拖慢），也无需在镜像里装
+`fonts-noto-cjk`（该包依赖过重，曾导致 Docker 导出镜像 I/O 错误）。
 
 本方案用 **Docker + Xvfb（虚拟显示器）** 在 Ubuntu 容器里跑**真实 zenity 二进制**，
 弥补「无物理 Linux 桌面」的缺口。Xvfb 自带显示，所以**宿主机不需要安装 X 服务器 /

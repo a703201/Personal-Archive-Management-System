@@ -201,7 +201,18 @@ def main():
         return 1
     # Domain vocabulary first: a pure frequency list would crowd out the
     # characters this product actually needs to read (档案 / 编号 / 姓名 ...).
-    chars = dedupe(CJK_DOMAIN + CJK_FREQUENT, 220)
+    # Character cap is configurable so a future dictionary extension needs no
+    # code change. Default stays 220 (zero behaviour change). NOTE: raising the
+    # cap alone does NOT add characters beyond the curated CJK_DOMAIN +
+    # CJK_FREQUENT pool; a real extension requires (1) a larger curated char
+    # set, (2) re-running this generator, (3) full build + 533-case regression.
+    try:
+        cap = int(os.environ.get("AMS_GLYPH_CAP", "220"))
+    except ValueError:
+        cap = 220
+    if cap < 1:
+        cap = 220
+    chars = dedupe(CJK_DOMAIN + CJK_FREQUENT, cap)
     if len(chars) < 50:
         raise RuntimeError("font/GDI produced no usable character set")
 

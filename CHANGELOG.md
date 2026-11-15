@@ -15,6 +15,75 @@
 
 ---
 
+## [1.3.2] — 2026-11-15（创新点论证成文 + 待补台账 + 实测补齐与工具链加固）
+
+> 版本号提升至 **1.3.2**。本批**不新增业务功能**，聚焦评估论证、工程可观测性、
+> 实测闭环与工具链健壮性；对 1.3.1 的交付物做补充与验证，不改变 P0/P1/P2 需求口径。
+
+### 创新点论证与待补台账（文档）
+
+- 新增 **`docs/19-创新点论证.md`**（详版）：`docs/17` §4.1/§4.2 判定由 🟡 升 ✅，
+  逐点展开「替代方案短板 → AMS 技术路径 → 证据 → 如实边界」，并新增**证据三级分级**
+  （A 本系统内部实测 / B 公开资料定性 / C 市场结论明确不做）。
+- **补齐同赛道「类似档案管理系统」直接竞品对照**（§2）：自托管 DMS（Paperless-ngx）、
+  E2E 零知识保险库（Ente）、数字遗产 SaaS（Everplans/Trustworthy）、
+  单位侧电子档案（国家档案局《电子档案管理系统基本功能规定》+ GB/T 33870-2017），
+  全部标注公开来源 URL、仅作定性对照、不给精确数字。
+- §7 拆为**表 A（间接替代方案）+ 表 B（同赛道）**，表 B 最后一行 AMS 刻意标 **△ 而非 ✅**；
+  §2.5 / §8 明确列出**同赛道产品的反向优势**（OCR 语言覆盖、E2E 零知识隐私强度、国标合规背书），
+  §9 收窄定位：不是通用 DMS / 零知识影像库 / 数字遗产 SaaS，也不能替代单位侧法定归档。
+- `docs/17` 新增 **§5.3.1 待补清单**：基于 `docs/19` 论证登记 A 类证据缺口 4 项、
+  B 类能力短板 6 项，逐条标 ✅ 已落地 / 🔄 进行中 / ⛔ 阻塞 / 📋 需决策，
+  并显式列出「不属于缺口的设计取舍」（审批流、E2E 零知识、通用 OCR、单位侧合规、商业版/SaaS）。
+- `docs/README.md` 导航登记 19 号文档；`docs/17` §4 摘要、附录索引、§5.1 汇总同步。
+
+### 工程可观测性与实测补齐（A 类）
+
+- 新增 **`scripts/ci/measure-success-metrics.py`**：只读、零污染（只 GET 公开端点，
+  不注册账号、不写库），把 `docs/01 §2.4` 七项成功指标分类为
+  `NEEDS_USERS` / `NEEDS_AUTH_SAMPLE` / `AUTOMATABLE` / `NEEDS_THIRD_PARTY` / `PARTIAL`，
+  **不编造任何用户、竞品或第三方数字**。支持 `--json`。
+  实测 30 次/端点：`health` P95 **14.1ms**、`branding`(DB) **27.1ms**、
+  `setup_status`(DB) **9.6ms**，窗口内可用率 100%。
+- 如实登记仍缺：真实用户埋点/采纳率与留存、第三方渗透报告、竞品真实部署对照、
+  精确竞品量化基准（红线禁止编造）。
+
+### 工具链加固与实测闭环（B 类）
+
+- **S3 兼容链路验证**：修 `scripts/ci/verify-s3-moto.sh` 跨平台缺陷（Windows venv 为
+  `Scripts/` 且 `activate` 无 +x 位，原 `-x` 判断误落 `bin/activate`；`| tail` 吞退出码造成假成功），
+  改为 venv 内绝对入口 `VPY` / `MOTO_BIN`。真跑通过：moto 5.2.5 →
+  `bash scripts/test.sh ams-storage` **64 例 0 失败**（含 `S3IntegrationTest` 真实 SigV4 + HTTP 往返）。
+- **Linux zenity 桌面 GUI 实测闭环**：`scripts/launcher/test/run.sh` 在本机 Docker
+  （Ubuntu 22.04 + Xvfb + openbox + zenity 3.42.1 + xdotool）真跑
+  **PASS=17 FAIL=0、退出码 0**，产出 6 张 1280×1024 真实渲染截图，覆盖信息框 / 是-否 /
+  输入框 / 隐藏口令 / 列表菜单 / headless 降级 / 失败关闭 / shellcheck。
+  逐轮修复 8 处**实测夹具自身缺陷**（非启动器故障）：MSYS 自动路径转换污染 docker 参数、
+  `run.sh` 层级算错、子 shell source 函数未回传、`--class Zenity` 大小写、C locale 中文 `--text`、
+  无窗口管理器导致 `_NET_ACTIVE_WINDOW` 不可用、`scrot -u -f` 无焦点、旧 PNG 造成 `_000` 混杂。
+- **中文字体物证修复**：`run.sh` 只读挂载宿主机**单个**中文字体文件
+  （Windows `simhei.ttf` → 容器 `host-cjk.ttf`，Linux/macOS 有探测分支），
+  **不改 Dockerfile、镜像体积不变**；`test-zenity.sh` 新增**中文字体可用性断言**
+  （`fc-list :lang=zh` 为空直接 FAIL）。复跑检出 `SimHei,黑体`，6 张截屏中文清晰可读、无方框无乱码。
+  注：曾试 apt 装 `fonts-noto-cjk`，其重依赖导致 Docker 导出层 I/O 错误，已回退。
+- `scripts/gen-media-glyphs.py`：字表上限 220 硬编码参数化为 `AMS_GLYPH_CAP`
+  （默认 220、零行为变更）。核实字表池共 416 个不重复汉字；**实际扩表未执行**
+  （需重生成 `glyphdata.cj` 运行时产物 + 全量三件套回归，属能力变更待拍板）。
+- `scripts/launcher/AMS-Launcher.sh`：修两处 shellcheck 告警
+  （SC2164 `cd "$ROOT" || exit 1`、SC2155 拆分 `local url` 声明与赋值），零行为变更。
+- `scripts/launcher/test/README.md` 同步实测结论与中文字体说明。
+
+### 版本对齐
+
+- `web/package.json` / `web/package-lock.json` / `packages/ams-server/src/main.cj`（启动日志 `version`）/
+  `mobile/entry/src/main/ets/config/About.ets`（含 `releaseDate`）/
+  `deploy/compose/docker-compose.yml` 镜像 tag / 全部部署文档与 Dockerfile 示例 /
+  `docs/17`·`docs/18`·`docs/19` 版本口径统一升至 **1.3.2**。
+- 刻意未改：`web/package-lock.json` 中 **tinyexec 依赖的 1.3.1**、
+  `tools/vendor/` 文档的**章节号 1.3.1**、本文件 `[1.3.1]` 及以下历史段落。
+
+---
+
 ## [1.3.1] — 2026-11-13（二进制发布包图形化启动器 · 方案 A 双平台 + 实测方案）
 
 > 版本号提升至 **1.3.1**（对 1.3.0 交付物的补强：补齐图形化启动器这一 3.2 评估项；并交付 Linux zenity 桌面 GUI 与容器形态 GUI 的可复现实测方案）。

@@ -19,7 +19,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 
 CONFIG="$ROOT/config/application.env"
 DEPLOY_ENV="$ROOT/config/deployment.env"
@@ -298,7 +298,8 @@ $v"
 }
 
 open_browser() {
-    local url="http://127.0.0.1:$(get_port)/"
+    local url
+    url="http://127.0.0.1:$(get_port)/"
     if command -v xdg-open >/dev/null 2>&1; then xdg-open "$url" >/dev/null 2>&1 &
     elif command -v open >/dev/null 2>&1; then open "$url" >/dev/null 2>&1 &
     else msg_info "请手动打开浏览器访问 $url"; fi
