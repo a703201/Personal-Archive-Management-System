@@ -39,21 +39,28 @@ if command -v curl >/dev/null 2>&1; then
 fi
 
 # ---- 准备 venv + moto ----
+# 跨平台：Windows 原生 venv 是 Scripts/python.exe（activate 无 +x 位，不能用 -x 判断）；
+# Linux/macOS 是 bin/python。统一用「venv 内 python 的绝对路径 + -m」调用，
+# 不 source activate（避免 activate 脚本差异与 PATH 污染）。
 export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
-if [ ! -x "$VENV/Scripts/python.exe" ] && [ ! -x "$VENV/bin/python" ]; then
+if [ -f "$VENV/Scripts/python.exe" ]; then
+  VPY="$VENV/Scripts/python.exe"
+elif [ -f "$VENV/bin/python" ]; then
+  VPY="$VENV/bin/python"
+else
   echo "[INFO] 创建 venv：$VENV"
   python3 -m venv "$VENV"
+  if [ -f "$VENV/Scripts/python.exe" ]; then
+    VPY="$VENV/Scripts/python.exe"
+  else
+    VPY="$VENV/bin/python"
+  fi
 fi
-if [ -x "$VENV/Scripts/activate" ]; then
-  . "$VENV/Scripts/activate"
-else
-  . "$VENV/bin/activate"
-fi
-if ! python -c "import moto" >/dev/null 2>&1; then
+if ! "$VPY" -c "import moto" >/dev/null 2>&1; then
   echo "[INFO] 安装 moto[server]（首次需联网拉取 PyPI）..."
-  pip install --quiet --disable-pip-version-check "moto[server]"
+  "$VPY" -m pip install --quiet --disable-pip-version-check "moto[server]"
 fi
-echo "[OK]   moto 就绪：$(python -c 'import moto; print(moto.__version__)')"
+echo "[OK]   moto 就绪：$("$VPY" -c 'import moto; print(moto.__version__)')"
 
 # ---- 起 moto server（trap 清理）----
 MOTO_PID=""
@@ -67,9 +74,19 @@ cleanup() {
 trap cleanup EXIT
 
 export AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin AWS_DEFAULT_REGION=us-east-1
-moto_server -p "$API_PORT" -H 0.0.0.0 > "$MOTO_LOG" 2>&1 &
+# 与上面一致：不依赖 activate 后的 PATH，直接用 venv 内的绝对入口。
+# Windows venv 为 Scripts/moto_server.exe；Linux/macOS 为 bin/moto_server。
+if [ -f "$VENV/Scripts/moto_server.exe" ]; then
+  MOTO_BIN="$VENV/Scripts/moto_server.exe"
+elif [ -f "$VENV/bin/moto_server" ]; then
+  MOTO_BIN="$VENV/bin/moto_server"
+else
+  echo "[ERROR] 未在 venv 中找到 moto_server 入口（Scripts/ 或 bin/）。" >&2
+  exit 1
+fi
+"$MOTO_BIN" -p "$API_PORT" -H 0.0.0.0 > "$MOTO_LOG" 2>&1 &
 MOTO_PID=$!
-echo "[INFO] moto_server 已启动 (PID=$MOTO_PID)，等待就绪..."
+echo "[INFO] moto_server 已启动 (PID=$MOTO_PID, bin=$MOTO_BIN)，等待就绪..."
 
 ready() {
   curl -fsS --max-time 2 "http://127.0.0.1:${API_PORT}/" >/dev/null 2>&1

@@ -16,7 +16,12 @@
 set -uo pipefail
 
 LAUNCHER="/opt/ams/scripts/launcher/AMS-Launcher.sh"
-OUT="${OUT_DIR:-/tmp/ams-gui-test}"
+# 产物目录优先用容器内固定挂载点 /out（不受宿主机 MSYS 路径转换影响）。
+if [ -d /out ] && [ -w /out ]; then
+    OUT=/out
+else
+    OUT="${OUT_DIR:-/tmp/ams-gui-test}"
+fi
 mkdir -p "$OUT"
 RESULT="$OUT/result.log"
 : > "$RESULT"
@@ -35,12 +40,28 @@ if [ -n "${DISPLAY:-}" ]; then
         [ -S "/tmp/.X11-unix/X${DISPLAY#:}" ] && break
         sleep 0.1
     done
+    # 必须有窗口管理器：裸 Xvfb 不支持 _NET_ACTIVE_WINDOW，
+    # xdotool windowactivate 会失败、按键送不进 zenity 导致 drive() 永久挂起。
+    # openbox 轻量、无 session 依赖；实测 activate rc=0 且 zenity 正常响应 Return。
+    if command -v openbox >/dev/null 2>&1; then
+        openbox --sm-disable >/dev/null 2>&1 &
+        OPENBOX_PID=$!
+        sleep 0.5
+        info "窗口管理器 openbox 已启动 (PID=$OPENBOX_PID)"
+    else
+        fail "环境检查: 缺少 openbox（无 WM 时无法驱动 zenity）"
+    fi
 fi
 
 zenity_wid(){
     local i wid
     for i in $(seq 1 80); do
-        wid="$(xdotool search --class Zenity 2>/dev/null | head -1)"
+        # Ubuntu 22.04 / zenity 3.42 的 WM_CLASS 为 ("zenity" "Zenity")，
+        # xdotool --class 用大写 "Zenity" 匹配不到（实测窗口确实渲染，xwininfo 可见）；
+        # 用大小写兼容的正则，避免把「已渲染」误判成「GUI 路径未渲染」。
+        wid="$(xdotool search --class '[Zz]enity' 2>/dev/null | head -1)"
+        # 兜底：部分 GTK 版本窗口 class 注册慢或不同，按标题名再找一次。
+        [ -z "$wid" ] && wid="$(xdotool search --name '^AMS$' 2>/dev/null | head -1)"
         [ -n "$wid" ] && { printf '%s' "$wid"; return 0; }
         sleep 0.2
     done
@@ -61,7 +82,9 @@ drive(){
         return 1
     fi
     sleep 0.4
-    scrot -u -f "$OUT/zenity_${tag}.png" 2>/dev/null || info "$tag: 截屏失败（scrot 不可用，不影响判定）"
+    # 全屏截屏（-f）比 -u（聚焦窗口）可靠：虚拟显示器无物理焦点时 -u 会报
+    # "no image grabbed: Resource temporarily unavailable"。截的是真实 X 帧缓冲。
+    scrot -f "$OUT/zenity_${tag}.png" 2>/dev/null || info "$tag: 截屏失败（不影响判定）"
     case "$strat" in
         yes)    xdotool windowactivate --sync "$wid" key Return ;;          # 默认聚焦「是」
         no)     xdotool windowactivate --sync "$wid" key Escape ;;          # 取消 == 否
@@ -79,6 +102,24 @@ echo "================ AMS 启动器 zenity GUI 实测 ================"
 info "zenity 版本: $(zenity --version 2>&1)"
 info "DISPLAY=${DISPLAY:-<unset>}"
 
+# ---- 中文字体可用性（截图物证有效性的前提）----
+# 宿主机字体由 run.sh 只读挂到 /usr/share/fonts/hostfonts；fontconfig 需重建缓存
+# 才能被 GTK/zenity 发现。没有 CJK 字体时中文会渲染成方框(tofu)，
+# 虽然交互契约仍能全过，但「中文 GUI 正常渲染」的物证不合格 —— 故显式断言。
+# run.sh 把宿主机**单个**中文字体文件挂到 /usr/share/fonts/truetype/host-cjk.*；
+# 镜像自身也可能带 CJK 字体，两种情况都通过 fc-list 统一检出，不做路径假设。
+if command -v fc-cache >/dev/null 2>&1; then
+    fc-cache -f >/dev/null 2>&1 || true
+fi
+ZH_COUNT="$(fc-list :lang=zh family 2>/dev/null | sort -u | wc -l)"
+ZH_SAMPLE="$(fc-list :lang=zh family 2>/dev/null | sort -u | head -3 | tr '\n' ' ')"
+info "可用中文字体族数量: $ZH_COUNT  样例: $ZH_SAMPLE"
+if [ "$ZH_COUNT" -gt 0 ]; then
+    pass "中文字体: 已加载（截屏中文可正常渲染）"
+else
+    fail "中文字体: 无 CJK 字体，截屏中文会呈方框（GUI 交互仍可测，但物证不合格）"
+fi
+
 # ---- 0) GUI 检测（两个形态）----
 GUI_ZENITY="$(DISPLAY=:99 bash -c 'source "'"$LAUNCHER"'" >/dev/null 2>&1; echo "$GUI"')"
 [ "$GUI_ZENITY" = "zenity" ] && pass "GUI 检测: 有 DISPLAY+zenity → \"$GUI_ZENITY\"" || fail "GUI 检测: 期望 zenity，实得 \"$GUI_ZENITY\""
@@ -87,6 +128,13 @@ GUI_TEXT="$(env -u DISPLAY -u WAYLAND_DISPLAY bash -c 'source "'"$LAUNCHER"'" >/
 [ -z "$GUI_TEXT" ] && pass "GUI 检测: 无 DISPLAY → 空（文本模式）" || fail "GUI 检测: 无 DISPLAY 仍选 GUI=\"$GUI_TEXT\""
 
 # ---- 1) 失败关闭（文本层，确定性，不依赖显示）----
+# 先把启动器函数加载进**当前 shell**：上面 0) 的 GUI 检测用的是 bash -c 子 shell，
+# 函数不会回传，若此处不 source 会报 "preflight: command not found"。
+# 启动器第 331 行有 BASH_SOURCE 守卫，source 不会触发 main_menu；
+# 但 source 会重置 CONFIG 等路径变量，故必须在 source **之后**再覆盖成沙箱路径。
+if ! source "$LAUNCHER" >/dev/null 2>&1; then
+    fail "source: 无法加载 $LAUNCHER（检查 -v 挂载是否被 MSYS 路径转换污染）"
+fi
 SB="$(mktemp -d)"
 printf 'AMS_HTTP_PORT=8080\n' > "$SB/config.env"
 # 覆盖路径全局，避免触碰只读挂载的 /opt/ams
@@ -103,7 +151,10 @@ cfg_set AMS_KEK          "$(printf 'B%.0s' $(seq 1 40))"
 cfg_set AMS_DB_PASSWORD  "dbpass"
 iss2="$(preflight)"
 [ -z "$iss2" ] && pass "preflight: 补齐三密钥后 0 问题" || fail "preflight: 补齐后仍存在问题 -> $iss2"
-grep -q '^AMS_TOKEN_SECRET=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA$' "$CONFIG" \
+# 断言值必须与上面 cfg_set 实际写入的 40 个 A 完全一致。
+# 原字面量误写成 44 个 A，导致必然 FAIL（测试脚本自身 bug，非启动器问题）。
+EXPECTED_KEY_LINE="AMS_TOKEN_SECRET=$(printf 'A%.0s' $(seq 1 40))"
+grep -qxF "$EXPECTED_KEY_LINE" "$CONFIG" \
     && pass "cfg_set: 键值独占一行、值与键同行" || fail "cfg_set: 写盘格式异常"
 # 短令牌应被预检拦截（>=32 字节）
 cfg_set AMS_TOKEN_SECRET "short"
@@ -132,7 +183,7 @@ if [ -n "${DISPLAY:-}" ]; then
     MPID=$!
     if wid="$(zenity_wid)"; then
         sleep 0.4
-        scrot -u -f "$OUT/zenity_menu.png" 2>/dev/null || info "menu: 截屏失败"
+        scrot -f "$OUT/zenity_menu.png" 2>/dev/null || info "menu: 截屏失败"
         xdotool windowactivate --sync "$wid" key Escape   # 取消列表 -> 循环退出
         for _ in $(seq 1 50); do kill -0 "$MPID" 2>/dev/null || break; sleep 0.2; done
         if kill -0 "$MPID" 2>/dev/null; then fail "menu: 进程未退出"; kill "$MPID" 2>/dev/null || true
@@ -165,6 +216,7 @@ else
 fi
 
 # ---- 收尾 ----
+[ -n "${OPENBOX_PID:-}" ] && kill "$OPENBOX_PID" 2>/dev/null || true
 [ -n "${XVFB_PID:-}" ] && kill "$XVFB_PID" 2>/dev/null || true
 echo "----------------------------------------------------------" | tee -a "$RESULT"
 echo "结果: PASS=$PASS_C FAIL=$FAIL_C" | tee -a "$RESULT"
