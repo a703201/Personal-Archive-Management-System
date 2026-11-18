@@ -62,7 +62,7 @@ export const SOURCE_DEFS: Array<{ value: number; label: string; labelEn: string;
   { value: 0, label: '手动', labelEn: 'Manual', labelFr: 'Manuel' },
   { value: 1, label: 'CSV 导入', labelEn: 'CSV Import', labelFr: 'Import CSV' },
   { value: 2, label: '克隆', labelEn: 'Cloned', labelFr: 'Cloné' },
-  { value: 3, label: 'OCR', labelEn: 'OCR', labelFr: 'OCR' },
+  { value: 3, label: 'OCR 识别', labelEn: 'OCR', labelFr: 'OCR' },
   { value: 4, label: '附件导入', labelEn: 'Attachment Import', labelFr: 'Import de pièce jointe' },
   { value: 5, label: '导出包回导', labelEn: 'Export Re-import', labelFr: 'Réimportation du paquet' },
 ]

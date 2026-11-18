@@ -27,6 +27,7 @@ import std.sync.*
 
 import ams.app.audit.*
 import ams.crypto.provider.*
+import ams.data.db.*
 import ams.data.repo.*
 import ams.kernel.error.*
 import ams.kernel.id.*
@@ -223,7 +224,7 @@ public class AuthService {
 
         // 3) 失败路径：计数 + 渐进延迟
         if (!ok) {
-            this.onLoginFailed(userId, username)
+            this.onLoginFailed(userId, username, ip)
             // FR-AUD-001：登录失败必须留痕
             this.audit("${userId}", AuditAction.LoginFailed, "user", username,
                        AuditResult.Failure, "AUTH_FAILED", ip, userAgent)
@@ -323,12 +324,13 @@ public class AuthService {
         }
     }
 
-    private func onLoginFailed(userId: Int64, username: String): Unit {
+    private func onLoginFailed(userId: Int64, username: String, ip: String): Unit {
         if (userId > 0) {
             this.userRepo.recordLoginFailure(userId, this.config.maxFailedAttempts, this.config.lockSeconds)
         }
         // 渐进延迟：按用户名维度计数（不记录口令）
-        let delay = this.progressiveDelay(username)
+        // P1-5：计数落 sys_runtime_login_failures，并带上 uid/ip 上下文，多副本共享。
+        let delay = this.progressiveDelay(username, userId, ip)
         Times.sleepMillis(delay)
         Log.get().warn("auth.login.failed", None, [
             ("username", username)
@@ -338,16 +340,17 @@ public class AuthService {
     /**
      * 渐进延迟计算。
      *
-     * 以「用户名的稳定哈希」为键在内存中计数，
-     * 避免引入额外的持久化表；进程重启后计数归零（可接受）。
+     * 以「用户名的稳定哈希」为键计数（不存口令）。
+     * P1-5：配置了 RuntimeStateDb 时计数落 sys_runtime_login_failures（多副本共享），
+     * 否则退化为进程内 Mutex 计数（单测/开发零依赖）。
      */
-    private func progressiveDelay(username: String): Int64 {
+    private func progressiveDelay(username: String, uid: Int64, ip: String): Int64 {
         // 用用户名的稳定哈希做键（不存口令，只存用户名哈希）。
-        // 【并发安全】计数器的读写全部经 Mutex 串行化，见 LoginFailureCounter；
+        // 【并发安全】内存回退路径的读写全部经 Mutex 串行化，见 LoginFailureCounter；
         // 此前直接读写无锁 HashMap，并发登录会破坏哈希桶结构导致 get() 死循环，
         // 占死工作线程并连锁拖垮整个 stdx 线程池（2026-11-11 全局 dead lock）。
-        let n = LoginFailureCounter.increment(
-            AuthService.failureKey(username), Times.nowMillis())
+        let n = LoginFailureCounter.incrementFor(
+            AuthService.failureKey(username), uid, ip, Times.nowMillis())
         let delay = this.config.delayBaseMillis * n
         return if (delay > this.config.delayMaxMillis) { this.config.delayMaxMillis } else { delay }
     }
@@ -517,23 +520,21 @@ public class AuthService {
 }
 
 // ============================================================
-// 登录失败计数器（进程内 · 并发安全）
+// 登录失败计数器（P1-5：DB 优先 / 内存回退 · 并发安全）
 //
-// 【为什么必须加锁 · 2026-11-11 线上故障复盘】
+// 【存储切换】配置了 RuntimeStateDb 时，读 / 写 / 删全部落到
+//   sys_runtime_login_failures（fkey / uid / ip / count / last_at），多副本共享；
+//   未配置（单测 / 纯本地开发）时退回原有进程内 HashMap + Mutex 实现。
+//
+// 【为什么内存路径必须加锁 · 2026-11-11 线上故障复盘】
 // 旧实现把失败次数放在无锁 `HashMap<String, Int64>` 里，由
 // progressiveDelay（写）、captchaRequired（读）、resetFailureCount（删）
 // 三处直接读写。Web 与移动端并发登录时，并发写会破坏哈希桶内部结构，
 // 使 get() 落入环链死循环，占死工作线程；stdx 线程池被逐步耗尽后，
 // 所有接口（含 /api/branding、/api/setup/status）排队 30s 并抛
 // "Exception: dead lock"，仅 /api/health 因不进业务链路仍可用。
-// 当时只做了 docker restart 恢复，未根治。此处把读 / 写 / 删全部收进
-// 一把 Mutex，与 CaptchaStore / ChunkUploadStore 的线程安全范式一致。
 //
-// 【为什么不落库】该计数只用于「渐进延迟 + 图形验证码摩擦」，
-// 真正的安全边界是 DB 侧 recordLoginFailure 的原子计数与账号锁定；
-// 进程重启清零属可接受降级，不引入额外表与写放大。
-//
-// 【容量与 TTL】用户名哈希可被枚举，故用 TTL + 桶上限兜住内存。
+// 【容量与 TTL】用户名哈希可被枚举，故用 TTL + 桶上限兜底。
 // 触顶时不再新增桶，并对未知键返回保守值（触发验证码 + 最大延迟），
 // 即 fail-closed：绝不因表满而降低登录摩擦。
 // ============================================================
@@ -558,12 +559,10 @@ public class LoginFailureCounter {
 
     /** 读取当前连续失败次数（不存在返回 0）。 */
     public static func get(key: String): Int64 {
-        LoginFailureCounter.mutex.lock()
-        try {
-            return LoginFailureCounter.counts.get(key) ?? 0
-        } finally {
-            LoginFailureCounter.mutex.unlock()
+        if (RuntimeStateDb.isConfigured()) {
+            return LoginFailureCounter.dbGet(key)
         }
+        return LoginFailureCounter.getLocal(key)
     }
 
     /**
@@ -571,6 +570,21 @@ public class LoginFailureCounter {
      * 表满且过期清理无效时不再新增桶，返回 MaxBuckets 使验证码阈值判定为真。
      */
     public static func increment(key: String, nowMillis: Int64): Int64 {
+        if (RuntimeStateDb.isConfigured()) {
+            return LoginFailureCounter.dbIncrement(key, "", "", nowMillis)
+        }
+        return LoginFailureCounter.incrementLocal(key, nowMillis)
+    }
+
+    /** 带上下文（uid/ip）的递增入口 —— 登录失败路径使用。 */
+    public static func incrementFor(key: String, uid: Int64, ip: String, nowMillis: Int64): Int64 {
+        if (RuntimeStateDb.isConfigured()) {
+            return LoginFailureCounter.dbIncrement(key, "${uid}", ip, nowMillis)
+        }
+        return LoginFailureCounter.incrementLocal(key, nowMillis)
+    }
+
+    private static func incrementLocal(key: String, nowMillis: Int64): Int64 {
         LoginFailureCounter.mutex.lock()
         try {
             LoginFailureCounter.sweepLocked(nowMillis)
@@ -592,8 +606,25 @@ public class LoginFailureCounter {
         }
     }
 
+    private static func getLocal(key: String): Int64 {
+        LoginFailureCounter.mutex.lock()
+        try {
+            return LoginFailureCounter.counts.get(key) ?? 0
+        } finally {
+            LoginFailureCounter.mutex.unlock()
+        }
+    }
+
     /** 登录成功后清零（使「连续」语义正确）。 */
     public static func reset(key: String): Unit {
+        if (RuntimeStateDb.isConfigured()) {
+            LoginFailureCounter.dbReset(key)
+            return
+        }
+        LoginFailureCounter.resetLocal(key)
+    }
+
+    private static func resetLocal(key: String): Unit {
         LoginFailureCounter.mutex.lock()
         try {
             LoginFailureCounter.counts.remove(key)
@@ -605,6 +636,13 @@ public class LoginFailureCounter {
 
     /** 当前桶数（观测 / 单测用）。 */
     public static func size(): Int64 {
+        if (RuntimeStateDb.isConfigured()) {
+            return LoginFailureCounter.dbSize()
+        }
+        return LoginFailureCounter.sizeLocal()
+    }
+
+    private static func sizeLocal(): Int64 {
         LoginFailureCounter.mutex.lock()
         try {
             return LoginFailureCounter.counts.size
@@ -615,6 +653,14 @@ public class LoginFailureCounter {
 
     /** 全量清空（进程内运维级重置 / 单测隔离）。 */
     public static func clear(): Unit {
+        if (RuntimeStateDb.isConfigured()) {
+            LoginFailureCounter.dbClear()
+            return
+        }
+        LoginFailureCounter.clearLocal()
+    }
+
+    private static func clearLocal(): Unit {
         LoginFailureCounter.mutex.lock()
         try {
             let keys = ArrayList<String>()
@@ -628,6 +674,124 @@ public class LoginFailureCounter {
             LoginFailureCounter.lastSweepMillis = 0
         } finally {
             LoginFailureCounter.mutex.unlock()
+        }
+    }
+
+    // ------------------------------------------------------------
+    // DB 路径（多副本共享，落 sys_runtime_login_failures）
+    // ------------------------------------------------------------
+
+    private static func dbGet(key: String): Int64 {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            let st = c.prepareStatement(
+                "SELECT count, last_at FROM sys_runtime_login_failures WHERE fkey = ?"
+            )
+            st.set(0, key)
+            let rows = readRows(st.query())
+            if (rows.isEmpty()) {
+                return 0
+            }
+            let r = rows.at(0)
+            if (Times.nowMillis() - r.i64("last_at") > LoginFailureCounter.TtlMillis) {
+                return 0
+            }
+            return r.i64("count")
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    private static func dbIncrement(key: String, uid: String, ip: String, nowMillis: Int64): Int64 {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            let q = c.prepareStatement(
+                "SELECT count, last_at FROM sys_runtime_login_failures WHERE fkey = ?"
+            )
+            q.set(0, key)
+            let rows = readRows(q.query())
+            match (rows.first()) {
+                case Some(r) =>
+                    let expired = (nowMillis - r.i64("last_at")) > LoginFailureCounter.TtlMillis
+                    let next = if (expired) { 1 } else { r.i64("count") + 1 }
+                    let u = c.prepareStatement(
+                        "UPDATE sys_runtime_login_failures SET count = ?, last_at = ?, uid = ?, ip = ? WHERE fkey = ?"
+                    )
+                    u.set(0, next)
+                    u.set(1, nowMillis)
+                    u.set(2, uid)
+                    u.set(3, ip)
+                    u.set(4, key)
+                    u.update()
+                case None =>
+                    // openGauss 无 ON CONFLICT：INSERT ... SELECT ... WHERE NOT EXISTS 幂等。
+                    let ins = c.prepareStatement(
+                        "INSERT INTO sys_runtime_login_failures (fkey, uid, ip, count, last_at) " +
+                        "SELECT ?, ?, ?, 1, ? WHERE NOT EXISTS " +
+                        "(SELECT 1 FROM sys_runtime_login_failures WHERE fkey = ?)"
+                    )
+                    ins.set(0, key)
+                    ins.set(1, uid)
+                    ins.set(2, ip)
+                    ins.set(3, nowMillis)
+                    ins.set(4, key)
+                    ins.update()
+            }
+            // 回读最终值（并发 INSERT 被 NOT EXISTS 挡下时仍拿到最新计数）。
+            let q2 = c.prepareStatement("SELECT count FROM sys_runtime_login_failures WHERE fkey = ?")
+            q2.set(0, key)
+            let finalRows = readRows(q2.query())
+            if (finalRows.isEmpty()) {
+                return 1
+            }
+            let n = finalRows.at(0).i64("count")
+            return if (n >= LoginFailureCounter.MaxBuckets) { LoginFailureCounter.MaxBuckets } else { n }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    private static func dbReset(key: String): Unit {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            let st = c.prepareStatement("DELETE FROM sys_runtime_login_failures WHERE fkey = ?")
+            st.set(0, key)
+            st.update()
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    private static func dbSize(): Int64 {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            let st = c.prepareStatement("SELECT COUNT(*) AS n FROM sys_runtime_login_failures")
+            let rows = readRows(st.query())
+            if (rows.isEmpty()) {
+                return 0
+            }
+            return rows.at(0).i64("n")
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    private static func dbClear(): Unit {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            c.prepareStatement("DELETE FROM sys_runtime_login_failures").update()
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 

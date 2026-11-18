@@ -65,6 +65,13 @@ describe('i18n · t(key, fallback)', () => {
     expect(mod.t('__vitest_tpl__', '已处理')).toBe('已处理')
   })
 
+  it('正确 key + vars 时 {n} 占位符被替换（档案页统计回归）', () => {
+    mod.setLocale('zh-CN')
+    expect(mod.t('viewsArchiveView.totalCount', `共 ${3} 条`, { n: 3 })).toBe('共 3 条')
+    mod.setLocale('en')
+    expect(mod.t('viewsArchiveView.totalCount', `Total ${7}`, { n: 7 })).toBe('Total 7')
+  })
+
   it('setLocale 切换语言后取值变化', () => {
     mod.setLocale('zh-CN')
     const zh = mod.t('app.name', 'X')

@@ -202,6 +202,64 @@ public class StorageBackends {
         // 配置完整即构造**真实** HTTP 传输层（SigV4 签名 + std.net/stdx.net.tls）。
         // 真正的网络 I/O 发生在首次 put/get 时，而非启动期；连接/签名/响应任一
         // 失败都会抛 AppError 失败关闭，绝不静默回落本地 FS 或明文写入。
+        return StorageBackends.makeBackend(
+            profile.code, root, purpose, cfg, transport: transport)
+    }
+
+    /**
+     * 显式配置构造后端（存储迁移专用）。
+     *
+     * 与 make() 的区别：**不读环境变量**——迁移期的目标配置先存在
+     * deployment.env 的 MIGRATION_* 键里，尚未写回现网 S3_* 键；
+     * 若走 make() 会把「目标」误当作「当前生效」，造成静默丢数据。
+     */
+    public static func makeFrom(
+        providerCode: String,
+        root: String,
+        purpose: String,
+        endpoint: String,
+        bucket: String,
+        region: String,
+        accessKey: String,
+        secretKey: String,
+        pathStyle!: ?Bool = None,
+        transport!: ?S3Transport = None
+    ): StorageBackend {
+        match (StorageProviders.find(providerCode)) {
+            case Some(_) => ()
+            case None => throw validationError("provider", "未知存储平台：${providerCode}")
+        }
+        if (StorageProviders.isLocalCode(providerCode)) {
+            return LocalFileStorage(root)
+        }
+        var style = true
+        match (pathStyle) {
+            case Some(v) => style = v
+            case None =>
+                match (StorageProviders.find(providerCode)) {
+                    case Some(p) => style = p.defaultPathStyle
+                    case None => ()
+                }
+        }
+        let cfg = S3StorageConfig(
+            endpoint, bucket, region, accessKey, secretKey, style, purpose,
+            provider: providerCode)
+        cfg.validate()
+        return StorageBackends.makeBackend(
+            providerCode, root, purpose, cfg, transport: transport)
+    }
+
+    /** 由已校验的 S3 配置构造传输层（唯一装配点，便于测试注入桩）。 */
+    private static func makeBackend(
+        providerCode: String,
+        root: String,
+        purpose: String,
+        cfg: S3StorageConfig,
+        transport!: ?S3Transport = None
+    ): StorageBackend {
+        if (StorageProviders.isLocalCode(providerCode)) {
+            return LocalFileStorage(root)
+        }
         match (transport) {
             case Some(t) => return S3ObjectStorage(cfg, transport: t)
             case None => return S3ObjectStorage(cfg, transport: HttpS3Transport.forConfig(cfg))

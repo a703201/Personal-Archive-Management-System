@@ -286,7 +286,7 @@ function goLogin(): void {
 
         <!-- ② 输入验证码 -->
         <form v-else-if="step === 2" class="auth__form" @submit.prevent="verifyCode">
-          <p v-if="notice" class="fgt-notice">{{ notice }}</p>
+          <p v-if="notice" class="fgt-notice" aria-live="polite">{{ notice }}</p>
           <label class="auth__field">
             <span class="auth__label">{{ t('ForgotPasswordView.83a302', '6 位验证码') }}</span>
             <input
@@ -342,7 +342,7 @@ function goLogin(): void {
 
         <!-- ③ 设置新口令 -->
         <form v-else-if="step === 3" class="auth__form" @submit.prevent="submitReset">
-          <p v-if="notice" class="fgt-notice">{{ notice }}</p>
+          <p v-if="notice" class="fgt-notice" aria-live="polite">{{ notice }}</p>
           <label class="auth__field">
             <span class="auth__label">{{ t('ForgotPasswordView.2a1f04', '新口令') }}</span>
             <input

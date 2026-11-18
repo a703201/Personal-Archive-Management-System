@@ -25,16 +25,21 @@
 //   ④ 合并前校验总字节数 == totalSize，且分片 0..totalChunks-1 齐全。
 //   ⑤ 会话数与单片大小均设硬上限，防内存耗尽；过期会话惰性清理。
 //
-// 【能力边界（如实标注）】
-//   会话是**单实例内存态**：进程重启则续传中断，多副本部署需把会话
-//   迁到共享存储 / DB。与 CaptchaStore 的既有边界一致，不假装已分布式。
+// 【P1-5 多副本支持】
+//   启动时调用 RuntimeStateDb.configure(db) 后，会话与分片字节落
+//   sys_upload_sessions / sys_upload_chunks，多副本可续传同一上传；
+//   未配置时退回原内存实现，单测与本地开发零改动可用。
 // ============================================================
 package ams.app.attachment
 
 import std.collection.*
 import std.sync.*
+import std.database.sql.*
 
+import ams.data.db.*
+import ams.data.repo.*
 import ams.kernel.error.*
+import ams.security.authn.*
 
 /** 完成合并后的产物：路由层据此调用 AttachmentService.upload()。 */
 public class ChunkUploadComplete {
@@ -194,6 +199,11 @@ public class ChunkUploadStore {
         if (n > ChunkUploadStore.MAX_CHUNKS) {
             throw validationError("totalSize", "分片数超过上限")
         }
+        if (RuntimeStateDb.isConfigured()) {
+            return ChunkUploadStore.dbCreate(
+                ownerId, subjectId, itemId, category, title, fileName,
+                summary, keywords, totalSize, n, nowMillis)
+        }
         ChunkUploadStore.mutex.lock()
         try {
             ChunkUploadStore.sweep(nowMillis)
@@ -219,6 +229,9 @@ public class ChunkUploadStore {
     public static func putChunk(
         operatorId: Int64, id: String, index: Int64, data: Array<Byte>, nowMillis: Int64
     ): Int64 {
+        if (RuntimeStateDb.isConfigured()) {
+            return ChunkUploadStore.dbPutChunk(operatorId, id, index, data, nowMillis)
+        }
         ChunkUploadStore.mutex.lock()
         try {
             let s = ChunkUploadStore.sessionOf(operatorId, id, nowMillis)
@@ -261,6 +274,9 @@ public class ChunkUploadStore {
     public static func status(
         operatorId: Int64, id: String, nowMillis: Int64
     ): (Int64, Array<Int64>, Int64, Int64) {
+        if (RuntimeStateDb.isConfigured()) {
+            return ChunkUploadStore.dbStatus(operatorId, id, nowMillis)
+        }
         ChunkUploadStore.mutex.lock()
         try {
             let s = ChunkUploadStore.sessionOf(operatorId, id, nowMillis)
@@ -280,6 +296,9 @@ public class ChunkUploadStore {
     private static func takeSnapshot(
         operatorId: Int64, id: String, nowMillis: Int64
     ): ChunkUploadSnapshot {
+        if (RuntimeStateDb.isConfigured()) {
+            return ChunkUploadStore.takeSnapshotDb(operatorId, id, nowMillis)
+        }
         ChunkUploadStore.mutex.lock()
         try {
             let s = ChunkUploadStore.sessionOf(operatorId, id, nowMillis)
@@ -339,6 +358,9 @@ public class ChunkUploadStore {
 
     /** 取消会话并释放内存。 */
     public static func cancel(operatorId: Int64, id: String, nowMillis: Int64): Bool {
+        if (RuntimeStateDb.isConfigured()) {
+            return ChunkUploadStore.dbCancel(operatorId, id)
+        }
         ChunkUploadStore.mutex.lock()
         try {
             match (ChunkUploadStore.sessions.get(id)) {
@@ -359,6 +381,18 @@ public class ChunkUploadStore {
 
     /** 当前存活会话数（供单测 / 运维观测）。 */
     public static func size(): Int64 {
+        if (RuntimeStateDb.isConfigured()) {
+            let c = RuntimeStateDb.get().connect()
+            try {
+                let st = c.prepareStatement("SELECT COUNT(*) AS n FROM sys_upload_sessions")
+                let rows = readRows(st.query())
+                return if (rows.isEmpty()) { 0 } else { rows.at(0).i64("n") }
+            } catch (e: Exception) {
+                throw toDbError(e)
+            } finally {
+                c.close()
+            }
+        }
         ChunkUploadStore.mutex.lock()
         try {
             return ChunkUploadStore.sessions.size
@@ -369,6 +403,20 @@ public class ChunkUploadStore {
 
     /** 当前缓存分片总字节数（供单测 / 运维观测预算水位）。 */
     public static func buffered(): Int64 {
+        if (RuntimeStateDb.isConfigured()) {
+            let c = RuntimeStateDb.get().connect()
+            try {
+                let st = c.prepareStatement(
+                    "SELECT COALESCE(SUM(LENGTH(data)), 0) AS n FROM sys_upload_chunks"
+                )
+                let rows = readRows(st.query())
+                return if (rows.isEmpty()) { 0 } else { rows.at(0).i64("n") }
+            } catch (e: Exception) {
+                throw toDbError(e)
+            } finally {
+                c.close()
+            }
+        }
         ChunkUploadStore.mutex.lock()
         try {
             return ChunkUploadStore.bufferedBytes
@@ -422,6 +470,267 @@ public class ChunkUploadStore {
             ChunkUploadStore.sessions.remove(k)
         }
         ChunkUploadStore.bufferedBytes = ChunkUploadStore.bufferedBytes - freed
+    }
+
+    // ---------------------------------------------------------
+    // DB 路径（多副本共享，落 sys_upload_sessions / sys_upload_chunks）
+    // ---------------------------------------------------------
+
+    private static func dbCreate(
+        ownerId: Int64, subjectId: Int64, itemId: Option<Int64>, category: Int64,
+        title: String, fileName: String, summary: String, keywords: String,
+        totalSize: Int64, totalChunks: Int64, nowMillis: Int64
+    ): String {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            ChunkUploadStore.sweepDb(c, nowMillis)
+            let cnt = c.prepareStatement("SELECT COUNT(*) AS n FROM sys_upload_sessions")
+            if (readRows(cnt.query()).at(0).i64("n") >= ChunkUploadStore.MAX_SESSIONS) {
+                throw validationError("upload", "并发上传会话过多，请稍后重试")
+            }
+            // 随机后缀保证跨实例唯一（不依赖各进程各自从 0 开始的 seq）。
+            let id = "UP${nowMillis}${RuntimeStateDb.newToken()}"
+            ChunkUploadStore.insertSessionDb(
+                c, id, ownerId, subjectId, itemId, category, title, fileName,
+                summary, keywords, totalSize, totalChunks, nowMillis)
+            return id
+        } catch (e: Exception) {
+            if (e is AppError) {
+                throw e
+            }
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    private static func insertSessionDb(
+        c: Connection, id: String, ownerId: Int64, subjectId: Int64, itemId: Option<Int64>,
+        category: Int64, title: String, fileName: String, summary: String, keywords: String,
+        totalSize: Int64, totalChunks: Int64, nowMillis: Int64
+    ): Unit {
+        match (itemId) {
+            case Some(v) =>
+                let st = c.prepareStatement(
+                    "INSERT INTO sys_upload_sessions " +
+                    "(upload_id, owner_id, subject_id, item_id, category, title, file_name, " +
+                    "summary, keywords, total_size, chunk_size, total_chunks, created_at) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                st.set(0, id)
+                st.set(1, ownerId)
+                st.set(2, subjectId)
+                st.set(3, v)
+                st.set(4, category)
+                st.set(5, title)
+                st.set(6, fileName)
+                st.set(7, summary)
+                st.set(8, keywords)
+                st.set(9, totalSize)
+                st.set(10, ChunkUploadStore.CHUNK_SIZE)
+                st.set(11, totalChunks)
+                st.set(12, nowMillis)
+                st.update()
+            case None =>
+                let st = c.prepareStatement(
+                    "INSERT INTO sys_upload_sessions " +
+                    "(upload_id, owner_id, subject_id, item_id, category, title, file_name, " +
+                    "summary, keywords, total_size, chunk_size, total_chunks, created_at) " +
+                    "VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                st.set(0, id)
+                st.set(1, ownerId)
+                st.set(2, subjectId)
+                st.set(3, category)
+                st.set(4, title)
+                st.set(5, fileName)
+                st.set(6, summary)
+                st.set(7, keywords)
+                st.set(8, totalSize)
+                st.set(9, ChunkUploadStore.CHUNK_SIZE)
+                st.set(10, totalChunks)
+                st.set(11, nowMillis)
+                st.update()
+        }
+    }
+
+    /** 取会话并校验归属与过期；不命中一律按 notFound（不泄漏会话是否存在）。 */
+    private static func loadSessionDb(
+        c: Connection, operatorId: Int64, id: String, nowMillis: Int64
+    ): ChunkUploadSession {
+        let st = c.prepareStatement(
+            "SELECT upload_id, owner_id, subject_id, item_id, category, title, file_name, " +
+            "summary, keywords, total_size, chunk_size, total_chunks, created_at " +
+            "FROM sys_upload_sessions WHERE upload_id = ?"
+        )
+        st.set(0, id)
+        let rows = readRows(st.query())
+        if (rows.isEmpty()) {
+            throw notFound("上传会话")
+        }
+        let r = rows.at(0)
+        let owner = r.i64("owner_id")
+        if (owner != operatorId) {
+            throw notFound("上传会话")
+        }
+        if (nowMillis - r.i64("created_at") > ChunkUploadStore.TTL_MS) {
+            ChunkUploadStore.deleteSessionCascade(c, id)
+            throw notFound("上传会话")
+        }
+        var itemIdOpt: Option<Int64> = None
+        match (r.getOpt("item_id")) {
+            case Some(v) => itemIdOpt = Some(RowData.toI64(v))
+            case None => ()
+        }
+        return ChunkUploadSession(
+            r.str("upload_id"), owner, r.i64("subject_id"), itemIdOpt,
+            r.i64("category"), r.str("title"), r.str("file_name"),
+            r.str("summary"), r.str("keywords"), r.i64("total_size"),
+            r.i64("chunk_size"), r.i64("total_chunks"), r.i64("created_at")
+        )
+    }
+
+    /** 级联删除会话及其分片（调用方负责事务）。 */
+    private static func deleteSessionCascade(c: Connection, id: String): Unit {
+        let d1 = c.prepareStatement("DELETE FROM sys_upload_chunks WHERE upload_id = ?")
+        d1.set(0, id)
+        d1.update()
+        let d2 = c.prepareStatement("DELETE FROM sys_upload_sessions WHERE upload_id = ?")
+        d2.set(0, id)
+        d2.update()
+    }
+
+    /** 惰性清理过期会话（连同分片），避免预算被僵尸会话永久占用。 */
+    private static func sweepDb(c: Connection, nowMillis: Int64): Unit {
+        let cutoff = nowMillis - ChunkUploadStore.TTL_MS
+        let d1 = c.prepareStatement(
+            "DELETE FROM sys_upload_chunks WHERE upload_id IN " +
+            "(SELECT upload_id FROM sys_upload_sessions WHERE created_at < ?)"
+        )
+        d1.set(0, cutoff)
+        d1.update()
+        let d2 = c.prepareStatement("DELETE FROM sys_upload_sessions WHERE created_at < ?")
+        d2.set(0, cutoff)
+        d2.update()
+    }
+
+    private static func dbPutChunk(
+        operatorId: Int64, id: String, index: Int64, data: Array<Byte>, nowMillis: Int64
+    ): Int64 {
+        return RuntimeStateDb.get().withTransaction { c: Connection =>
+            let s = ChunkUploadStore.loadSessionDb(c, operatorId, id, nowMillis)
+            if (index < 0 || index >= s.totalChunks) {
+                throw validationError("index", "分片序号越界")
+            }
+            if (data.size <= 0 || data.size > s.chunkSize) {
+                throw validationError("chunk", "分片大小非法")
+            }
+            let expected = if (index == s.totalChunks - 1) {
+                s.totalSize - s.chunkSize * (s.totalChunks - 1)
+            } else {
+                s.chunkSize
+            }
+            if (data.size != expected) {
+                throw validationError("chunk", "分片长度与预期不符（请检查分片顺序与大小）")
+            }
+            // 重传同一 index 幂等覆盖（先删后插，主键无冲突）。
+            let d = c.prepareStatement(
+                "DELETE FROM sys_upload_chunks WHERE upload_id = ? AND chunk_index = ?"
+            )
+            d.set(0, id)
+            d.set(1, index)
+            d.update()
+            let ins = c.prepareStatement(
+                "INSERT INTO sys_upload_chunks (upload_id, chunk_index, data) VALUES (?, ?, ?)"
+            )
+            ins.set(0, id)
+            ins.set(1, index)
+            ins.set<Array<Byte>>(2, data)
+            ins.update()
+            let q = c.prepareStatement(
+                "SELECT COUNT(*) AS n FROM sys_upload_chunks WHERE upload_id = ?"
+            )
+            q.set(0, id)
+            readRows(q.query()).at(0).i64("n")
+        }
+    }
+
+    private static func dbStatus(
+        operatorId: Int64, id: String, nowMillis: Int64
+    ): (Int64, Array<Int64>, Int64, Int64) {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            let s = ChunkUploadStore.loadSessionDb(c, operatorId, id, nowMillis)
+            let st = c.prepareStatement(
+                "SELECT chunk_index FROM sys_upload_chunks WHERE upload_id = ? ORDER BY chunk_index"
+            )
+            st.set(0, id)
+            let rows = readRows(st.query())
+            let arr = ArrayList<Int64>()
+            for (r in rows.all().iterator()) {
+                arr.add(r.i64("chunk_index"))
+            }
+            return (s.totalChunks, ChunkUploadStore.sortAsc(arr.toArray()), s.totalSize, s.chunkSize)
+        } catch (e: Exception) {
+            if (e is AppError) {
+                throw e
+            }
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    private static func takeSnapshotDb(
+        operatorId: Int64, id: String, nowMillis: Int64
+    ): ChunkUploadSnapshot {
+        // 读校验 + 摘除会话 + 删分片在同一事务内完成，多副本不会重复合并。
+        return RuntimeStateDb.get().withTransaction { c: Connection =>
+            let s = ChunkUploadStore.loadSessionDb(c, operatorId, id, nowMillis)
+            let q = c.prepareStatement(
+                "SELECT COUNT(*) AS n FROM sys_upload_chunks WHERE upload_id = ?"
+            )
+            q.set(0, id)
+            let received = readRows(q.query()).at(0).i64("n")
+            if (received != s.totalChunks) {
+                throw validationError("upload", "分片未收齐（缺 ${s.totalChunks - received} 片）")
+            }
+            let st = c.prepareStatement(
+                "SELECT chunk_index, data FROM sys_upload_chunks " +
+                "WHERE upload_id = ? ORDER BY chunk_index"
+            )
+            st.set(0, id)
+            let rs = st.query()
+            let parts = ArrayList<Array<Byte>>()
+            var held: Int64 = 0
+            while (rs.next()) {
+                // 按序读取：主键 (upload_id, chunk_index) + 行数已校验，故索引必连续齐全。
+                let part = rs.get<Array<Byte>>(1)
+                parts.add(part)
+                held = held + part.size
+            }
+            if (held != s.totalSize) {
+                throw validationError("upload", "合并后大小与声明不一致")
+            }
+            ChunkUploadStore.deleteSessionCascade(c, id)
+            ChunkUploadSnapshot(s, parts.toArray())
+        }
+    }
+
+    private static func dbCancel(operatorId: Int64, id: String): Bool {
+        return RuntimeStateDb.get().withTransaction { c: Connection =>
+            let st = c.prepareStatement("SELECT owner_id FROM sys_upload_sessions WHERE upload_id = ?")
+            st.set(0, id)
+            let rows = readRows(st.query())
+            if (rows.isEmpty()) {
+                return false
+            }
+            if (rows.at(0).i64("owner_id") != operatorId) {
+                throw notFound("上传会话")
+            }
+            ChunkUploadStore.deleteSessionCascade(c, id)
+            true
+        }
     }
 
     /** 简单插入排序（分片数 <= 64，无需引入排序依赖）。 */

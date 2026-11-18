@@ -21,7 +21,7 @@ import { api } from '../api/client'
 import { formatTime as fmtTime } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
 
-const props = defineProps<{ itemId: number }>()
+const props = defineProps<{ itemId: string }>()
 
 const { success, error: toastError } = useToast()
 

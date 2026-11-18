@@ -6,8 +6,8 @@
  *
  * 断点续传：会话 ID 存 sessionStorage，键由 文件名 + 大小 + 修改时间
  * 组成。页面刷新 / 网络中断后重新选同一个文件，会先查已收分片并跳过，
- * 不会重头再传。会话是服务端单实例内存态（TTL 24h），服务端重启后
- * status 查询失败会自动开新会话重传。
+ * 不会重头再传。会话已落共享 DB（多副本可用，TTL 24h）；status 查询失败
+ * （过期 / 会话不存在）时会自动开新会话重传。
  */
 import { api, getToken, ApiError } from './client'
 import { t } from '../i18n'
@@ -16,8 +16,9 @@ import { t } from '../i18n'
 export const CHUNK_THRESHOLD = 1024 * 1024
 
 export interface ChunkedUploadMeta {
-  itemId?: number
-  subjectId?: number
+  // 雪花 ID 超过 2^53，必须用 string 传递，Number() 会精度丢失
+  itemId?: string
+  subjectId?: string
   fileName: string
   title: string
   category?: number
@@ -55,6 +56,25 @@ function resumeKey(file: File): string {
   return `ams.upload.${file.name}.${file.size}.${file.lastModified}`
 }
 
+/**
+ * raw fetch 没有 api() 的超时保护：后端卡住时 putChunk 会永远 pending，
+ * 上层新建表单的「保存中…」也就永远不会结束（用户实测）。这里显式加超时。
+ */
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = 60000): Promise<Response> {
+  const ctrl = new AbortController()
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: ctrl.signal })
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') {
+      throw new ApiError(0, 'TIMEOUT', t('ApiError.timeout', '请求超时，请检查网络后重试'))
+    }
+    throw e
+  } finally {
+    window.clearTimeout(timer)
+  }
+}
+
 async function readError(res: Response): Promise<string> {
   const j = (await res.json().catch(() => ({}))) as { message?: string }
   return j.message || t('api.chunkedUploadFailed', `上传失败（${res.status}）`, { status: res.status })
@@ -75,7 +95,7 @@ function isRecoverable(e: unknown): boolean {
 }
 
 async function putChunk(uploadId: string, index: number, blob: Blob): Promise<void> {
-  const res = await fetch(
+  const res = await fetchWithTimeout(
     `/api/attachments/upload/sessions/${encodeURIComponent(uploadId)}/chunks/${index}`,
     {
       method: 'PUT',
@@ -123,7 +143,7 @@ export async function uploadChunked(
           fileName: meta.fileName,
           title: meta.title,
           subjectId: meta.subjectId ?? 0,
-          itemId: meta.itemId ?? 0,
+          itemId: meta.itemId ?? '0',
           category: meta.category ?? 10,
           totalSize: file.size,
           summary: meta.summary ?? '',
@@ -149,7 +169,8 @@ export async function uploadChunked(
 
     const done = await api<CompleteResp>(
       `/attachments/upload/sessions/${encodeURIComponent(uploadId)}/complete`,
-      { method: 'POST', timeoutMs: 0 },
+      // 合并 + 加密 + 落存储较慢，但仍必须有上限：超时后可重试/续传
+      { method: 'POST', timeoutMs: 120000 },
     )
     sessionStorage.removeItem(key)
     return done

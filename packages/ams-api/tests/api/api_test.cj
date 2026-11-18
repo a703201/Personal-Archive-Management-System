@@ -259,6 +259,35 @@ public func testAuthMiddlewareMissingToken(): Unit {
 }
 
 /**
+ * 刷新令牌重放：旧令牌再次使用时必须上报 reuseDetected 并吊销全部会话。
+ */
+@Test
+public func testRefreshTokenReplayRevokesSessions(): Unit {
+    let ts = TokenService(StdxCryptoProvider(),
+        TokenConfig(secret: Array<Byte>(32, repeat: 0u8)), MemorySessionStore())
+    let oldRefresh = match (ts.issue("u1", [], [], "127.0.0.1", "ua")) {
+        case CryptoResult.Ok((_, r, _)) => r
+        case CryptoResult.Err(_) => @Assert(false); return
+    }
+    let newRefresh = match (ts.refresh(oldRefresh)) {
+        case CryptoResult.Ok((_, r, reuse)) =>
+            @Assert(!reuse)
+            r
+        case CryptoResult.Err(_) => @Assert(false); return
+    }
+    // 旧令牌重放 → 上报重放（上层据此吊销全部会话并记安全日志）
+    match (ts.refresh(oldRefresh)) {
+        case CryptoResult.Ok((_, _, reuse)) => @Assert(reuse)
+        case CryptoResult.Err(_) => @Assert(false)
+    }
+    // 吊销后连新令牌也不可用
+    match (ts.refresh(newRefresh)) {
+        case CryptoResult.Ok(_) => @Assert(false)
+        case CryptoResult.Err(_) => ()
+    }
+}
+
+/**
  * 服务器：未匹配路径返回 404 JSON。
  */
 @Test
@@ -282,8 +311,8 @@ public func testServerMethodNotAllowed(): Unit {
     let srv = ApiServer("127.0.0.1", 18080, r)
     let req = makeReq("POST", "/api/health")
     let resp = srv.handleRequest(req)
-    @Assert(resp.status == 400)
-    @Assert(resp.body.contains("VALIDATION_FAILED"))
+    @Assert(resp.status == 405)
+    @Assert(resp.body.contains("METHOD_NOT_ALLOWED"))
 }
 
 /**

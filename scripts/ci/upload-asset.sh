@@ -30,8 +30,18 @@ asset_exists() {
   list="$(curl -sS --ssl-no-revoke -H "Authorization: Bearer ${TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     "https://api.github.com/repos/${REPO}/releases/${REL_ID}/assets" 2>/dev/null)"
-  # 资产名为 ASCII，JSON 形如 "name": "xxx"，简单匹配即可
-  printf '%s' "$list" | grep -q "\"name\":\"${name}\""
+  # GitHub 返回的 JSON 带空格（形如 "name": "xxx"），grep 字面量
+  # "\"name\":\"...\"" 会漏判 → 重跑时重复上传触发 422。改用 python json 解析。
+  printf '%s' "$list" | python3 -c '
+import json, sys
+try:
+    assets = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if not isinstance(assets, list):
+    sys.exit(1)
+sys.exit(0 if any(isinstance(a, dict) and a.get("name") == sys.argv[1] for a in assets) else 1)
+' "$name"
 }
 
 # 统一上传一个资产：file 本地路径，name 资产名，required=1 缺失/失败即退出，=0 缺失则跳过

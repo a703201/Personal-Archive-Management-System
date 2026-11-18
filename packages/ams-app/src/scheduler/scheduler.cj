@@ -20,15 +20,20 @@
 //
 // 【为什么要「间隔闸门」】
 //   cron 配置错误（每分钟跑）或运维重复点，都不应造成重复推送/重复清理。
-//   闸门以内存记账；进程重启归零，故首次触发一定会执行。
+// P1-5：闸门改为 DB 租约（sys_scheduler_leases），多副本靠
+//   UPDATE ... WHERE leased_until < now 原子争抢，保证同一时刻只有一个实例执行；
+//   失败/崩溃靠租约超时自动恢复。未配置 RuntimeStateDb 时退回内存记账。
 // ============================================================
 package ams.app.scheduler
 
 import std.collection.*
+import std.database.sql.*
 
 import ams.app.notification.*
+import ams.data.db.*
 import ams.data.repo.*
 import ams.kernel.log.*
+import ams.security.authn.*
 
 /**
  * 周期任务调度器。
@@ -47,8 +52,10 @@ public class Scheduler {
     private let userRepo: UserRepo
     private let configRepo: ConfigRepo
     private let mailer: Mailer
-    /** 任务名 → 上次成功执行的时刻（内存记账，重启归零） */
+    /** 任务名 → 上次成功执行的时刻（内存回退路径使用） */
     private let lastRun: HashMap<String, Int64>
+    /** 本实例的租约持有者标识（惰性生成，避免静态初始化期调用密码学）。 */
+    private static var leaseOwner: String = ""
 
     public init(
         itemRepo: ItemRepo,
@@ -136,6 +143,9 @@ public class Scheduler {
      * 取任务上次执行时刻（毫秒，未执行返回 0）。
      */
     public func lastRunOf(name: String): Int64 {
+        if (RuntimeStateDb.isConfigured()) {
+            return Scheduler.lastRunOfDb(name)
+        }
         match (this.lastRun.get(name)) {
             case Some(t) => return t
             case None => return 0
@@ -150,25 +160,25 @@ public class Scheduler {
     public func runNow(name: String, now: Int64): Int64 {
         if (name == "expiry.reminder") {
             let n = this.expiryReminder(now)
-            this.lastRun[name] = now
+            this.recordRun(name, now)
             Log.get().info("task.run.now", None, [("job", name), ("pushed", "${n}")])
             return n
         }
         if (name == "recycle.purge") {
             let n = this.recyclePurge(now)
-            this.lastRun[name] = now
+            this.recordRun(name, now)
             Log.get().info("task.run.now", None, [("job", name), ("purged", "${n}")])
             return n
         }
         if (name == "audit.alert") {
             let n = this.auditAlert(now)
-            this.lastRun[name] = now
+            this.recordRun(name, now)
             Log.get().info("task.run.now", None, [("job", name), ("alerts", "${n}")])
             return n
         }
         if (name == "audit.retention") {
             let n = this.auditRetention(now)
-            this.lastRun[name] = now
+            this.recordRun(name, now)
             Log.get().info("task.run.now", None, [("job", name), ("archived", "${n}")])
             return n
         }
@@ -269,10 +279,9 @@ public class Scheduler {
      * @return 实际推送的「管理员×风险」条数（0 = 无风险）
      */
     public func auditAlert(now: Int64): Int64 {
-        let fromMillis = match (this.lastRun.get("audit.alert")) {
-            case Some(t) => if (t > 0) { t } else { now - 7 * Scheduler.INTERVAL_DAY }
-            case None => now - 7 * Scheduler.INTERVAL_DAY
-        }
+        // P1-5：扫描窗口起点也走 DB（多副本下各实例看到同一 last_run_at）。
+        let lastAlert = this.lastRunOf("audit.alert")
+        let fromMillis = if (lastAlert > 0) { lastAlert } else { now - 7 * Scheduler.INTERVAL_DAY }
         let risks = this.auditRepo.scanHighRisk(fromMillis)
         if (risks.isEmpty()) {
             return 0
@@ -316,15 +325,130 @@ public class Scheduler {
      * 间隔闸门：判断某任务此刻是否该跑；该跑则登记本次时刻。
      */
     private func due(name: String, intervalMillis: Int64, now: Int64): Bool {
+        if (RuntimeStateDb.isConfigured()) {
+            return Scheduler.leaseDue(name, intervalMillis, now)
+        }
         var last: Int64 = 0
         match (this.lastRun.get(name)) {
             case Some(v) => last = v
             case None => last = 0
         }
         if (last == 0 || now - last >= intervalMillis) {
-            this.lastRun[name] = now
+            this.recordRun(name, now)
             return true
         }
         return false
+    }
+
+    /** 登记一次执行（runNow 与内存路径共用）。 */
+    private func recordRun(name: String, now: Int64): Unit {
+        if (RuntimeStateDb.isConfigured()) {
+            Scheduler.markRunDb(name, now)
+            return
+        }
+        this.lastRun[name] = now
+    }
+
+    // ------------------------------------------------------------
+    // DB 租约（多副本互斥）
+    // ------------------------------------------------------------
+
+    private static func ownerId(): String {
+        if (Scheduler.leaseOwner.isEmpty()) {
+            Scheduler.leaseOwner = RuntimeStateDb.newToken()
+        }
+        return Scheduler.leaseOwner
+    }
+
+    /**
+     * 原子争抢租约：只有 leased_until < now 的实例才能拿到；
+     * 拿到后把租约延长一个间隔并写入 last_run_at。
+     * 首次（无行）用 INSERT ... WHERE NOT EXISTS 保证只有一个实例成功。
+     */
+    private static func leaseDue(name: String, intervalMillis: Int64, now: Int64): Bool {
+        return RuntimeStateDb.get().withTransaction { c: Connection =>
+            let until = now + intervalMillis
+            let grab = c.prepareStatement(
+                "UPDATE sys_scheduler_leases SET leased_until = ?, owner_id = ? " +
+                "WHERE task_key = ? AND leased_until < ?"
+            )
+            grab.set(0, until)
+            grab.set(1, Scheduler.ownerId())
+            grab.set(2, name)
+            grab.set(3, now)
+            if (grab.update().rowCount > 0) {
+                let u = c.prepareStatement(
+                    "UPDATE sys_scheduler_leases SET last_run_at = ? WHERE task_key = ?"
+                )
+                u.set(0, now)
+                u.set(1, name)
+                u.update()
+                return true
+            }
+            let q = c.prepareStatement("SELECT 1 FROM sys_scheduler_leases WHERE task_key = ?")
+            q.set(0, name)
+            if (!readRows(q.query()).isEmpty()) {
+                return false
+            }
+            let ins = c.prepareStatement(
+                "INSERT INTO sys_scheduler_leases (task_key, leased_until, owner_id, last_run_at) " +
+                "SELECT ?, ?, ?, ? WHERE NOT EXISTS " +
+                "(SELECT 1 FROM sys_scheduler_leases WHERE task_key = ?)"
+            )
+            ins.set(0, name)
+            ins.set(1, until)
+            ins.set(2, Scheduler.ownerId())
+            ins.set(3, now)
+            ins.set(4, name)
+            return ins.update().rowCount > 0
+        }
+    }
+
+    /** runNow 登记：更新 last_run_at；行不存在则插一行（leased_until=0 不挡后续闸门）。 */
+    private static func markRunDb(name: String, now: Int64): Unit {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            let u = c.prepareStatement(
+                "UPDATE sys_scheduler_leases SET last_run_at = ?, owner_id = ? WHERE task_key = ?"
+            )
+            u.set(0, now)
+            u.set(1, Scheduler.ownerId())
+            u.set(2, name)
+            if (u.update().rowCount == 0) {
+                let ins = c.prepareStatement(
+                    "INSERT INTO sys_scheduler_leases (task_key, leased_until, owner_id, last_run_at) " +
+                    "SELECT ?, 0, ?, ? WHERE NOT EXISTS " +
+                    "(SELECT 1 FROM sys_scheduler_leases WHERE task_key = ?)"
+                )
+                ins.set(0, name)
+                ins.set(1, Scheduler.ownerId())
+                ins.set(2, now)
+                ins.set(3, name)
+                ins.update()
+            }
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    private static func lastRunOfDb(name: String): Int64 {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            let st = c.prepareStatement(
+                "SELECT last_run_at FROM sys_scheduler_leases WHERE task_key = ?"
+            )
+            st.set(0, name)
+            let rows = readRows(st.query())
+            if (rows.isEmpty()) {
+                return 0
+            }
+            return rows.at(0).i64("last_run_at")
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
     }
 }

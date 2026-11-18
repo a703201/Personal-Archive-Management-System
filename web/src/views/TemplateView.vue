@@ -228,7 +228,7 @@ async function apply(): Promise<void> {
       {
         method: 'POST',
         body: {
-          subjectId: Number(applyForm.value.subjectId),
+          subjectId: String(applyForm.value.subjectId),
           count: Math.min(50, Math.max(1, Number(applyForm.value.count) || 1)),
         },
       },
@@ -445,7 +445,8 @@ onMounted(load)
             max="50"
           />
           <span class="field__hint">
-            超过 1 条时，标题会按序号展开（使用 {n} 占位，或自动追加序号）
+            <!-- 传入 vars（值即字面量 {n}）是为了让 t() 返回译文而非回退到中文 fallback -->
+            {{ tr('TemplateView.4a9c27', '超过 1 条时，标题会按序号展开（使用 {n} 占位，或自动追加序号）', { n: '{n}' }) }}
           </span>
         </label>
       </div>

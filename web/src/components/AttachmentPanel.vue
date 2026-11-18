@@ -72,7 +72,7 @@ interface Diff {
   fields: DiffField[]
 }
 
-const props = defineProps<{ itemId: number }>()
+const props = defineProps<{ itemId: string }>()
 
 const list = ref<Att[]>([])
 const loading = ref(false)
@@ -222,7 +222,7 @@ async function upload(ev: Event): Promise<void> {
       await uploadChunked(
         file,
         {
-          itemId: Number(props.itemId),
+          itemId: props.itemId,
           fileName: file.name,
           title: file.name.replace(/\.[^.]+$/, ''),
           category: 10,
@@ -554,7 +554,7 @@ onMounted(load)
               <span v-if="a.versionCount > 1" class="att-item__badge">v{{ a.versionCount }}</span>
             </div>
             <div class="att-item__sub">
-              {{ fmtSize(a.fileSize) }} · 下载 {{ a.downloadCount }} 次
+              {{ fmtSize(a.fileSize) }} · {{ tr('AttachmentPanel.7b2e91', '下载 {n} 次', { n: a.downloadCount }) }}
             </div>
             <div v-if="a.summary || a.keywords || a.ocrText" class="att-item__meta">
               <span v-if="a.summary" class="att-item__metaline">{{ tr('AttachmentPanel.79a6bb', '摘要：') }}{{ a.summary }}</span>
@@ -571,7 +571,7 @@ onMounted(load)
       </ul>
     </template>
 
-    <p v-if="notice" class="notice">{{ notice }}</p>
+    <p v-if="notice" class="notice" aria-live="polite">{{ notice }}</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
     <!-- 预览（水印覆盖） -->
@@ -610,7 +610,7 @@ onMounted(load)
               </div>
             </div>
             <button v-if="!v.isCurrent" class="btn-text" type="button" @click="makeCurrent(v)">
-              设为当前
+              {{ tr('AttachmentPanel.3a5d2f', '设为当前') }}
             </button>
           </li>
         </ul>
@@ -622,13 +622,13 @@ onMounted(load)
             :placeholder="tr('AttachmentPanel.4d7ded', '变更说明（可选）')"
           />
           <button class="btn-ghost" type="button" :disabled="busy" @click="verFileInput?.click()">
-            上传新版本
+            {{ tr('AttachmentPanel.9c4a18', '上传新版本') }}
           </button>
           <input ref="verFileInput" class="hidden" type="file" @change="uploadVersion" />
         </div>
         <div class="cmp">
           <label>
-            对比
+            {{ tr('AttachmentPanel.5e7b30', '对比') }}
             <select v-model.number="cmpFrom">
               <option v-for="v in verList" :key="v.id" :value="v.id">v{{ v.versionNo }}</option>
             </select>
@@ -684,10 +684,10 @@ onMounted(load)
         </div>
         <div class="cmp">
           <button class="btn-ghost" type="button" :disabled="busy" @click="applyTags('add')">
-            添加标签
+            {{ tr('AttachmentPanel.2d8f64', '添加标签') }}
           </button>
           <button class="btn-ghost" type="button" :disabled="busy" @click="applyTags('remove')">
-            移除标签
+            {{ tr('AttachmentPanel.6f1c4a', '移除标签') }}
           </button>
         </div>
       </div>

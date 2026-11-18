@@ -75,6 +75,8 @@ public class AttachmentService {
     private let userRepo: ?UserRepo
     /** Q2 多厂商：落库时自述平台 code（默认 local，零回归） */
     private let storageProvider: String
+    /** 存储迁移期双写目标（默认 None = 零回归） */
+    private let dualWrite: ?StorageDualWrite
 
     public init(
         repo: AttachmentRepo,
@@ -84,7 +86,8 @@ public class AttachmentService {
         cipherProvider: CryptoProvider,
         itemRepo!: ?ItemRepo = None,
         userRepo!: ?UserRepo = None,
-        storageProvider!: String = "local"
+        storageProvider!: String = "local",
+        dualWrite!: ?StorageDualWrite = None
     ) {
         this.repo = repo
         this.storage = storage
@@ -94,6 +97,16 @@ public class AttachmentService {
         this.itemRepo = itemRepo
         this.userRepo = userRepo
         this.storageProvider = storageProvider
+        this.dualWrite = dualWrite
+    }
+
+    /** 主后端写入 + 迁移期镜像（密文字节，不解密）。 */
+    private func putBoth(key: String, data: Array<Byte>): Unit {
+        this.storage.put(key, data)
+        match (this.dualWrite) {
+            case Some(d) => d.mirror(key, data)
+            case None => ()
+        }
     }
 
     /**
@@ -210,7 +223,7 @@ public class AttachmentService {
         let id = Ids.next()
         let storageKey = "att_${id}_v1.bin"
         if (clean) {
-            this.storage.put(storageKey, encrypted)
+            this.putBoth(storageKey, encrypted)
         } else {
             this.quarantine.put(storageKey, encrypted)
             Log.get().warn("attachment.quarantined", None, [
@@ -219,14 +232,27 @@ public class AttachmentService {
         }
 
         // ---- 7. 落库 ----
-        let attId = this.repo.create(
-            owner, itemId, category, title, storageKey,
-            kv.version, plain.size, ext, mime, fp, dkey,
-            status.toCode(), operatorId, summary: summary, keywords: keywords,
-            // Q2 方案 A：落库记录真实后端与厂商，供后续按后端路由读取 / 迁移
-            storageBackend: this.storage.backendCode(),
-            storageProvider: this.storageProvider
-        )
+        // 唯一索引 uk_arc_attachments_subject_dedup 并发兜底：
+        // 若两个请求同时通过「先查后插」窗口，败者捕获唯一冲突后回查并复用胜者行。
+        var attId: Int64 = 0
+        try {
+            attId = this.repo.create(
+                owner, itemId, category, title, storageKey,
+                kv.version, plain.size, ext, mime, fp, dkey,
+                status.toCode(), operatorId, summary: summary, keywords: keywords,
+                // Q2 方案 A：落库记录真实后端与厂商，供后续按后端路由读取 / 迁移
+                storageBackend: this.storage.backendCode(),
+                storageProvider: this.storageProvider
+            )
+        } catch (e: Exception) {
+            if (dedup) {
+                match (this.repo.findByDedupKey(owner, dkey)) {
+                    case Some(existing) => return UploadResult(existing.id, true, existing.status)
+                    case None => ()
+                }
+            }
+            throw e
+        }
         this.repo.setWrappedDek(attId, AttachmentService.encodeWrapped(wrapped))
 
         // ---- 7b. 同步条目附件计数（FR-SRC-003 排序依赖）----
@@ -247,11 +273,11 @@ public class AttachmentService {
             case None => ()
         }
 
-        let versionId = this.repo.addVersion(
+        // 版本行 + 主记录指针在同一事务内落库，避免中断导致指针悬空
+        let versionId = this.repo.addInitialVersionAtomically(
             attId, 1, storageKey, encrypted.size, ext, mime, fp,
             status.toCode(), "初始版本", operatorId
         )
-        this.repo.setCurrentVersionId(attId, versionId, 1)
 
         // ---- 8. 拍摄时间（FR-ATT-006，启发式 EXIF）----
         match (AttachmentService.captureTimeOf(plain, ext)) {
@@ -315,10 +341,10 @@ public class AttachmentService {
             let plain = this.download(attachmentId)
             let result = MediaEngine.process(plain, true, true, true, watermarkText)
             if (result.thumbnail.size > 0) {
-                this.storage.put("thumb_${attachmentId}.png", result.thumbnail)
+                this.putBoth("thumb_${attachmentId}.png", result.thumbnail)
             }
             if (result.watermarked.size > 0) {
-                this.storage.put("wm_${attachmentId}.png", result.watermarked)
+                this.putBoth("wm_${attachmentId}.png", result.watermarked)
             }
             try {
                 this.repo.updateOcr(attachmentId, result.ocrText, result.ocrStatus,
@@ -468,20 +494,17 @@ public class AttachmentService {
         let versionNo = rec.versionCount + 1
         let storageKey = "att_${attachmentId}_v${versionNo}.bin"
         if (clean) {
-            this.storage.put(storageKey, encrypted)
+            this.putBoth(storageKey, encrypted)
         } else {
             this.quarantine.put(storageKey, encrypted)
         }
         let note = if (changeNote.isEmpty()) { "第 ${versionNo} 版" } else { changeNote }
-        let versionId = this.repo.addVersion(
+        // 新增版本 → 翻转 is_current → 更新主记录指针/计数：同一事务内完成，
+        // 任一步失败整体回滚，避免下载指向不存在的版本对象。
+        let versionId = this.repo.addVersionAndActivateAtomically(
             attachmentId, versionNo, storageKey, encrypted.size, ext, mime, fp,
             status.toCode(), note, operatorId
         )
-        // 两件事都要做：
-        //   ① setCurrentVersion 翻转版本行的 is_current（下载按它取对象）
-        //   ② setCurrentVersionId 更新主记录的 current_version_id 与 version_count
-        this.repo.setCurrentVersion(attachmentId, versionId)
-        this.repo.setCurrentVersionId(attachmentId, versionId, versionNo)
         return versionId
     }
 

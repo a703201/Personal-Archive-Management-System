@@ -104,6 +104,7 @@ fi
 
 TOTAL_PASS=0
 TOTAL_FAIL=0
+TOTAL_SKIP=0
 FAILED_PKGS=()
 
 echo "============================================================"
@@ -204,23 +205,43 @@ for pkg in "${PKGS[@]}"; do
         PASSED=$(echo "$CLEAN" | grep -oE "PASSED:[[:space:]]*[0-9]+" | head -1 | grep -oE "[0-9]+")
         FAILED=$(echo "$CLEAN" | grep -oE "FAILED:[[:space:]]*[0-9]+" | head -1 | grep -oE "[0-9]+")
         ERRORS=$(echo "$CLEAN" | grep -oE "ERROR:[[:space:]]*[0-9]+" | head -1 | grep -oE "[0-9]+")
-        PASSED=${PASSED:-0}; FAILED=${FAILED:-0}; ERRORS=${ERRORS:-0}
+        # SKIPPED 单列统计：跳过不是通过，绝不能并入 TOTAL_PASS
+        SKIPPED=$(echo "$CLEAN" | grep -oE "SKIPPED:[[:space:]]*[0-9]+" | head -1 | grep -oE "[0-9]+")
+        PASSED=${PASSED:-0}; FAILED=${FAILED:-0}; ERRORS=${ERRORS:-0}; SKIPPED=${SKIPPED:-0}
+
+        # 【防静默漏测】与 Windows 版一致：exe 存在却解析出 PASSED/FAILED/ERROR
+        # 全 0，说明测试框架输出丢失（输出缓冲/IO 抖动），此时绝不判 PASS，
+        # 否则该包用例会被静默跳过、总计数偏小却报全绿。
+        if [ "$PASSED" -eq 0 ] && [ "$FAILED" -eq 0 ] && [ "$ERRORS" -eq 0 ]; then
+            echo "  [FAIL]   ${sub}  测试框架无有效输出（PASSED/FAILED/ERROR 全 0，SKIPPED=${SKIPPED}），拒绝判 PASS"
+            echo "$CLEAN" | tail -5 | sed 's/^/           /'
+            TOTAL_FAIL=$((TOTAL_FAIL + 1))
+            TOTAL_SKIP=$((TOTAL_SKIP + SKIPPED))
+            FAILED_PKGS+=("${pkg}/${sub}")
+            continue
+        fi
 
         if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then
-            echo "  [FAIL]   ${sub}  通过 ${PASSED} / 失败 ${FAILED} / 错误 ${ERRORS}"
+            echo "  [FAIL]   ${sub}  通过 ${PASSED} / 失败 ${FAILED} / 错误 ${ERRORS} / 跳过 ${SKIPPED}"
             echo "$CLEAN" | grep -E "FAILED|ERROR" | head -8 | sed 's/^/           /'
             TOTAL_FAIL=$((TOTAL_FAIL + FAILED + ERRORS))
+            TOTAL_SKIP=$((TOTAL_SKIP + SKIPPED))
             FAILED_PKGS+=("${pkg}/${sub}")
         else
-            echo "  [PASS]   ${sub}  ${PASSED} 个用例"
+            if [ "$SKIPPED" -gt 0 ]; then
+                echo "  [PASS]   ${sub}  ${PASSED} 个用例，跳过 ${SKIPPED} 个（不计入通过）"
+            else
+                echo "  [PASS]   ${sub}  ${PASSED} 个用例"
+            fi
             TOTAL_PASS=$((TOTAL_PASS + PASSED))
+            TOTAL_SKIP=$((TOTAL_SKIP + SKIPPED))
         fi
     done
 done
 
 echo ""
 echo "============================================================"
-echo " 通过 ${TOTAL_PASS} 个用例，失败 ${TOTAL_FAIL} 个"
+echo " 通过 ${TOTAL_PASS} 个用例，失败 ${TOTAL_FAIL} 个，跳过 ${TOTAL_SKIP} 个（SKIPPED 单列，不计入通过）"
 if [ ${#FAILED_PKGS[@]} -gt 0 ]; then
     echo " 失败位置：${FAILED_PKGS[*]}"
 fi

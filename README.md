@@ -7,7 +7,7 @@
 [![Backend](https://img.shields.io/badge/backend-Cangjie-1f6feb)](./packages)
 [![Frontend](https://img.shields.io/badge/frontend-Vue%203%20%2B%20TS-42b883)](./web)
 [![Database](https://img.shields.io/badge/database-openGauss-orange)](./db/migrations)
-[![Tests](https://img.shields.io/badge/tests-523%20passed-brightgreen)](./scripts/test.sh)
+[![Tests](https://img.shields.io/badge/tests-561%20passed-brightgreen)](./scripts/test.sh)
 
 ---
 
@@ -53,9 +53,9 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 | --- | --- |
 | 后端源码 | 135 个 `.cj` / 48,091 行；测试 43 个 `.cj` / 9,027 行 |
 | 前端源码 | 47 个源文件（21 视图 / 7 组件 / composables、i18n、样式、api、router、config、入口等） |
-| 数据库迁移 | 26 个 SQL（编号 001–025，`007` 重号两个文件：`007_p1_foundation.sql` / `007_scheduler_ops.sql`；约 47 张表） |
-| HTTP 路由 | 206 条声明（29 个 routes 文件）；OpenAPI 规范 206 个 operation / 160 个 path，静态门禁逐条断言 206/206 覆盖 |
-| 单元测试 | **523 passed / 0 failed**（后端全量 `test.sh`）；前端 typecheck / 16 例单测 / build 全绿 |
+| 数据库迁移 | 28 个 SQL（编号 001–027，`007` 重号两个文件：`007_p1_foundation.sql` / `007_scheduler_ops.sql`；约 47 张表） |
+| HTTP 路由 | 224 条声明（31 个 routes 文件）；OpenAPI 规范 224 个 operation / 177 个 path，静态门禁逐条断言 224/224 覆盖 |
+| 单元测试 | **561 passed / 0 failed**（后端全量 `test.sh`）；前端 typecheck / 23 例单测 / build 全绿 |
 
 > 门禁：`bash scripts/build.sh` → 0 error、`bash scripts/test.sh` → 0 fail、`cd web && npm test && npm run build` → 0 error；
 > 另有无需数据库的静态门禁 `python3 scripts/ci/check-consistency.py`（CI 必跑）。
@@ -85,7 +85,7 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 - 逐块加密存储、版本管理（新版本复用 DEK）、版本元数据对比
 - **ZIP 批量导入**（自研 ZIP 读取器：store + deflate、CRC32 校验、GBK/UTF-8 文件名双解码、路径穿越与解压炸弹防护）
 - 批量下载（自研 ZIP 写入器）/ 打标签 / 删除
-- **纯仓颉媒体引擎 `ams.core.media`**（`packages/ams-core/src/media/`，全部在 `ams-server` 进程内同步完成，不引入外部进程 / 独立 worker）：PNG 解码 / 编码、`bmp.cj` BMP 解码、`jpeg.cj` baseline + 渐进式 JPEG 解码、`pdftext.cj` 文本型 PDF 抽文本 + `pdfimage.cj` 图像型扫描 PDF 的图像流抽取、**三路 OCR 路由**（5×7 印刷体 → CJK 220 字点阵字典 → 手写风格数字，`MediaOcr.recognizeAutoWithEngine` 返回实际命中引擎）、缩略图与像素水印；CJK / 手写字模由构建期生成器 `scripts/gen-media-glyphs.py`（Windows GDI 字体渲染）产出 `glyphdata.cj`，运行时零依赖（不读系统字体 / 不启外部进程）
+- **纯仓颉媒体引擎 `ams.core.media`**（`packages/ams-core/src/media/`，全部在 `ams-server` 进程内同步完成，不引入外部进程 / 独立 worker）：PNG 解码 / 编码、`bmp.cj` BMP 解码、`jpeg.cj` baseline + 渐进式 JPEG 解码、`pdftext.cj` 文本型 PDF 抽文本 + `pdfimage.cj` 图像型扫描 PDF 的图像流抽取、**三路 OCR 路由**（5×7 印刷体 → CJK 416 字点阵字典 → 手写风格数字，`MediaOcr.recognizeAutoWithEngine` 返回实际命中引擎）、缩略图与像素水印；CJK / 手写字模由构建期生成器 `scripts/gen-media-glyphs.py`（Windows GDI 字体渲染）产出 `glyphdata.cj`，运行时零依赖（不读系统字体 / 不启外部进程）
 - 预览**动态水印**：签票 + 审计可追溯 + 前端叠加；PNG 由服务端把访问者 / 时间 / 追踪号**烧进像素**（仍不阻止截图 / 翻拍）
 - 4 条附件媒体路由：`GET /api/attachments/:id/thumbnail`（PNG 缩略图）、`GET /api/attachments/:id/watermarked`（烧写水印后的 PNG）、`GET /api/attachments/:id/ocr`（OCR 结果）、`POST /api/attachments/:id/media`（手动触发一次媒体处理）
 
@@ -130,7 +130,7 @@ AMS 把一个人的**证件、学历、职业、资质、资产、健康、家�
 | 前端 | **Vue 3.5 + TypeScript + Vite 7** | 零 UI 框架依赖，手写设计系统（深浅色、四档响应式断点、Apple 质感动效） |
 | 状态管理 | 组合式 API + `AppStorage` 式信号 | 不引入 Pinia，规模未到需要 |
 | 测试 | 仓颉 `std.unittest` + Vitest | 后端全量 `test.sh` **419 通过 / 0 失败**，按包分层；前端 typecheck / test / build 全绿 |
-| 媒体处理 | **`ams.core.media`（纯仓颉）** | PNG 解码 / 编码（自写 CRC-32 / Adler-32）、`bmp.cj` BMP 解码、`jpeg.cj` baseline + 渐进式 JPEG 解码、`pdftext.cj` 文本型 PDF 抽文本 + `pdfimage.cj` 图像型扫描 PDF 图像流抽取、**三路 OCR**（5×7 印刷体 → CJK 220 字点阵 → 手写风格数字，返回实际命中引擎）、缩略图与像素水印；`scripts/gen-media-glyphs.py` 构建期用 Windows GDI 生成 `glyphdata.cj` 字模，运行时零依赖。全部在 `ams-server` 进程内完成，无外部进程 / 独立 worker |
+| 媒体处理 | **`ams.core.media`（纯仓颉）** | PNG 解码 / 编码（自写 CRC-32 / Adler-32）、`bmp.cj` BMP 解码、`jpeg.cj` baseline + 渐进式 JPEG 解码、`pdftext.cj` 文本型 PDF 抽文本 + `pdfimage.cj` 图像型扫描 PDF 图像流抽取、**三路 OCR**（5×7 印刷体 → CJK 416 字点阵 → 手写风格数字，返回实际命中引擎）、缩略图与像素水印；`scripts/gen-media-glyphs.py` 构建期用 Windows GDI 生成 `glyphdata.cj` 字模，运行时零依赖。全部在 `ams-server` 进程内完成，无外部进程 / 独立 worker |
 
 ### 分层依赖（严格单向，`scripts/build.sh` 按拓扑序编译）
 
@@ -250,7 +250,7 @@ bash scripts/build.sh               # 首次会自动编译 opengauss 驱动，�
 启动成功日志形如：
 
 ```json
-{"action":"server.ready","routes":"206","startedAt":"…","webDir":"web"}
+{"action":"server.ready","routes":"224","startedAt":"…","webDir":"web"}
 ```
 
 ### 4. 生产模式：一个进程、一个端口 ★
@@ -338,7 +338,7 @@ Vite dev server 把 `/api` 代理到 `8080`（见 `web/vite.config.ts`），
 | `scripts/verify-stdx.sh` | 国密能力 14 项向量校验 |
 | `scripts/db.py` | 数据库辅助：`exec <sql文件>` / `sql -s "<SQL>"` / `tables` / `count <表>` |
 | `scripts/gen-gbk-table.py` | 生成 GBK 码表（ZIP 中文文件名解码用） |
-| `scripts/gen-media-glyphs.py` | **构建期字模生成器**：用 Windows GDI 字体渲染生成 `packages/ams-core/src/media/glyphdata.cj`（220 常用汉字 × 8 字体原型 + 10 手写风格数字 × 9 原型），供 CJK / 手写 OCR 运行时查表；运行时零依赖（不需字体 / GDI / Python / 外部进程） |
+| `scripts/gen-media-glyphs.py` | **构建期字模生成器**：用 Windows GDI 字体渲染生成 `packages/ams-core/src/media/glyphdata.cj`（416 常用汉字 × 8 字体原型 + 10 手写风格数字 × 9 原型），供 CJK / 手写 OCR 运行时查表；运行时零依赖（不需字体 / GDI / Python / 外部进程） |
 | `scripts/verify-audit-chain.py` | 审计哈希链外部校验 |
 | `scripts/ci/verify-family.py` | 家庭协作端到端验收（90 项断言：邀请闭环 + 失效语义 + 可见性 + 主体级授权与列表下推 + 条目级授权隔离 + 同端口静态托管）。自带启停服务，`AMS_VERIFY_PORT` 可换端口 |
 | `scripts/release.sh` | 打包发布产物 |
@@ -396,7 +396,7 @@ Archive_manager/
 | 11 | [前端技术栈选型分析](./docs/11-前端技术栈选型分析.md) | 为什么是 Vue 3？备选方案为何被否？ |
 | 12 | [家庭成员邀请（设计 + 方案评估）](./docs/12-家庭成员邀请.md) | 家庭协作安全设计（10 原则 / 14 威胁 / API 草案）与授权粒度·审批流·分批取舍（含推荐结论） |
 | 13 | [信创与国家密码标准参考](./docs/13-信创与国家密码标准参考.md) | 国密 GM/T·GB/T 对齐、已落地/未实现能力、信创适配现状 |
-| 14 | [对外 API 规范（OpenAPI）](./docs/14-对外API规范-OpenAPI.yaml) | 206 个 operation / 160 个 path 的 OpenAPI 3.1 基线；与后端 206 条路由声明一一对应，静态门禁强制 206/206 覆盖 |
+| 14 | [对外 API 规范（OpenAPI）](./docs/14-对外API规范-OpenAPI.yaml) | 224 个 operation / 177 个 path 的 OpenAPI 3.1 基线；与后端 224 条路由声明一一对应，静态门禁强制 224/224 覆盖 |
 | 15 | [架构演进路线（方案候选）](./docs/15-架构演进路线-方案候选.md) | 提炼通用框架 / SaaS·微服务化的 A/B/C 候选方案（已拍板，见 §三） |
 
 变更记录见 [CHANGELOG.md](./CHANGELOG.md)。
@@ -414,7 +414,7 @@ Archive_manager/
 | **SM2 未实现** | SDK 无非对称国密实现 | 导出包签名用 HMAC-SM3（对称共享密钥），不是公钥签名，无法做到"验签方不持有签名密钥" |
 | **SM4-GCM 不可用**，改用 CBC + HMAC-SM3 | stdx 实测 `create tag error` | 已是 EtM（先加密后认证）的正确构造，但非 AEAD，随机数管理需更小心 |
 | **像素水印仍不阻止截图 / 翻拍** | 服务端已把访问者 / 时间 / 追踪号烧进 PNG 像素，但截图 / 翻拍发生在像素之外 | PNG 由 `GET /api/attachments/:id/watermarked` 返回烧写图；PDF 与不支持格式仍走签票 + 审计 + 前端叠加 |
-| **OCR 有字体与版式边界** | 内置 5×7 点阵字模面向等宽印刷体数字 / 大写字母；CJK / 手写为构建期字体点阵字典，非训练模型 | PNG / BMP / baseline + 渐进式 JPEG / 文本型 PDF / 图像型扫描 PDF 的图像流均可处理（图像型 PDF 经 `pdfimage.cj` 抽图后走三路 OCR）；CJK 仅覆盖字典内 220 汉字且为字体点阵、手写仅 10 个近似手写风格数字；真实草书 / 生僻字 / 强倾斜 / 复杂排版 / 加密 PDF / CMYK 不支持，高精度识别仍需外部模型；阈值来自跨字体验收夹具，真实扫描件泛化未验证 |
+| **OCR 有字体与版式边界** | 内置 5×7 点阵字模面向等宽印刷体数字 / 大写字母；CJK / 手写为构建期字体点阵字典，非训练模型 | PNG / BMP / baseline + 渐进式 JPEG / 文本型 PDF / 图像型扫描 PDF 的图像流均可处理（图像型 PDF 经 `pdfimage.cj` 抽图后走三路 OCR）；CJK 仅覆盖字典内 416 汉字且为字体点阵、手写仅 10 个近似手写风格数字；真实草书 / 生僻字 / 强倾斜 / 复杂排版 / 加密 PDF / CMYK 不支持，高精度识别仍需外部模型；阈值来自跨字体验收夹具，真实扫描件泛化未验证 |
 | **短信 / 图形验证码 / 图像格式边界** | 网关需运维配置、path 轮廓仍可被专用 OCR 解析、图像格式有剩余边界 | 短信默认关闭，需运维配置 `SMS_*`；图形验证码 SVG 已改为**纯 path 轮廓**（内嵌点阵字模 + 旋转 / 倾斜 + 干扰线 / 噪点，不含 `<text>` / `aria-label` / `data-*` / 答案明文），但字符轮廓仍可被专用 OCR 解析，强对抗建议换图片 / 滑块，challenge TTL / 一次性 / 3 次尝试 / 单实例内存态不变；缩略图与像素水印支持 PNG / BMP / baseline + 渐进式 JPEG（其余格式与加密 PDF / CMYK 仍不支持）；E2E `devHint` 测试通道仅当 `AMS_ENV` 非 production/prod 且 `AMS_E2E_CAPTCHA_HINT=true` 时可用，生产环境恒不返回 |
 | **C++ 侧（ams-native）为空** | 当前性能不构成瓶颈 | 纯仓颉实现；C++ 通道留作后续优化 |
 | **本机构建不走 `cjpm`** | `cjpm 1.0.5` 在本机 Windows 触发堆损坏（`0xC0000374`） | 本地用 `scripts/build.sh`，CI 仍用 `cjpm`；两条路径都需保持通过 |

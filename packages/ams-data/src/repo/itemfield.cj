@@ -39,8 +39,10 @@ public class ItemFieldValue {
     public let fieldName: String
     public let dataType: Int64
     public let sensitivity: Int64
-    /** 归一后的取值字符串（空串 = 未填） */
+    /** 归一后的取值字符串（空串 = 未填；敏感字段为空，密文见 encHex） */
     public let value: String
+    /** 敏感字段密文（hex 编码的 EtM 封装）；空串表示该字段为普通值 */
+    public let encHex: String
 
     public init(
         id: Int64,
@@ -50,7 +52,8 @@ public class ItemFieldValue {
         fieldName: String,
         dataType: Int64,
         sensitivity: Int64,
-        value: String
+        value: String,
+        encHex!: String = ""
     ) {
         this.id = id
         this.itemId = itemId
@@ -60,6 +63,7 @@ public class ItemFieldValue {
         this.dataType = dataType
         this.sensitivity = sensitivity
         this.value = value
+        this.encHex = encHex
     }
 }
 
@@ -93,7 +97,8 @@ public class ItemFieldRepo {
                   "        WHEN f.value_bool IS NOT NULL THEN CAST(f.value_bool AS TEXT)" +
                   "        WHEN f.value_json IS NOT NULL THEN CAST(f.value_json AS TEXT)" +
                   "        ELSE NULL" +
-                  "    END, '') AS value " +
+                  "    END, '') AS value, " +
+                  "COALESCE(encode(f.value_enc, 'hex'), '') AS enc_hex " +
                   "FROM arc_item_fields f " +
                   "LEFT JOIN arc_field_defs d ON d.id = f.field_def_id " +
                   "WHERE f.item_id = ? " +
@@ -136,6 +141,86 @@ public class ItemFieldRepo {
             ItemFieldRepo.writeJson(this.db, itemId, fieldDefId, value, bidx)
         } else {
             ItemFieldRepo.writeText(this.db, itemId, fieldDefId, value, bidx)
+        }
+    }
+
+    /**
+     * 历史数据回填候选：sensitivity >= 2 且仍以明文列存值、value_enc 为空的行。
+     * 供一次性加密回填任务使用；只读，不修改任何行。
+     */
+    public func listPlaintextSensitive(): ArrayList<ItemFieldValue> {
+        let sql = "SELECT f.id, f.item_id, f.field_def_id, " +
+                  "COALESCE(d.field_key, '') AS field_key, " +
+                  "COALESCE(d.field_name, '') AS field_name, " +
+                  "COALESCE(d.data_type, 0) AS data_type, " +
+                  "COALESCE(d.sensitivity, 1) AS sensitivity, " +
+                  "COALESCE(" +
+                  "    CASE" +
+                  "        WHEN f.value_text IS NOT NULL THEN f.value_text" +
+                  "        WHEN f.value_num IS NOT NULL THEN CAST(f.value_num AS TEXT)" +
+                  "        WHEN f.value_date IS NOT NULL THEN TO_CHAR(f.value_date, 'YYYY-MM-DD')" +
+                  "        WHEN f.value_bool IS NOT NULL THEN CAST(f.value_bool AS TEXT)" +
+                  "        WHEN f.value_json IS NOT NULL THEN CAST(f.value_json AS TEXT)" +
+                  "        ELSE NULL" +
+                  "    END, '') AS value, '' AS enc_hex " +
+                  "FROM arc_item_fields f " +
+                  "JOIN arc_field_defs d ON d.id = f.field_def_id " +
+                  "WHERE d.sensitivity >= 2 AND f.value_enc IS NULL " +
+                  "AND (f.value_text IS NOT NULL OR f.value_num IS NOT NULL OR " +
+                  "     f.value_date IS NOT NULL OR f.value_bool IS NOT NULL OR " +
+                  "     f.value_json IS NOT NULL)"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            return ItemFieldRepo.collect(readRows(st.query()))
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 敏感字段写入：只落 value_enc（EtM 密文）+ value_bidx（盲索引），
+     * 所有明文取值列一律置 NULL —— 高敏值绝不落库明文（S-1）。
+     *
+     * @param encHex 密文字节的 hex 表示（由 fromHexString 还原后写 BYTEA）
+     */
+    public func saveEncrypted(
+        itemId: Int64,
+        fieldDefId: Int64,
+        encHex: String,
+        bidx!: ?Array<Byte> = None
+    ): Unit {
+        let enc = match (fromHexString(encHex)) {
+            case Some(b) => b
+            case None => throw validationError("valueEnc", "字段密文不是合法 hex")
+        }
+        let c = this.db.connect()
+        try {
+            let upd = c.prepareStatement(
+                "UPDATE arc_item_fields SET value_text = NULL, value_num = NULL, " +
+                "value_date = NULL, value_bool = NULL, value_json = NULL, " +
+                "value_enc = decode(?, 'hex'), value_bidx = decode(?, 'hex') " +
+                "WHERE item_id = ? AND field_def_id = ?")
+            upd.set(0, enc)
+            ItemFieldRepo.bindBidx(upd, 1, bidx)
+            upd.set(2, itemId)
+            upd.set(3, fieldDefId)
+            if (upd.update().rowCount > 0) {
+                return
+            }
+            let ins = c.prepareStatement(
+                "INSERT INTO arc_item_fields (id, item_id, field_def_id, value_enc, value_bidx) " +
+                "VALUES (?, ?, ?, decode(?, 'hex'), decode(?, 'hex'))")
+            ItemFieldRepo.bindCommon(ins, itemId, fieldDefId)
+            ins.set(3, enc)
+            ItemFieldRepo.bindBidx(ins, 4, bidx)
+            ins.update()
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
         }
     }
 
@@ -337,7 +422,8 @@ public class ItemFieldRepo {
                 r.str("field_name"),
                 r.i64("data_type"),
                 r.i64("sensitivity"),
-                r.str("value")
+                r.str("value"),
+                encHex: r.str("enc_hex")
             ))
         }
         return out

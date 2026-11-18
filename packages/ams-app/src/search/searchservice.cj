@@ -124,6 +124,13 @@ public class SearchService {
             // 单字查询：二元索引里没有单字 token，回退到 LIKE
             if (ChineseTokenizer.isSingleCharQuery(q.keyword)) {
                 likePattern = "%${q.keyword}%"
+            } else if (!ChineseTokenizer.containsCjk(q.keyword)) {
+                // 纯英文/数字查询：存量索引里只有整词 token，不完整输入
+                // （openEule vs openeuler）交叠匹配不到。改用 LIKE 前缀匹配
+                // 并清空 token 交叠条件（两者是 AND，留着会互相抵消），
+                // 对存量数据立即生效，无需重建索引。
+                likePattern = "%${q.keyword}%"
+                tokens = []
             }
         }
         return this.searchRepo.search(q, tokens, q.tagIds, likePattern)

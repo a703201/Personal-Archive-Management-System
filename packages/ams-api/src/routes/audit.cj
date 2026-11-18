@@ -43,6 +43,20 @@ public class AuditRoutes {
         // FR-AUD-005 审计报告导出（带链校验结论）
         router.get("/api/audit/report", { req: ApiRequest => this.report(req) },
                    requiredPerm: "audit:export")
+        // FR-AUD-004：每日链头锚定（需管理权限，写入不可变的 aud_chain_anchors）
+        router.post("/api/admin/audit/anchor", { req: ApiRequest => this.anchor(req) },
+                    requiredPerm: "cfg:manage")
+    }
+
+    /** 落当前链头锚点；externalRef 由查询串传入，指向主库外的独立存储引用。 */
+    private func anchor(req: ApiRequest): ApiResponse {
+        let uid = RowData.toI64(req.subjectId)
+        let ext = req.queryParam("externalRef") ?? ""
+        let (date, seq) = this.recorder.anchorChain(uid, ext)
+        this.selfAudit(req, "anchor-chain", "date=${date};seq=${seq};external=${ext.isEmpty()}")
+        return ApiResponse.ok(
+            "{\"anchored\":true,\"date\":\"${date}\",\"chainSeq\":${seq}," +
+            "\"externalRef\":\"${ApiResponse.escape(ext)}\"}", req.requestId)
     }
 
     /**
@@ -160,7 +174,8 @@ public class AuditRoutes {
         let sb = StringBuilder()
         if (mode == "segment") {
             let (result, checked) = this.recorder.verifyChainSegment(from, limit)
-            sb.append("{\"mode\":\"segment\",\"anchored\":false,\"checked\":${checked},")
+            let anchored = if (this.recorder.latestAnchor().isSome()) { "true" } else { "false" }
+            sb.append("{\"mode\":\"segment\",\"anchored\":${anchored},\"checked\":${checked},")
             sb.append(AuditRoutes.chainVerdict(result))
             sb.append("}")
         } else {

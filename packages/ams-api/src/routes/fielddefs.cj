@@ -21,7 +21,9 @@ package ams.api.routes
 import std.collection.*
 
 import ams.api.http.*
+import ams.app.item.*
 import ams.app.search.*
+import ams.crypto.provider.*
 import ams.core.search.*
 import ams.data.repo.*
 import ams.kernel.error.*
@@ -265,6 +267,10 @@ public class ItemFieldRoutes {
     private let userRepo: UserRepo
     private let searchService: ?SearchService
     private let blindIndexService: ?BlindIndexService
+    /** 敏感字段加密（可选：缺装配时高敏字段拒绝写入，绝不降级明文） */
+    private let fieldCipher: ?FieldCipher
+    /** 历史明文敏感字段回填（运维一次性任务） */
+    private let backfill: ?FieldBackfillService
 
     public init(
         itemRepo: ItemRepo,
@@ -272,7 +278,9 @@ public class ItemFieldRoutes {
         itemFieldRepo: ItemFieldRepo,
         userRepo: UserRepo,
         searchService!: ?SearchService = None,
-        blindIndexService!: ?BlindIndexService = None
+        blindIndexService!: ?BlindIndexService = None,
+        fieldCipher!: ?FieldCipher = None,
+        backfill!: ?FieldBackfillService = None
     ) {
         this.itemRepo = itemRepo
         this.fieldDefRepo = fieldDefRepo
@@ -280,6 +288,8 @@ public class ItemFieldRoutes {
         this.userRepo = userRepo
         this.searchService = searchService
         this.blindIndexService = blindIndexService
+        this.fieldCipher = fieldCipher
+        this.backfill = backfill
     }
 
     public func register(router: Router): Unit {
@@ -287,6 +297,18 @@ public class ItemFieldRoutes {
                    requiredPerm: "archive:read:own")
         router.put("/api/items/:id/fields", { req: ApiRequest => this.saveValues(req) },
                    requiredPerm: "archive:write:own")
+        // 历史明文敏感字段一次性回填（运维手动触发，幂等可重跑）
+        router.post("/api/admin/items/encrypt-fields", { req: ApiRequest => this.encryptBackfill(req) },
+                    requiredPerm: "cfg:manage")
+    }
+
+    private func encryptBackfill(req: ApiRequest): ApiResponse {
+        let svc = match (this.backfill) {
+            case Some(s) => s
+            case None => throw AppError(AppErrorKind.Internal, "字段加密回填服务未装配")
+        }
+        let (done, failed) = svc.run()
+        return ApiResponse.ok("{\"encrypted\":${done},\"failed\":${failed}}", req.requestId)
     }
 
     // ---------------------------------------------------------
@@ -308,7 +330,22 @@ public class ItemFieldRoutes {
                 sb.append(",")
             }
             first = false
-            let shown = if (canReveal) { v.value } else { this.maskField(v.fieldKey, v.value, v.sensitivity) }
+            // 敏感值只以密文落库；读取时才按 (主体, 分类, 字段) 派生密钥解密
+            let plain = if (v.encHex.isEmpty()) {
+                v.value
+            } else {
+                match (this.fieldCipher) {
+                    case Some(c) =>
+                        match (c.decrypt(RowData.toI64(rec.subjectId), rec.category,
+                                         v.fieldKey, v.encHex)) {
+                            case CryptoResult.Ok(s) => s
+                            case CryptoResult.Err(e) => throw e
+                        }
+                    case None => throw AppError(AppErrorKind.CryptoFailure,
+                        "敏感字段加密服务未装配，拒绝返回密文字段")
+                }
+            }
+            let shown = if (canReveal) { plain } else { this.maskField(v.fieldKey, plain, v.sensitivity) }
             sb.append("{\"fieldDefId\":${v.fieldDefId},")
             sb.append("\"fieldKey\":\"${ApiResponse.escape(v.fieldKey)}\",")
             sb.append("\"fieldName\":\"${ApiResponse.escape(v.fieldName)}\",")
@@ -368,7 +405,22 @@ public class ItemFieldRoutes {
                         case Some(s) => s.bidx(fd.fieldKey, value)
                         case None => None<Array<Byte>>
                     }
-                    this.itemFieldRepo.save(id, fd.id, fd.dataType, value, bidx: bidx)
+                    if (fd.sensitivity >= 2) {
+                        // 失败关闭：高敏字段没有加密服务时拒绝写入，绝不降级明文落库
+                        let fc = match (this.fieldCipher) {
+                            case Some(c) => c
+                            case None => throw AppError(AppErrorKind.CryptoFailure,
+                                "敏感字段加密服务未装配，拒绝明文落库")
+                        }
+                        let sealed = match (fc.encrypt(RowData.toI64(rec.subjectId),
+                                                        rec.category, fd.fieldKey, value)) {
+                            case CryptoResult.Ok(hex) => hex
+                            case CryptoResult.Err(e) => throw e
+                        }
+                        this.itemFieldRepo.saveEncrypted(id, fd.id, sealed, bidx: bidx)
+                    } else {
+                        this.itemFieldRepo.save(id, fd.id, fd.dataType, value, bidx: bidx)
+                    }
                     saved = saved + 1
                 }
             }

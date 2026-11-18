@@ -173,6 +173,24 @@ public class AuditRecorder {
      *
      * @return (校验结论, 本段实际校验条数)
      */
+    /**
+     * 每日链头锚定（FR-AUD-004）：把当前链头哈希与记录数写入 aud_chain_anchors。
+     * externalRef 由调用方填独立存储引用（如对象存储键 / 外部系统 ID）；
+     * 留空表示仅库内锚定，防篡改强度较低，接口响应会如实标注。
+     */
+    public func anchorChain(actorId: Int64, externalRef: String): (String, Int64) {
+        let (seq, hash) = this.repo.chainTail()
+        let iso = Times.nowIso8601()
+        let date = if (iso.size >= 10) { iso[0..10] } else { iso }
+        this.repo.saveAnchor(date, hash, seq, actorId, externalRef)
+        return (date, seq)
+    }
+
+    /** 最近一次链头锚点：(日期, 哈希 hex, 记录数, 外部引用)。 */
+    public func latestAnchor(): Option<(String, String, Int64, String)> {
+        return this.repo.latestAnchor()
+    }
+
     public func verifyChainSegment(fromSeq: Int64, limit: Int64): (ChainVerifyResult, Int64) {
         let rows = this.repo.listChain(fromSeq, limit)
         let records = ArrayList<AuditRecord>()

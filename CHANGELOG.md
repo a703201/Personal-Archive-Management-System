@@ -15,6 +15,139 @@
 
 ---
 
+## [1.4.0] — 2026-11-18（AI 能力接入 · 设计基线开版 + 审查修复）
+
+> 原 `Unreleased` 段已并入 **1.4.0**；本版同时包含 2026-11-16 开版内容与 2026-11-18 同版收口的审查修复。
+> 历史段落与 `v1.3.3` tag 均不改写。
+
+### 修复与变更（截至 2026-11-18）
+
+#### Fixed
+
+- 档案列表页统计显示字面量 `{n}`：根因是调用点 i18n key 写成 `ArchiveView.totalCount`（目录实际为 `viewsArchiveView.totalCount`），导致 `t()` 返回未插值的 fallback；改用正确 key + 已插值 fallback，三语均生效。
+- OCR 建档未归入「OCR 识别」：前端已正确传 `source=3`，但 `POST /api/items` 路由未读取该字段，仓储默认 `source=0` 落库；新增 `parseSource()` 校验（0–5，越界降级为手动）并透传，同时回填截图中两条既有档案、统一列表 / 筛选来源文案为「OCR 识别」。
+- 发布包缺数据库迁移产物：`scripts/package.sh` 现在随包分发 `db/migrations/*.sql` 与 `deploy/scripts/migrate.sh`（保持目录结构），`scripts/ci/verify-package.sh` 增加对应静态断言；包内 `DEPLOY.md` 补迁移说明。同时删除包模板中无消费者的数据库 SSL 模式环境变量（驱动只认连接串 `sslmode`）。
+- 测试统计口径：`scripts/test.sh` / `test-linux.sh` 将 SKIPPED 单列输出且不计入通过总数；Linux 版移植 Windows 版「PASSED/FAILED/ERROR 全 0 拒绝判 PASS」守卫，防止测试框架输出丢失被静默误判为全绿。
+- 部署脚本安全与可靠性：`deploy/scripts/migrate.sh` 的 `AMS_DB_PASSWORD` 从硬编码默认值改为 `:?` 强门禁（与 backup.sh/restore.sh 一致）；`deploy/scripts/run-app.sh` 显式检查 `docker compose up` 退出码，健康轮询 60s 超时后 `exit 1`。
+- Release 资产上传幂等：`scripts/ci/upload-asset.sh` 改用 python json 解析资产列表判断同名资产，不再用 grep 匹配带空格的 `"name": "..."`（重跑易 422）；`scripts/release.sh` 与其实物/注释统一为 `--data-binary` + `application/octet-stream`。
+- 发布包校验语义诚实化：`scripts/ci/verify-package.sh` 区分「二进制可加载」与「功能就绪」——CI 无数据库时只判定前者并输出明确 WARN，不再笼统宣称完整可运行。
+- YAML 语法门禁不再静默跳过：`scripts/ci/check-consistency.py` 在 PyYAML 不可用时依次退到 `ruby YAML.load_file`、保守 stdlib 结构检查，并输出显著 WARN 与安装提示（docs/09 已记录）。
+- `deploy/config/ams.env.example` 生产模板的 `AMS_KEK` 改为留空，避免非空占位串绕过 SEC-001 的生产凭据门禁。
+- **高敏字段历史明文回填**：`ItemFieldValue` 携带密文与盲索引，`FieldCipher` 按 `(主体, 分类, 字段)` 派生 DEK，`FieldBackfillService` + `POST /api/admin/items/encrypt-fields` 幂等回填；写入链路缺加密服务时失败关闭。
+- **AI 接口对象级越权**：`AiRoutes` 对 `summary/advice/ai-parse` 三条 `:id` 路由做服务端归属校验（不信任前端 subjectId）。
+- **刷新令牌重放**：旧刷新令牌再次使用即上报 `reuseDetected=true` 并吊销该用户全部会话，登录失败计数与会话改为多副本共享。
+- **审计链外部锚定**：`POST /api/admin/audit/anchor` 落每日链头到 `aud_chain_anchors`，分段校验如实返回 `anchored` 状态；运维 cron 示例见 docs/09。
+- **存储迁移正确性**：双写失败键持久化并按批补偿；隔离件跳过搬运；失败行不推进游标；切换生效后拒绝自动回滚；重启前反向镜像回源端。
+- **数据一致性**：`Database.withTransaction()`；附件版本新增/激活/指针更新同一事务；条目恢复级联恢复软删附件；并发去重冲突回查复用。
+- **枚举 ABI 顺序**：`AppErrorKind.MethodNotAllowed` 追加到枚举末尾而非插队，避免未重编静态库把 `CryptoFailure` 误读为其他种类。
+- **AI 预填建档「保存中…」卡住**：档案本体落库后先关闭表单释放保存态，AI 原图改后台上传；分片 `PUT chunk` 与 `complete` 补齐超时（60s / 120s），单图上传同样加 60s 超时，避免上传请求挂起让表单永不结束。
+- **容器登录超时（dead lock）**：线上容器仍跑 11-17 旧二进制，进程内状态锁死后所有业务接口排队 30s 报 `Exception: dead lock`；已重编 Linux 后端、重建 `ams:1.4.0` 镜像并强制重建容器（数据卷保留），登录恢复秒级响应。
+
+#### Added
+
+- 存储平台支持切换并提供内置「全量 + 增量」数据迁移：`prepare / run / cancel / cutover / rollback / status` 六个管理接口；按 id 游标分批搬密文字节（含历史版本与 `thumb_`/`wm_` 派生对象），catchup 阶段新写入双写，确认无剩余后手动切换（重启生效），保留源配置快照用于回滚；迁移期禁止直接改配置以避免源后端被中途改动。
+- 管理页「系统运维 → 存储平台」解除平台 / Endpoint / Bucket 锁定，定位变更且已有附件时提示迁移并提供进度面板（阶段、进度、失败数、继续 / 取消 / 切换 / 回滚），三语文案同步。
+- 多副本运行时状态落库迁移 `027_runtime_state.sql`：会话 / 已轮换刷新令牌 / 登录失败计数 / 验证码 challenge / 分片上传 / 调度租约统一走共享 DB，表名用 `sys_runtime_*` 避开 001 中同名旧表。
+- 审计链锚定、历史敏感字段回填、字段加密回归、刷新令牌重放 4 组后端用例；前端 403 无权限视图与路由守卫。
+
+#### 门禁（2026-11-18 实测）
+
+- `build.sh` EXIT=0（47 包 0 error）· `test.sh` **561 例 0 失败** · `web build` EXIT=0 · `web test` 23 例 · `check-consistency.py` PASS（224/224 路由、28 迁移、i18n 4284 键）。
+
+### 开版基线与实现（2026-11-16 实测）
+
+> 版本号提升至 **1.4.0**（MINOR，新功能模块）。本批以 **AI 能力接入** 为主线：
+> 四能力域（V 视觉识别 / S 档案总结 / Q 自然语言查询 / A 智能建议）共用 `ams-ai` 底座，
+> OQ1–OQ13 全部拍板定稿，新增「档案信息录入辅助」模块与精度评估基线。
+> **实现状态：主干已落地**（详见 [docs/10](./docs/10-实现状态核对.md) 末节）：
+> `ams-ai` 底座、能力发现与 opt-out、V/S/Q/A 九条 API、一键预填、前端全入口与关闭态门控、
+> AI 配置管理页（含关闭态收敛）、离线模型 FFI 骨架、精度评估管线、二次开发说明与本地联调脚本均已实现；
+> **内置模型真推理（需 llama.cpp + 权重）与真实样例集（需用户提供）仍未实现**。
+> 历史段落与 `v1.3.3` tag 均不改写。
+
+#### 设计范围（详见 docs/20 v0.6）
+
+- 新增 `ams-ai` 基础设施层与四能力域统一底座；接入优先级：本地（Ollama / LM Studio / Cherry Studio 后端）优于在线（硅基流动 / 阿里 / 华为 / DeepSeek / OpenAI），出境需二次同意。
+- 新增 **V5「档案信息录入辅助」**：附件 jpg/png/pdf 解析 → 字段预填 → 人工确认；逐字段来源 + 置信度，四档字段范围（敏感字段只提示不生成明文），八类失败友好提示。
+- 新增 **P12 关闭态零痕迹**：用户 opt-out 存服务端、历史 AI 内容保留但关闭态不渲染；`GET /api/ai/capabilities` 统一门控，零请求 / 零残留。
+- 新增 **§11.1 精度评估基线**（脱敏样例 ≥ 200、关键字段 F1 ≥ 0.90 等建议目标待评审）与 **§7.5 provider 解析能力矩阵**；§12 四阶段补退出条件。
+- OQ1–OQ13 全部定稿；其中 OQ5 依用户新指令调整为**内置轻量离线模型**：PP-OCRv5 mobile（≈22 MB）+ Qwen2.5-0.5B-Instruct Q4（≈350 MB），**官方成熟模型、不做领域微调**，总体积 < 400 MB（详见 docs/20 §7.7）。
+
+#### 版本同步
+
+- 产品版本 **1.4.0**：`web/package.json` / `package-lock.json` / `main.cj` / `About.ets` / 部署镜像 tag / docs 17–20 / PRD 口径全量同步。
+
+#### 实现与门禁（2026-11-16 实测）
+
+- 新增包 `packages/ams-ai`（基础设施层，只依赖 kernel）：provider 抽象与选择链、OpenAI 兼容出站客户端（HTTP/1.1 + TLS + Bearer + 超时）、五层提示词与 XML 防注入、容错 JSON、审计与失败关闭；9 条单测。
+- app 层：`AiService`（配置装配 + 用户 opt-out 存服务端）、`AiRecognizeService` / `AiIntakeService`（V5）、`AiQueryService`（Q 域白名单 + 归属注入 + 降级）、`AiTextService`（S/A 候选不落库）、`AiAdminService`（配置管理 + 连通性测试）。
+- API 九条：`capabilities`、`me/ai-preference`、`attachments/:id/ai-parse`、`search/ask`、`summary/items/:id`、`advice/items/:id`、`admin/ai/config` GET·PUT、`admin/ai/test`；OpenAPI 215/215 覆盖。
+- 前端：能力发现门控（`AiFeatureGate` 关闭态 `v-if` 整块移除）、录入辅助（来源 / 置信度 / 一键采纳仅填空值）、Q/S/A 三域入口、ProfileView 用户 opt-out 开关、SystemView「AI 能力」配置页（**关闭态仅留一个启用总开关**，docs/20 §6.9.3）；三语词条 4179 键。
+- 骨架与工具：`native/llama/{llama_bridge.c,llama_bridge_stub.c}` + `LocalTextModel.probe()`（当前恒回退）；`scripts/ci/eval-ai-accuracy.py`（合成样例冒烟 F1 0.947，**非真实精度**）；`scripts/dev/ollama-smoke.sh` + `ai-live-check.sh`（本地真连联调，三层判定）；`docs/18` §7 二次开发说明。
+- **五件套全绿**：`build.sh` 0 error · `test.sh` **542 例 0 失败** · `check-consistency.py` PASS（215/215、i18n 4179）· `web build` EXIT=0 · `web test` 22 例 0 失败。
+- ⚠️ 内置离线模型**真推理**（`llama_bridge.c` 的 `ams_llama_chat()` 仍空实现）与 Qwen 权重未落地；真实精度样例集（≥200 份脱敏）需用户提供；当前默认走外部 OpenAI 兼容端点，配置页可现场改。正式 Release 前需按 1.4.0 完成 commit / 三路 push / tag。
+
+## [1.3.3] — 2026-11-15（OCR 字典扩表 + 真实证书实测 + 竞品真实部署对照 + 扩表二进制上线）
+
+> 版本号提升至 **1.3.3**。本批**不新增业务功能**，聚焦证据缺口补齐与实测闭环：
+> OCR CJK 字典实际扩表并用真实证书验证、同赛道竞品真实部署对照跑通、
+> 把扩表后的二进制重编进线上镜像。历史段落与 `v1.3.2` tag 均不改写。
+
+### OCR CJK 字典实际扩表（220 → 416 字）
+
+- `scripts/gen-media-glyphs.py` 默认 `AMS_GLYPH_CAP` 由 220 提升为 **416**（字表池上限），
+  重跑 Windows GDI 生成器：`glyphdata.cj` **135K → 246K**、CJK 原型 **1760 → 3328**。
+  默认固化在 416，避免以后普通重跑静默退回 220；已验证「不带环境变量重跑」产物字节一致。
+- `packages/ams-core/src/media/cjk.cj` 注释（原型数 / 字典规模 / 诚实边界）同步；
+  全仓当前状态性文档（`README.md`、`SECURITY.md`、`docs/10`、`docs/17`、`docs/19`、`docs/README.md`）
+  的「220 字」口径共 21 处同步为 416（历史段落与尺寸数字不动）。
+- **全量三件套门禁全绿**：`build.sh` 0 error、`test.sh` **533 例 0 失败**、`web build` EXIT=0。
+
+### 真实证书样本媒体/OCR 实测（补「真实扫描件泛化未验证」边界）
+
+- 新增 `scripts/ci/competitor-study/make_samples.py`（合成样本，纯 stdlib）、
+  `run_ams_media_harness.sh`（用 `cjc` 编独立可执行，直接调**真实**
+  `ams.core.media.MediaEngine.process`，纯内存、不落库、不联网）。
+  ⚠️ 不使用 `scripts/media_worker.py` —— 那是离线参考实现，不参与运行时主链路。
+- 用户提供 `D:\个人\证书` 用于测试；按**最严格隐私口径**执行：原件只读、
+  副本仅 `.tmp/competitor-study/real/` 且序号化为 `n0..n9`（不含姓名/编号）、
+  不进 git / 不进 Release / 不上传、报告只写聚合指标、测完删除副本与容器卷。
+- 实测 10 份代表性证书（6 PDF + 2 PNG + 2 JPG，约 76MB）：
+  完成 8 / 失败 2；文本型 PDF **5/6** 由 `pdf-text` 直接抽文本，图像型 PDF 1 份走
+  `pdf-image` 未识别，4 份位图 3 份命中 `builtin-5x7`，**CJK 点阵/手写路径命中 0 次**。
+- 结论：文本型 PDF 抽取是强项；**扩表提升字典覆盖，不等于版式/字体泛化能力提升**，
+  真实扫描件仍不可宣称高精度 OCR。`docs/19` §3.5 与 `docs/17` §5.3.1 已同步该实测结论。
+
+### 竞品真实部署对照（已跑通 PASS=2 FAIL=0）
+
+- `scripts/ci/competitor-study/compare.sh`：真实部署同赛道自托管文档档案系统
+  （Papra 单容器 / 内置 SQLite），对同一批样本做能力形态对照，只记录实测聚合证据；
+  含镜像缺失前置检查（缺失即报错退出，**不生成假报告**）、容器自动清理、
+  报告只写聚合指标、不写姓名/编号/识别正文。
+- **竞品侧已真实部署跑通**：Papra（docs/19 §2.1 同赛道轻量替代）Web / 登录页 / API 均 HTTP 200、
+  容器内进程 `esbuild node pnpm`、无 tesseract、10 份真实证书序号化副本只读挂载可见（仅计数）；
+  合成样本标记词落盘可 grep（无字段级加密旁证）。报告 `.tmp/competitor-study/compare-report.md`。
+  这是**能力形态核验，非性能/易用性基准**，不宣称 AMS 全面超越（§2.5 反向优势仍成立）。
+- **网络根因与解法**：直连 `ghcr.io` 被限到 ~31KB/s、28 分钟卡死；改用南京大学镜像
+  `ghcr.nju.edu.cn` 后 1.7MB/s、2min 拉完（Docker Hub `registry-1.docker.io` 仍全超时）。
+  脚本已内置镜像加速指引与 tag 步骤。
+- 修复 `compare.sh` 三处真实 bug：① 就绪探测 `curl -w` 连接失败输出 `000` 后再 `|| echo 000`
+  拼成 `000000` 且 `!= "000"` 判断反向（改为只认 2xx/3xx）；② Git Bash 下 `docker cp`
+  目标路径被 MSYS 转换导致副本进不了容器（改为只读挂载 `:ro`）；③ 原生 Windows Python
+  不认 `/e/...` 路径致 `prepare_real_samples.py --clean` 静默失败、副本残留（改为 shell `rm -rf`）。
+  最终核验：副本残留 **0 份**、对照容器 **0**、线上 `ams-server` 不受影响。
+
+### 扩表后 Linux 二进制重编进线上镜像
+
+- 416 字表源码（`glyphdata.cj` 220→416）此前未编入线上产物：经 `deploy/scripts/build-linux-docker.sh`
+  在 `ams-cj` 工具链容器重编，`ams.core.media` 重新编译、`build/linux/ams-server` 由
+  21,733,616 → **21,933,224 字节**（18:24 产出），确认扩表已进入二进制。
+- 经 `Dockerfile.prebuilt` 重建 `ams:1.3.2`（新镜像 ID `18df594b…`）、`docker compose -p ams`
+  仅重建 `ams` 容器（不碰 DB 容器/数据卷），`/api/health` HTTP 200、`ams-server` healthy。
+  镜像内二进制字节数与宿主新产物精确一致。
+
+---
+
 ## [1.3.2] — 2026-11-15（创新点论证成文 + 待补台账 + 实测补齐与工具链加固）
 
 > 版本号提升至 **1.3.2**。本批**不新增业务功能**，聚焦评估论证、工程可观测性、

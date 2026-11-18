@@ -184,6 +184,51 @@ public class Database {
     }
 
     /**
+     * 在一个事务内顺序执行 action：成功提交，任何异常回滚。
+     *
+     * 实现说明：openGauss 驱动（`cangjie_tpc::opengauss.driver`）的
+     * Connection.createTransaction() 返回 Transaction，提供 begin/commit/rollback；
+     * 经 PooledDatasource 拿到的是 ProxyConnection，其 createTransaction()
+     * 会委托给底层连接，因此这里用统一接口即可，无需依赖具体驱动类型。
+     *
+     * 关键：**闭包内所有 SQL 必须复用参数 c（同一物理连接）**，
+     * 否则各 INSERT/UPDATE 会落到不同连接、不在同一事务内。
+     * 任何步骤失败都会 rollback，避免「三条 UPDATE 只成功两条」这类
+     * 半提交状态（版本切换/上传链路的历史工程债）。
+     *
+     * @return action 的返回值
+     */
+    public func withTransaction<T>(action: (Connection) -> T): T {
+        let c = this.connect()
+        let tx = c.createTransaction()
+        var committed = false
+        try {
+            tx.begin()
+            let result = action(c)
+            tx.commit()
+            committed = true
+            return result
+        } catch (e: Exception) {
+            // 失败必须回滚；回滚自身失败只记日志，不掩盖原始异常。
+            if (!committed) {
+                try {
+                    tx.rollback()
+                } catch (re: Exception) {
+                    Log.get().error("db.rollback.failed", None, [("detail", re.toString())])
+                }
+            }
+            // 业务异常保持原样（如 NotFound），驱动异常统一转换，不泄露 SQL 细节。
+            if (e is AppError) {
+                throw e
+            }
+            throw toDbError(e)
+        } finally {
+            // 归还连接池前事务已 commit/rollback，避免把「开着事务」的连接放回池。
+            c.close()
+        }
+    }
+
+    /**
      * 健康检查。
      */
     public func ping(): Bool {

@@ -54,19 +54,23 @@ public class ItemRoutes {
      * 未注入时该字段的编辑照常工作，只是打标会被跳过并如实返回 0。
      */
     private let tagRepo: ?TagRepo
+    /** 附件仓储（可选）：条目恢复时级联恢复其下软删附件 */
+    private let attachmentRepo: ?AttachmentRepo
 
     public init(
         itemRepo: ItemRepo,
         userRepo: UserRepo,
         versionRepo!: ?ItemVersionRepo = None,
         searchService!: ?SearchService = None,
-        tagRepo!: ?TagRepo = None
+        tagRepo!: ?TagRepo = None,
+        attachmentRepo!: ?AttachmentRepo = None
     ) {
         this.itemRepo = itemRepo
         this.userRepo = userRepo
         this.versionRepo = versionRepo
         this.searchService = searchService
         this.tagRepo = tagRepo
+        this.attachmentRepo = attachmentRepo
     }
 
     /**
@@ -448,6 +452,9 @@ public class ItemRoutes {
         }
         let category = ItemRoutes.intOf(json, "category", 0)
         let sensitivity = ItemRoutes.intOf(json, "sensitivity", 1)
+        // 来源系统：0 手动 / 1 CSV / 2 克隆 / 3 OCR / 4 附件 / 5 导出包回导。
+        // 前端 OCR 建档会传 3；非法值由 parseSource 降级为手动。
+        let source = ItemRoutes.parseSource(json)
         let id = this.itemRepo.create(
             UserRepo.parseId(subjectIdStr),
             category,
@@ -460,7 +467,8 @@ public class ItemRoutes {
             json.get("remark") ?? "",
             json.get("extra") ?? "{}",
             req.tenantId,
-            UserRepo.parseId(req.subjectId)
+            UserRepo.parseId(req.subjectId),
+            source: source
         )
         // 同步重建检索索引（失败不影响创建结果）
         this.reindex(id)
@@ -628,6 +636,18 @@ public class ItemRoutes {
         )
         if (!ok) {
             throw notFound("条目")
+        }
+        // 级联恢复该条目下软删附件（失败只记日志，不回滚条目恢复）
+        match (this.attachmentRepo) {
+            case Some(a) =>
+                try {
+                    a.restoreByItem(id, UserRepo.parseId(req.subjectId))
+                } catch (e: Exception) {
+                    Log.get().warn("attachment.restore.failed", None, [
+                        ("itemId", "${id}"), ("reason", e.toString())
+                    ])
+                }
+            case None => ()
         }
         return ApiResponse.ok("{\"restored\":true}", req.requestId)
     }
@@ -856,6 +876,18 @@ public class ItemRoutes {
         sb.append("\"shared\":${if (shared) { "true" } else { "false" }},")
         sb.append("\"updatedAt\":${r.i64("updated_ms")}}")
         return sb.toString()
+    }
+
+    /**
+     * 解析条目来源系统枚举（0 手动 / 1 CSV / 2 克隆 / 3 OCR / 4 附件 / 5 回导）。
+     * 非法值（负数 / 越界 / 非数字）统一降级为手动，防止脏枚举落库。
+     */
+    public static func parseSource(json: SimpleJson): Int64 {
+        let v = ItemRoutes.intOf(json, "source", 0)
+        if (v < 0 || v > 5) {
+            return 0
+        }
+        return v
     }
 
     /**

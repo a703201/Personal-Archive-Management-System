@@ -34,7 +34,7 @@
 | SM2 未实现 | SDK 无非对称国密；导出包签名使用 HMAC-SM3（对称共享密钥），**无法做到验签方不持有签名密钥** |
 | SM4-GCM 不可用 | stdx 实测 `create tag error`，实际落地为 SM4-CBC/CTR + HMAC-SM3（Encrypt-then-MAC） |
 | 像素水印已烧写，仍不阻止截图 / 翻拍 | 服务端把访问者 / 时间 / 追踪号烧进 PNG 像素（`GET /api/attachments/:id/watermarked`），但截图 / 翻拍发生在像素之外；PDF 与不支持格式保留签票 + 审计 + 前端叠加 |
-| 缩略图 / OCR / 短信 / 图形验证码边界 | 缩略图与像素水印支持 PNG / BMP / baseline + 渐进式 JPEG（纯仓颉 `bmp.cj` / `jpeg.cj`）；三路 OCR（5×7 印刷体 → CJK 220 字点阵字典 → 10 个手写风格数字，`MediaOcr.recognizeAutoWithEngine` 返回实际引擎），文本型 PDF 抽文本、图像型扫描 PDF 经 `pdfimage.cj` 抽图像流后走 OCR；剩余边界：CJK 仅字典内 220 字且为字体点阵、手写仅 10 个近似手写数字，真实草书 / 生僻字 / 强倾斜 / 复杂排版 / 加密 PDF / CMYK / JPEG2000 / CCITT / JBIG2 / 图像掩码不支持，高精度识别仍需外部模型；短信默认关闭需运维配置 `SMS_*`；图形验证码 SVG 已 path 化轮廓（无 `<text>` / 答案明文），但字符轮廓仍可被专用 OCR 解析，challenge TTL / 一次性 / 3 次尝试 / 单实例内存态 |
+| 缩略图 / OCR / 短信 / 图形验证码边界 | 缩略图与像素水印支持 PNG / BMP / baseline + 渐进式 JPEG（纯仓颉 `bmp.cj` / `jpeg.cj`）；三路 OCR（5×7 印刷体 → CJK 416 字点阵字典 → 10 个手写风格数字，`MediaOcr.recognizeAutoWithEngine` 返回实际引擎），文本型 PDF 抽文本、图像型扫描 PDF 经 `pdfimage.cj` 抽图像流后走 OCR；剩余边界：CJK 仅字典内 416 字且为字体点阵、手写仅 10 个近似手写数字，真实草书 / 生僻字 / 强倾斜 / 复杂排版 / 加密 PDF / CMYK / JPEG2000 / CCITT / JBIG2 / 图像掩码不支持，高精度识别仍需外部模型；短信默认关闭需运维配置 `SMS_*`；图形验证码 SVG 已 path 化轮廓（无 `<text>` / 答案明文），但字符轮廓仍可被专用 OCR 解析，challenge TTL / 一次性 / 3 次尝试 / 单实例内存态 |
 | 短信网关投递失败的可见性 | `SpoolSmsProvider.send()` 只在**写 `.job` 失败**时向 `ams-server` 抛错（失败关闭）；网关投递由独立的 `sms-spool.sh` 进程异步完成，**后端无法同步感知投递结果**。投递失败时 `.job` 移入 `failed/` 并写 `*.reason`（只含 HTTP 码/时间，不含凭据、手机号、正文）+ 输出 `[sms-spool] ERROR`；告警须监控该日志或目录。网关 URL 强制 `https://`（凭据随 JSON 明文发送），loopback http 仅允许本机网关，非合规配置脚本 FATAL 退出而非静默发请求 |
 | 商用密码产品认证 | **未进行**；代码层面对齐国密算法 ≠ 取得认证 / 完成密评 |
 

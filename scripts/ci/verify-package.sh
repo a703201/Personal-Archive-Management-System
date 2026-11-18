@@ -10,10 +10,15 @@
 #   而「缺 DLL」的表现是进程**瞬间死亡**并打印
 #   "error while loading shared libraries" —— 这才是真正要拦住的。
 #
-# 判定逻辑：
+# 判定逻辑（区分「二进制加载」与「功能就绪」两个维度）：
 #   ① 进程瞬间死亡且日志含加载器错误 → ❌ 失败（运行时缺失）
-#   ② 日志出现 "server.db.unavailable" → ✅ 通过（缺数据库，非打包问题）
-#   ③ 健康检查通过 → ✅ 通过（完整体验）
+#   ② 日志出现 "server.db.unavailable" / 连接被拒 → ⚠️ 二进制可加载，但
+#      **功能就绪未验证**（CI 无数据库）；发布包校验仍算通过（exit 0），
+#      但输出明确 WARN，不笼统宣称「完整可运行」。
+#   ③ 健康检查通过 → ✅ 二进制可加载 + 功能就绪（端到端可用）
+#
+# 语义边界：本脚本验证的是**发布包能否独立加载并启动**，不是功能验收。
+#   CI 无 DB 时只能证明前者；后者需要连真实数据库的部署/冒烟测试覆盖。
 #
 # 用法：
 #   bash scripts/ci/verify-package.sh <包目录> [端口]
@@ -80,6 +85,22 @@ done
 echo "  ✓ 未发现硬编码凭据 / 自动重启模式"
 echo ""
 
+# ---- 迁移资源静态断言（随包分发，供 init 容器在部署时执行）----
+echo "=== 校验数据库迁移资源完整性 ==="
+MIG_DIR="${PKG_DIR_ABS}/db/migrations"
+MIG_COUNT="$(find "$MIG_DIR" -maxdepth 1 -name '*.sql' -type f 2>/dev/null | wc -l | tr -d ' ')"
+MIG_COUNT="${MIG_COUNT:-0}"
+if [ "$MIG_COUNT" -lt 1 ]; then
+    echo "  ✗ 包内缺少 db/migrations/*.sql（当前 ${MIG_COUNT} 个）"
+    exit 1
+fi
+if [ ! -f "${PKG_DIR_ABS}/deploy/scripts/migrate.sh" ]; then
+    echo "  ✗ 包内缺少 deploy/scripts/migrate.sh（迁移执行器）"
+    exit 1
+fi
+echo "  ✓ ${MIG_COUNT} 个迁移 SQL + deploy/scripts/migrate.sh"
+echo ""
+
 # 找主程序
 if   [ -f "${BIN_DIR}/ams-server.exe" ]; then SERVER="${BIN_DIR}/ams-server.exe"
 elif [ -f "${BIN_DIR}/ams-server" ];     then SERVER="${BIN_DIR}/ams-server"
@@ -107,13 +128,17 @@ export AMS_TOKEN_SECRET="${AMS_TOKEN_SECRET:-package-verify-secret-0123456789abc
 SRV_PID=$!
 
 # 最多等 20 秒
+# OK：二进制已成功加载并启动（本脚本的核心校验目标）
+# FUNC_READY：功能就绪（健康检查 200 通过）——CI 无 DB 时为 0，必须诚实输出 WARN
 OK=0
+FUNC_READY=0
 for i in $(seq 1 20); do
     sleep 1
-    # ③ 健康检查通过
+    # ③ 健康检查通过：二进制加载 + 功能就绪
     if curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
-        echo "  ✓ 健康检查通过（完整可运行）"
+        echo "  ✓ 功能就绪：健康检查通过（HTTP 200）"
         OK=1
+        FUNC_READY=1
         break
     fi
     # ② 数据库不可用（正常业务退出，不是打包问题）
@@ -126,7 +151,10 @@ for i in $(seq 1 20); do
     #       （Failed to connect / actively refused / No connection could be made）
     if grep -q "server.db.unavailable" "$LOG" 2>/dev/null \
        || grep -qiE "SqliteException|SocketException|Failed to connect|actively refused|No connection could be made|connection.*refused|database.*unavailable" "$LOG" 2>/dev/null; then
-        echo "  ✓ 服务正常启动并进入就绪检查（数据库不可用，非打包问题）"
+        # 只证明「二进制加载齐全、能启动到 DB 检查」，不能宣称功能就绪。
+        echo "  [WARN] 二进制可加载（已启动到 DB 检查），但当前环境无可用数据库："
+        echo "  [WARN] 功能就绪**未验证**。本步骤只覆盖发布包可运行性，"
+        echo "  [WARN] 端到端功能请在连真实 DB 的部署/冒烟测试中确认。"
         OK=1
         break
     fi
@@ -162,5 +190,11 @@ fi
 
 rm -f "$LOG"
 echo ""
-echo "=== 发布包校验通过 ==="
+if [ "$FUNC_READY" = "1" ]; then
+    echo "=== 发布包校验通过：二进制可加载 + 功能就绪（健康检查 200）==="
+else
+    echo "=== 发布包校验通过（有限）：二进制可加载，功能就绪未验证（CI 无数据库）==="
+    echo "[WARN] 语义说明：此结果只证明发布包能独立加载并启动到 DB 检查，"
+    echo "[WARN] 不代表业务功能可用；请勿据此宣称端到端功能已通过。"
+fi
 exit 0

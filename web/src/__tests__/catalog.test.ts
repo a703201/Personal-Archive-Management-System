@@ -44,6 +44,7 @@ describe('useCatalog · 状态 / 来源 / 敏感度映射', () => {
     expect(statusName('3')).toBe('已删除')
     expect(statusName(99)).toBe('—')
     expect(sourceName(1)).toBe('CSV 导入')
+    expect(sourceName(3)).toBe('OCR 识别')
     expect(sourceName(5)).toBe('导出包回导')
     expect(sourceName(99)).toBe('手动')
     expect(sensitivityName(1)).toBe('普通')

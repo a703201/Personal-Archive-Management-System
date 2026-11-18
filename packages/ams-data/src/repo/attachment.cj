@@ -362,31 +362,68 @@ public class AttachmentRepo {
 
     /**
      * 切换当前版本（FR-ATT-004）：把目标版本置为当前，其余置为非当前。
+     *
+     * 三条 UPDATE 现在走同一个事务（见 replaceCurrentVersionAtomically），
+     * 避免中途失败留下「版本标记已翻转、主记录指针未更新」的半提交状态。
      */
     public func setCurrentVersion(attachmentId: Int64, versionId: Int64): Bool {
-        let c = this.db.connect()
-        try {
-            let st1 = c.prepareStatement(
-                "UPDATE arc_attachment_versions SET is_current = FALSE WHERE attachment_id = ?")
-            st1.set(0, attachmentId)
-            st1.update()
-            let st2 = c.prepareStatement(
-                "UPDATE arc_attachment_versions SET is_current = TRUE, status = 2 " +
-                "WHERE id = ? AND attachment_id = ?")
-            st2.set(0, versionId)
-            st2.set(1, attachmentId)
-            st2.update()
-            let st3 = c.prepareStatement(
-                "UPDATE arc_attachments SET current_version_id = ?, " +
-                "updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-            st3.set(0, versionId)
-            st3.set(1, attachmentId)
-            st3.update()
-            return true
-        } catch (e: Exception) {
-            throw toDbError(e)
-        } finally {
-            c.close()
+        return this.replaceCurrentVersionAtomically(attachmentId, versionId)
+    }
+
+    /**
+     * [原子] 切换当前版本：在一个事务内完成原 setCurrentVersion 的三条 UPDATE。
+     *
+     * 供 ams-app 的版本切换 / 上传链路使用；任一步失败整体回滚。
+     */
+    public func replaceCurrentVersionAtomically(attachmentId: Int64, versionId: Int64): Bool {
+        return this.db.withTransaction { c: Connection =>
+            AttachmentRepo.flipCurrentRow(c, attachmentId, versionId)
+            AttachmentRepo.updatePointerRow(c, attachmentId, versionId, None<Int64>)
+            true
+        }
+    }
+
+    /**
+     * [原子] 新增版本并立即激活（版本上传链路）。
+     *
+     * 一个事务内完成：INSERT 版本行 → 翻转 is_current → 更新主记录指针与版本计数。
+     * 供 ams-app 替换原先的 addVersion + setCurrentVersion + setCurrentVersionId 三步。
+     *
+     * @return 新版本行 id
+     */
+    public func addVersionAndActivateAtomically(
+        attachmentId: Int64, versionNo: Int64, storageKey: String, fileSize: Int64,
+        fileExt: String, mimeType: String, fingerprint: Array<Byte>, status: Int64,
+        changeNote: String, uploadedBy: Int64
+    ): Int64 {
+        return this.db.withTransaction { c: Connection =>
+            let id = AttachmentRepo.insertVersionRow(
+                c, attachmentId, versionNo, storageKey, fileSize, fileExt, mimeType,
+                fingerprint, status, changeNote, uploadedBy
+            )
+            AttachmentRepo.flipCurrentRow(c, attachmentId, id)
+            AttachmentRepo.updatePointerRow(c, attachmentId, id, Some(versionNo))
+            id
+        }
+    }
+
+    /**
+     * [原子] 首次上传：新增初始版本行并写入主记录指针/版本计数。
+     *
+     * 供 ams-app 替换原先的 addVersion + setCurrentVersionId 两步。
+     */
+    public func addInitialVersionAtomically(
+        attachmentId: Int64, versionNo: Int64, storageKey: String, fileSize: Int64,
+        fileExt: String, mimeType: String, fingerprint: Array<Byte>, status: Int64,
+        changeNote: String, uploadedBy: Int64
+    ): Int64 {
+        return this.db.withTransaction { c: Connection =>
+            let id = AttachmentRepo.insertVersionRow(
+                c, attachmentId, versionNo, storageKey, fileSize, fileExt, mimeType,
+                fingerprint, status, changeNote, uploadedBy
+            )
+            AttachmentRepo.updatePointerRow(c, attachmentId, id, Some(versionNo))
+            id
         }
     }
 
@@ -593,6 +630,58 @@ public class AttachmentRepo {
         }
     }
 
+    /**
+     * 单条恢复：把软删附件恢复为可见。
+     *
+     * 只清 deleted_at、把软删标记 status=9 复位为 2（可用），
+     * 并写审计字段；**不改 storage_provider / storage_backend /
+     * storage_key / dedup_key / 版本指针 / 加密字段**，避免回收站恢复
+     * 把已迁移到新平台的附件指回旧对象或破坏去重键。
+     */
+    public func restore(id: Int64, operatorId: Int64): Bool {
+        let sql = "UPDATE arc_attachments SET deleted_at = NULL, " +
+                  "status = CASE WHEN status = 9 THEN 2 ELSE status END, " +
+                  "updated_at = CURRENT_TIMESTAMP, updated_by = ? " +
+                  "WHERE id = ? AND deleted_at IS NOT NULL"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, operatorId)
+            st.set(1, id)
+            return st.update().rowCount > 0
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 条目恢复级联：恢复该条目下所有软删附件。
+     *
+     * 与 single restore 同语义（只动 deleted_at / status / 审计字段），
+     * 供条目 restoreItem 在条目本身恢复成功后调用。
+     *
+     * @return 实际恢复的附件条数
+     */
+    public func restoreByItem(itemId: Int64, operatorId: Int64): Int64 {
+        let sql = "UPDATE arc_attachments SET deleted_at = NULL, " +
+                  "status = CASE WHEN status = 9 THEN 2 ELSE status END, " +
+                  "updated_at = CURRENT_TIMESTAMP, updated_by = ? " +
+                  "WHERE item_id = ? AND deleted_at IS NOT NULL"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, operatorId)
+            st.set(1, itemId)
+            return st.update().rowCount
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
     /** 取消附件上的某个标签 */
     public func removeTag(attachmentId: Int64, tagId: Int64): Bool {        let c = this.db.connect()
         try {
@@ -644,6 +733,73 @@ public class AttachmentRepo {
     }
 
     // ------------------------------------------------------------
+    // 事务内可复用的 SQL 片段：只接收调用方给定的 Connection，
+    // 保证同一事务内的多条语句落在同一物理连接上。
+    // ------------------------------------------------------------
+
+    private static func insertVersionRow(
+        c: Connection, attachmentId: Int64, versionNo: Int64, storageKey: String,
+        fileSize: Int64, fileExt: String, mimeType: String, fingerprint: Array<Byte>,
+        status: Int64, changeNote: String, uploadedBy: Int64
+    ): Int64 {
+        let id = Ids.next()
+        let st = c.prepareStatement(
+            "INSERT INTO arc_attachment_versions (" +
+            "id, attachment_id, version_no, storage_key, file_size, file_ext, " +
+            "mime_type, sm3_fingerprint, iv, is_current, status, change_note, " +
+            "uploaded_by, uploaded_at" +
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, FALSE, ?, ?, ?, CURRENT_TIMESTAMP)")
+        st.set(0, id)
+        st.set(1, attachmentId)
+        st.set(2, versionNo)
+        st.set(3, storageKey)
+        st.set(4, fileSize)
+        st.set(5, fileExt)
+        st.set(6, mimeType)
+        st.set(7, fingerprint)
+        st.set(8, status)
+        st.set(9, changeNote)
+        st.set(10, uploadedBy)
+        st.update()
+        return id
+    }
+
+    /** 老版本全部置非当前，目标版本置当前（status=2）。 */
+    private static func flipCurrentRow(c: Connection, attachmentId: Int64, versionId: Int64): Unit {
+        let st1 = c.prepareStatement(
+            "UPDATE arc_attachment_versions SET is_current = FALSE WHERE attachment_id = ?")
+        st1.set(0, attachmentId)
+        st1.update()
+        let st2 = c.prepareStatement(
+            "UPDATE arc_attachment_versions SET is_current = TRUE, status = 2 " +
+            "WHERE id = ? AND attachment_id = ?")
+        st2.set(0, versionId)
+        st2.set(1, attachmentId)
+        st2.update()
+    }
+
+    /** 更新主记录当前版本指针；versionCount 有值时同步版本计数。 */
+    private static func updatePointerRow(
+        c: Connection, attachmentId: Int64, versionId: Int64, versionCount: Option<Int64>
+    ): Unit {
+        match (versionCount) {
+            case Some(n) =>
+                let st = c.prepareStatement(
+                    "UPDATE arc_attachments SET current_version_id = ?, version_count = ?, " +
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                st.set(0, versionId)
+                st.set(1, n)
+                st.set(2, attachmentId)
+                st.update()
+            case None =>
+                let st = c.prepareStatement(
+                    "UPDATE arc_attachments SET current_version_id = ?, " +
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                st.set(0, versionId)
+                st.set(1, attachmentId)
+                st.update()
+        }
+    }
 
     private static func collect(rows: RowSet): ArrayList<AttachmentRecord> {
         let out = ArrayList<AttachmentRecord>()
@@ -749,6 +905,125 @@ public class AttachmentRepo {
                 return 0
             }
             return rows[0].i64("n")
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    // ---------------------------------------------------------
+    // 存储迁移（全量 + 增量）：以 arc_attachments.storage_provider 作为
+    // 「该附件的字节是否已完整落到目标平台」的逐行标记。
+    // 含软删行：回收站恢复仍要读到对象，不能只迁未删除的行。
+    // ---------------------------------------------------------
+
+    /** 迁移候选：id > 游标、尚未落到目标平台的行，按 id 升序分批。 */
+    public func listMigrationCandidates(
+        targetProvider: String, afterId: Int64, limit: Int64
+    ): RowSet {
+        let sql = "SELECT id, storage_key, status FROM arc_attachments " +
+                  "WHERE (storage_provider IS NULL OR storage_provider <> ?) AND id > ? " +
+                  "ORDER BY id ASC LIMIT ?"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, targetProvider)
+            st.set(1, afterId)
+            st.set(2, limit)
+            return readRows(st.query())
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /** 某附件所有历史版本的 storage_key（版本对象必须与主对象一起搬迁）。 */
+    public func listVersionKeys(attachmentId: Int64): RowSet {
+        let sql = "SELECT storage_key FROM arc_attachment_versions " +
+                  "WHERE attachment_id = ? ORDER BY version_no ASC"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, attachmentId)
+            return readRows(st.query())
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /** 标记已迁移：不改 version，避免迁移期与前端乐观锁冲突。 */
+    public func markMigrated(
+        id: Int64, backendCode: Int64, providerCode: String
+    ): Unit {
+        let sql = "UPDATE arc_attachments SET storage_backend = ?, storage_provider = ?, " +
+                  "updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, backendCode)
+            st.set(1, providerCode)
+            st.set(2, id)
+            st.update()
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /** 尚未落到目标平台的附件数（含软删）。 */
+    public func pendingMigrationCount(targetProvider: String): Int64 {
+        let sql = "SELECT COUNT(*) AS n FROM arc_attachments " +
+                  "WHERE storage_provider IS NULL OR storage_provider <> ?"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, targetProvider)
+            let rows = readRows(st.query()).all()
+            if (rows.size == 0) {
+                return 0
+            }
+            return rows[0].i64("n")
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
+     * 切换完成：把全部行的平台标记归一到真实目标 code。
+     * 必须更新**所有行**而非只更新带迁移标记的：增量期双写的新行仍是默认值。
+     */
+    public func finalizeProviders(providerCode: String, backendCode: Int64): Unit {
+        let sql = "UPDATE arc_attachments SET storage_provider = ?, storage_backend = ?, " +
+                  "updated_at = CURRENT_TIMESTAMP"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, providerCode)
+            st.set(1, backendCode)
+            st.update()
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /** 取消迁移：把本次标记恢复成源平台 code，避免留下孤儿标记。 */
+    public func resetMigrationMarkers(marker: String, providerCode: String): Unit {
+        let sql = "UPDATE arc_attachments SET storage_provider = ? WHERE storage_provider = ?"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, providerCode)
+            st.set(1, marker)
+            st.update()
         } catch (e: Exception) {
             throw toDbError(e)
         } finally {

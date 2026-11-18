@@ -34,7 +34,7 @@ HOST="${AMS_DB_HOST:-172.28.0.10}"
 PORT="${AMS_DB_PORT:-5432}"
 DB="${AMS_DB_NAME:-ams}"
 USER="${AMS_DB_USER:-gaussdb}"
-PASS="${AMS_DB_PASSWORD:-Ams@Gauss2026}"
+PASS="${AMS_DB_PASSWORD:?请设置 AMS_DB_PASSWORD（如：set -a; source deploy/compose/.env; set +a）}"
 # openGauss 不读 PGPASSWORD，口令须写进 conninfo 连接串
 CONN="host=${HOST} port=${PORT} user=${USER} password=${PASS} dbname=${DB}"
 

@@ -755,7 +755,7 @@ async function cloneTemplate(): Promise<void> {
   try {
     const r = await api<{ id: string }>('/import-templates', {
       method: 'POST',
-      body: { cloneFrom: Number(t.id), name: tr('viewsImportView.ad40e5', `${t.name} 副本`, { name: t.name }) },
+      body: { cloneFrom: String(t.id), name: tr('viewsImportView.ad40e5', `${t.name} 副本`, { name: t.name }) },
     })
     await loadTemplates()
     activeTemplateId.value = String(r.id)

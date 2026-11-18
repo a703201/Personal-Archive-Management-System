@@ -389,7 +389,8 @@ public class TokenServiceTest {
     }
 
     /**
-     * 重放检测：第二次使用同一刷新令牌应失败，且会话被标记吊销。
+     * 重放检测：第二次使用同一刷新令牌必须上报 reuseDetected=true
+     * 并把该用户全部会话标记为吊销（P1-2 修复后的契约）。
      */
     private static func replayDetected(
         svc: TokenService,
@@ -400,9 +401,13 @@ public class TokenServiceTest {
         if (!isRefreshOk(svc.refresh(refreshToken))) {
             return false
         }
-        // 用旧令牌重放 -> 应被检测
-        if (!isRefreshErr(svc.refresh(refreshToken))) {
-            return false
+        // 用旧令牌重放 -> 返回 Ok 但 reuseDetected=true，且不发新令牌
+        match (svc.refresh(refreshToken)) {
+            case CryptoResult.Ok((access, refresh, reuse)) =>
+                if (!reuse || !access.isEmpty() || !refresh.isEmpty()) {
+                    return false
+                }
+            case CryptoResult.Err(_) => return false
         }
         // 该用户全部会话已被吊销（仍存在记录但已标记吊销）
         return store.listByUser("u1").size == 1

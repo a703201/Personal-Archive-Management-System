@@ -22,12 +22,11 @@
 //   ③ Challenge：内存 HashMap + TTL 5 分钟 + 一次性消费（校验通过即删）
 //      + 每 ID 最多 3 次尝试；过期行惰性清理。
 //
-// [部署限制 · 如实标注]
-//   本存储是**单实例内存态**：进程重启即丢失、多实例之间不共享。
-//   多副本 / 多机部署必须改为落库（openGauss）或 Redis 等共享存储，
-//   否则「实例 A 签发、实例 B 校验」会一律判定为验证码失效。
-//   本项目其余内存态（MemorySessionStore / AuthService.failureCounts）
-//   采用同样的单机取舍，故此处保持一致，并在报告中明确说明。
+// [P1-5 多副本支持]
+//   启动时调用 RuntimeStateDb.configure(db) 后，challenge 落
+//   sys_captcha_challenges（含 answer_hash / 过期 / 尝试次数 / IP 签发窗口），
+//   实例 A 签发、实例 B 校验可正常工作；未配置时退回原内存实现，
+//   单测与本地开发零改动可用。答案明文只随本次响应返回，绝不落库。
 // ============================================================
 package ams.api.routes
 
@@ -35,9 +34,14 @@ import std.collection.*
 import std.sync.*
 import std.env.*
 
+import stdx.encoding.hex.*
+
 import ams.crypto.impl.*
 import ams.crypto.provider.*
+import ams.data.db.*
+import ams.data.repo.*
 import ams.kernel.error.*
+import ams.security.authn.*
 
 /**
  * 验证码策略常量（集中放置，便于单测与后续调整）。
@@ -334,13 +338,16 @@ public class CaptchaGenerator {
 }
 
 /**
- * 验证码 Challenge 单例存储（内存态，见文件头「部署限制」）。
+ * 验证码 Challenge 存储（DB 优先 / 内存回退）。
  *
- * 线程安全：所有读写经 Mutex 串行化（仿 MemorySessionStore）。
- * 通过 `issue / verify / invalidate` 三个静态方法暴露能力，由 AuthRoutes
- * 直接调用，无需改动 main.cj 的装配。
+ * 配置 RuntimeStateDb 后读写 sys_captcha_challenges，多副本共享；
+ * 未配置时沿用原内存 HashMap + Mutex（单测/本地开发零改动）。
+ * 通过 `issue / verify / invalidate` 三个静态方法暴露能力，API 不变。
  */
 public class CaptchaStore {
+    /** DB 路径计算 answer_hash 用（算法与令牌侧一致：SM3）。 */
+    private static let dbCrypto: StdxCryptoProvider = StdxCryptoProvider()
+
     private static let challenges: HashMap<String, CaptchaChallenge> = HashMap<String, CaptchaChallenge>()
     private static let mutex: Mutex = Mutex()
     /** 每 IP 固定窗口起点（Unix 毫秒），仅用于签发限流，不参与校验。 */
@@ -364,6 +371,13 @@ public class CaptchaStore {
      * 不超过 MaxChallenges。超额一律抛 RateLimited，绝不静默丢弃或无限堆积。
      */
     public static func issueForIp(ip: String, nowMillis: Int64): CaptchaChallenge {
+        if (RuntimeStateDb.isConfigured()) {
+            return CaptchaStore.dbIssueForIp(ip, nowMillis)
+        }
+        return CaptchaStore.issueForIpLocal(ip, nowMillis)
+    }
+
+    private static func issueForIpLocal(ip: String, nowMillis: Int64): CaptchaChallenge {
         CaptchaStore.mutex.lock()
         try {
             CaptchaStore.purgeExpiredLocked(nowMillis)
@@ -412,6 +426,74 @@ public class CaptchaStore {
         }
     }
 
+    // ------------------------------------------------------------
+    // DB 路径（多副本共享，落 sys_captcha_challenges）
+    // ------------------------------------------------------------
+
+    /** answer_hash = hex(SM3(challenge + answer))，明文答案绝不落库。 */
+    private static func hashAnswer(challenge: String, answer: String): String {
+        match (CaptchaStore.dbCrypto.digest((challenge + answer).toArray(), DigestAlgorithm.Sm3)) {
+            case CryptoResult.Ok(b) => return toHexString(b)
+            case CryptoResult.Err(_) =>
+                throw AppError(AppErrorKind.Internal, "验证码摘要计算失败")
+        }
+    }
+
+    private static func dbIssueForIp(ip: String, nowMillis: Int64): CaptchaChallenge {
+        let db = RuntimeStateDb.get()
+        let c = db.connect()
+        try {
+            // 惰性清理过期行（同时回收 IP 窗口计数，避免跨副本限流被僵尸行占满）。
+            let purge = c.prepareStatement(
+                "DELETE FROM sys_captcha_challenges WHERE expires_at <= ?"
+            )
+            purge.set(0, nowMillis)
+            purge.update()
+
+            let total = c.prepareStatement("SELECT COUNT(*) AS n FROM sys_captcha_challenges")
+            if (readRows(total.query()).at(0).i64("n") >= CaptchaPolicy.MaxChallenges) {
+                throw AppError(AppErrorKind.RateLimited, "验证码服务繁忙，请稍后重试")
+            }
+            if (!ip.isEmpty()) {
+                let ipq = c.prepareStatement(
+                    "SELECT COUNT(*) AS n FROM sys_captcha_challenges " +
+                    "WHERE ip = ? AND issued_at > ?"
+                )
+                ipq.set(0, ip)
+                ipq.set(1, nowMillis - CaptchaPolicy.IpWindowMillis)
+                if (readRows(ipq.query()).at(0).i64("n") >= CaptchaPolicy.IpMaxIssues) {
+                    throw AppError(AppErrorKind.RateLimited, "验证码请求过于频繁，请稍后重试")
+                }
+            }
+
+            let answer = CaptchaGenerator.randomAnswer()
+            let svg = CaptchaGenerator.renderSvg(answer)
+            let hint = if (CaptchaGenerator.e2eHintEnabled()) { answer } else { "" }
+            let id = CaptchaGenerator.randomId()
+            let expiresAt = nowMillis + CaptchaPolicy.TtlMillis
+
+            let ins = c.prepareStatement(
+                "INSERT INTO sys_captcha_challenges " +
+                "(challenge, answer_hash, expires_at, attempts, ip, issued_at) VALUES (?, ?, ?, 0, ?, ?)"
+            )
+            ins.set(0, id)
+            ins.set(1, CaptchaStore.hashAnswer(id, answer))
+            ins.set(2, expiresAt)
+            ins.set(3, ip)
+            ins.set(4, nowMillis)
+            ins.update()
+            // 返回对象保留 answer（仅服务端本次响应可见）与 devHint，API 不变。
+            return CaptchaChallenge(id, answer, svg, expiresAt, 0, hint)
+        } catch (e: Exception) {
+            if (e is AppError) {
+                throw e
+            }
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
     /**
      * 【供路由层拼装响应】返回应追加到对外 JSON 的 devHint 片段。
      * 门禁关闭时返回空串；开启时返回形如 ,"devHint":"<答案>" 的片段。
@@ -436,6 +518,65 @@ public class CaptchaStore {
      * 内容（Wrong 仅回传剩余次数，路由层可只回一句通用提示）。
      */
     public static func verify(id: String, code: String, nowMillis: Int64): CaptchaVerify {
+        if (RuntimeStateDb.isConfigured()) {
+            return CaptchaStore.dbVerify(id, code, nowMillis)
+        }
+        return CaptchaStore.verifyLocal(id, code, nowMillis)
+    }
+
+    private static func dbVerify(id: String, code: String, nowMillis: Int64): CaptchaVerify {
+        let c = RuntimeStateDb.get().connect()
+        try {
+            let st = c.prepareStatement(
+                "SELECT answer_hash, expires_at, attempts FROM sys_captcha_challenges WHERE challenge = ?"
+            )
+            st.set(0, id)
+            let rows = readRows(st.query())
+            if (rows.isEmpty()) {
+                return CaptchaVerify.NotFound
+            }
+            let r = rows.at(0)
+            if (nowMillis >= r.i64("expires_at")) {
+                let delExpired = c.prepareStatement(
+                    "DELETE FROM sys_captcha_challenges WHERE challenge = ?"
+                )
+                delExpired.set(0, id)
+                delExpired.update()
+                return CaptchaVerify.Expired
+            }
+            let normalized = code.trimAscii().toAsciiUpper()
+            if (CaptchaStore.hashAnswer(id, normalized) == r.str("answer_hash")) {
+                // 一次性：用后即删（多副本下由主键删除保证只有一实例消费成功）。
+                let del = c.prepareStatement("DELETE FROM sys_captcha_challenges WHERE challenge = ?")
+                del.set(0, id)
+                del.update()
+                return CaptchaVerify.Ok
+            }
+            let attempts = r.i64("attempts") + 1
+            if (attempts >= CaptchaPolicy.MaxAttempts) {
+                let del = c.prepareStatement("DELETE FROM sys_captcha_challenges WHERE challenge = ?")
+                del.set(0, id)
+                del.update()
+                return CaptchaVerify.Exhausted
+            }
+            let u = c.prepareStatement(
+                "UPDATE sys_captcha_challenges SET attempts = ? WHERE challenge = ?"
+            )
+            u.set(0, attempts)
+            u.set(1, id)
+            u.update()
+            return CaptchaVerify.Wrong(CaptchaPolicy.MaxAttempts - attempts)
+        } catch (e: Exception) {
+            if (e is AppError) {
+                throw e
+            }
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    private static func verifyLocal(id: String, code: String, nowMillis: Int64): CaptchaVerify {
         CaptchaStore.mutex.lock()
         try {
             match (CaptchaStore.challenges.get(id)) {
@@ -467,6 +608,19 @@ public class CaptchaStore {
      * 作废一个 ID（前端刷新验证码时携带 old=<id> 触发）。
      */
     public static func invalidate(id: String): Unit {
+        if (RuntimeStateDb.isConfigured()) {
+            let c = RuntimeStateDb.get().connect()
+            try {
+                let st = c.prepareStatement("DELETE FROM sys_captcha_challenges WHERE challenge = ?")
+                st.set(0, id)
+                st.update()
+            } catch (e: Exception) {
+                throw toDbError(e)
+            } finally {
+                c.close()
+            }
+            return
+        }
         CaptchaStore.mutex.lock()
         try {
             CaptchaStore.challenges.remove(id)
@@ -477,6 +631,21 @@ public class CaptchaStore {
 
     /** 当前存活挑战数（供单测 / 运维观测）。 */
     public static func size(): Int64 {
+        if (RuntimeStateDb.isConfigured()) {
+            let c = RuntimeStateDb.get().connect()
+            try {
+                let st = c.prepareStatement("SELECT COUNT(*) AS n FROM sys_captcha_challenges")
+                let rows = readRows(st.query())
+                if (rows.isEmpty()) {
+                    return 0
+                }
+                return rows.at(0).i64("n")
+            } catch (e: Exception) {
+                throw toDbError(e)
+            } finally {
+                c.close()
+            }
+        }
         CaptchaStore.mutex.lock()
         try {
             return CaptchaStore.challenges.size

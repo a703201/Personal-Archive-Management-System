@@ -34,6 +34,7 @@ import GlobalSearch from './components/GlobalSearch.vue'
 import ToastHost from './components/ToastHost.vue'
 import Onboarding from './components/Onboarding.vue'
 import { useTheme } from './composables/useTheme'
+import { useAiCapabilities } from './composables/useAiCapabilities'
 import { api, getToken } from './api/client'
 import { locale, setLocale, supported } from './i18n'
 
@@ -65,6 +66,9 @@ const hasAdmin = computed(
 
 onMounted(async () => {
   if (!getToken()) return
+  // AI 能力发现：登录后拉取一次，各页面统一消费（docs/20 §6.9）
+  const { refresh: refreshAi } = useAiCapabilities()
+  void refreshAi()
   try {
     const me = await api<{ perms: string[] }>('/me')
     const p = me.perms ?? []
