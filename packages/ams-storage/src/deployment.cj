@@ -36,7 +36,12 @@ public class DeploymentStore {
     private static let SECRET_KEYS: Array<String> = [
         "DB_PASSWORD", "DB_APP_PASSWORD", "MAIL_PASSWORD", "TOKEN_SECRET", "KEK",
         // Q2 多厂商 OBS 凭据：redactedJson() 必须遮住 SK，AK 也一并遮蔽更稳妥
-        "S3_SECRET_KEY", "S3_ACCESS_KEY"
+        "S3_SECRET_KEY", "S3_ACCESS_KEY",
+        // 存储迁移目标凭据：与现网凭据同等敏感，不得出现在响应/日志
+        "MIGRATION_SECRET_KEY", "MIGRATION_ACCESS_KEY",
+        "MIGRATION_SOURCE_SECRET_KEY", "MIGRATION_SOURCE_ACCESS_KEY",
+        // AI 能力接入：技术凭据（API 密钥）同样不得出现在响应/日志（docs/20 §6.7）
+        "AI_API_KEY"
     ]
 
     private let fs: LocalFileStorage

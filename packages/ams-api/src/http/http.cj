@@ -66,7 +66,10 @@ public func bodyCapFor(url: String): Int64 {
     // 回导包内含整份条目数据，50000 行可达数 MB，1 MiB 会直接 413。
     if (path.startsWith("/api/attachments") ||
         path.startsWith("/api/import/attachments") ||
-        path.startsWith("/api/import/bundle")) {
+        path.startsWith("/api/import/bundle") ||
+        // 新建档案时上传证书原图做 AI 预填：图片 base64 轻松超 1MB
+        // （7016×4961 的 PNG 约 2MB），必须走大体积档，否则 413 直接被拒
+        path == "/api/ai/parse-file") {
         return MAX_LARGE_BODY_BYTES
     }
     return MAX_BODY_BYTES

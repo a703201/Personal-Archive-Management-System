@@ -9,6 +9,8 @@ declare module 'vue-router' {
     public?: boolean
     /** 管理类页面（需管理权限，前端仅作分组展示） */
     admin?: boolean
+    /** 进入该路由所需的后端权限位；数组表示满足任一即可（OR） */
+    perm?: string | string[]
     /** 文档标题；用函数以便切换语言时重新求值 */
     title?: string | (() => string)
   }
@@ -25,10 +27,10 @@ const routes: RouteRecordRaw[] = [
   { path: '/tags', name: 'tags', component: () => import('../views/TagView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.tags', '标签管理') } },
   { path: '/import', name: 'import', component: () => import('../views/ImportView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.import', '批量导入') } },
   { path: '/profile', name: 'profile', component: () => import('../views/ProfileView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.profile', '个人主页') } },
-  { path: '/users', name: 'users', component: () => import('../views/UsersView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.users', '用户管理'), admin: true } },
-  { path: '/roles', name: 'roles', component: () => import('../views/RolesView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.roles', '角色与权限'), admin: true } },
-  { path: '/audit', name: 'audit', component: () => import('../views/AuditView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.audit', '审计日志'), admin: true } },
-  { path: '/system', name: 'system', component: () => import('../views/SystemView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.system', '系统运维'), admin: true } },
+  { path: '/users', name: 'users', component: () => import('../views/UsersView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.users', '用户管理'), admin: true, perm: ['user:read:any', 'user:manage'] } },
+  { path: '/roles', name: 'roles', component: () => import('../views/RolesView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.roles', '角色与权限'), admin: true, perm: 'acl:manage' } },
+  { path: '/audit', name: 'audit', component: () => import('../views/AuditView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.audit', '审计日志'), admin: true, perm: 'audit:read' } },
+  { path: '/system', name: 'system', component: () => import('../views/SystemView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.system', '系统运维'), admin: true, perm: 'system:admin' } },
   { path: '/about', name: 'about', component: () => import('../views/AboutView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.about', '关于') } },
   { path: '/login', name: 'login', component: () => import('../views/LoginView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.login', '登录'), public: true } },
   { path: '/register', name: 'register', component: () => import('../views/RegisterView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.register', '注册'), public: true } },
@@ -38,6 +40,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/ForgotPasswordView.vue').catch(() => import('../views/LoadFailedView.vue')),
     meta: { title: () => t('route.forgot', '找回口令'), public: true },
   },
+  // 无权限态：已登录但缺少权限位时落到这里（公开以免形成守卫循环）
+  { path: '/no-permission', name: 'no-permission', component: () => import('../views/NoPermissionView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.noPermission', '无访问权限'), public: true } },
   // 共享页：接收方无需账号，token 本身就是凭据（FR-ACL-012）
   // ⚠️ 必须排在通配兜底之前，否则会被 redirect 到 /overview
   { path: '/share/:token', name: 'share', component: () => import('../views/ShareView.vue').catch(() => import('../views/LoadFailedView.vue')), meta: { title: () => t('route.share', '共享档案'), public: true } },
@@ -77,6 +81,24 @@ function checkSetup(): Promise<boolean> {
   return setupPending
 }
 
+/**
+ * 权限位来源：后端 GET /api/me 返回 perms[]（无 /api/me/permissions 接口，
+ * 复用现有 capabilities 口径，与 App.vue 侧栏判定一致）。
+ * 模块级缓存，避免每次导航都打接口；拉取失败返回 null → 守卫保守不放行。
+ */
+let permsCache: string[] | null = null
+let permsPending: Promise<string[] | null> | null = null
+
+function loadPerms(): Promise<string[] | null> {
+  if (permsCache !== null) return Promise.resolve(permsCache)
+  if (permsPending) return permsPending
+  permsPending = api<{ perms: string[] }>('/me')
+    .then((me) => (permsCache = Array.isArray(me?.perms) ? me.perms : []))
+    .catch(() => (permsCache = null))
+    .finally(() => { permsPending = null })
+  return permsPending
+}
+
 // 未登录且访问非公开页面 → 跳登录，并带上原目标用于登录后回跳；
 // 尚未初始化时优先引导到向导，避免在无账号状态下空转。
 router.beforeEach(async (to) => {
@@ -94,6 +116,17 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (needSetup) return { path: '/setup' }
+
+  // 后端权限位守卫：仅对声明了 perm 的路由强制校验。
+  // 失败（null）或缺权限都落到 403，不把已登录用户踢回登录页。
+  const required = to.meta.perm
+  if (required) {
+    const perms = await loadPerms()
+    const need = Array.isArray(required) ? required : [required]
+    if (!perms || !need.some((p) => perms.includes(p))) {
+      return { name: 'no-permission', query: { from: to.fullPath } }
+    }
+  }
   return true
 })
 

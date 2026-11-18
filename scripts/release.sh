@@ -236,18 +236,16 @@ if [ "$AUTO_UPLOAD" != "1" ]; then
 fi
 
 echo "[4/4] 上传资产..."
-UPLOAD_URL="${API}/releases/${REL_ID}/assets?name=$(python3 -c "
+# 资产上传必须走 uploads.github.com（api.github.com 的同名路径只接受 GET，
+# POST 会返回 404）。与 scripts/ci/upload-asset.sh 的项目长期约定保持一致：
+#   -H "Content-Type: application/octet-stream" + --data-binary "@file"
+# 把文件原始字节作为 body 发送；**不要**改用 -F "file=@..." multipart。
+# --data-binary 是流式发送，不会把整个文件读进内存 —— 17 MB 的包无所谓，
+# 但工具链包 97 MB 时差别很大（内存版曾因此触发 504 Gateway Timeout）。
+UPLOAD_URL="https://uploads.github.com/repos/${OWNER_REPO}/releases/${REL_ID}/assets?name=$(python3 -c "
 import urllib.parse, sys
 print(urllib.parse.quote(sys.argv[1]))" "$(basename "$PKG_ZIP")")"
 
-# ⚠️ 必须用 `-F "file=@..."`（multipart/form-data）。
-#   `--data-binary "@file"` 是把文件内容作为**原始 body** 发送，
-#   GitHub 的 asset 上传接口不接受（会返回 400）。
-#   `-F` 还会**流式**发送，不会把整个文件读进内存 —— 17 MB 的包无所谓，
-#   但工具链包 97 MB 时差别很大（内存版曾因此触发 504 Gateway Timeout）。
-# ⚠️ **不要**在 -F 里写 `;type=application/zip`：Windows 版 curl.exe 会把
-#   `;` 后半段当成另一个 form 字段（实测报 curl: (26)）。去掉即可，
-#   GitHub 不要求 Content-Type。
 # --ssl-no-revoke：Windows 的 curl 用 schannel，默认查证书吊销状态，
 # 被代理/防火墙挡住时失败（CRYPT_E_NO_REVOCATION_CHECK 0x80092012）。
 HTTP_CODE="$(curl -sS -o /tmp/ams_release_upload.out -w "%{http_code}" \
@@ -256,7 +254,8 @@ HTTP_CODE="$(curl -sS -o /tmp/ams_release_upload.out -w "%{http_code}" \
     -X POST \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Accept: application/vnd.github+json" \
-    -F "file=@${PKG_ZIP}" \
+    -H "Content-Type: application/octet-stream" \
+    --data-binary "@${PKG_ZIP}" \
     "${UPLOAD_URL}")"
 
 if [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "200" ]; then

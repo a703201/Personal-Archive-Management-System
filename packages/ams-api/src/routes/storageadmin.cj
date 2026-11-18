@@ -27,6 +27,7 @@ import std.collection.*
 
 import ams.api.http.*
 import ams.app.audit.*
+import ams.app.storage.*
 import ams.data.repo.*
 import ams.kernel.error.*
 import ams.security.audit.*
@@ -36,6 +37,8 @@ public class StorageAdminRoutes {
     private let deployStore: DeploymentStore
     private let attachmentRepo: AttachmentRepo
     private let recorder: ?AuditRecorder
+    /** 迁移服务（可选）：迁移期间禁止通过普通配置接口改动现网配置 */
+    private let migration: ?StorageMigrationService
 
     /** deployment.env 里的键名 */
     private static let K_PROVIDER: String = "STORAGE_PROVIDER"
@@ -49,11 +52,13 @@ public class StorageAdminRoutes {
     public init(
         deployStore: DeploymentStore,
         attachmentRepo: AttachmentRepo,
-        recorder!: ?AuditRecorder = None
+        recorder!: ?AuditRecorder = None,
+        migration!: ?StorageMigrationService = None
     ) {
         this.deployStore = deployStore
         this.attachmentRepo = attachmentRepo
         this.recorder = recorder
+        this.migration = migration
     }
 
     public func register(router: Router): Unit {
@@ -204,6 +209,17 @@ public class StorageAdminRoutes {
         // 非本地平台必须给出定位信息（凭据可以稍后单独补，但 endpoint/bucket 不能缺）
         if (!StorageProviders.isLocalCode(provider) && (endpoint.isEmpty() || bucket.isEmpty())) {
             throw validationError("endpoint", "对象存储平台需要 endpoint 与 bucket")
+        }
+
+        // ---- 迁移期禁止直接改配置：源后端一旦被改，全量/增量字节会错位 ----
+        match (this.migration) {
+            case Some(m) =>
+                let phase = m.status().phase
+                if (phase == "full" || phase == "catchup" || phase == "ready") {
+                    throw AppError(AppErrorKind.Conflict,
+                        "存储迁移进行中（${phase}），请先完成切换或取消后再改配置")
+                }
+            case None => ()
         }
 
         // ---- 存量保护：改变定位三元组会让旧 storage_key 失效 ----

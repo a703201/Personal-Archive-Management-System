@@ -13,11 +13,12 @@ import { ref, computed, onMounted } from 'vue'
 import { t as tr } from '../i18n'
 import { api } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
+import AiConfigPanel from '../components/AiConfigPanel.vue'
 import { useToast } from '../composables/useToast'
 
 const toast = useToast()
 
-type TabKey = 'health' | 'config' | 'jobs' | 'keys' | 'backup' | 'deployment' | 'storage'
+type TabKey = 'health' | 'config' | 'jobs' | 'keys' | 'backup' | 'deployment' | 'storage' | 'ai'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'health', label: tr('viewsSystemView.9ac566', '健康看板') },
@@ -27,6 +28,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'backup', label: tr('viewsSystemView.823396', '备份恢复') },
   { key: 'deployment', label: tr('viewsSystemView.deploy', '部署配置') },
   { key: 'storage', label: tr('SystemView.storageTab', '存储平台') },
+  { key: 'ai', label: tr('aiConfig.tab', 'AI 能力') },
 ]
 
 const tab = ref<TabKey>('health')
@@ -447,6 +449,24 @@ interface StorageConfigResp {
   secretKey: string
   transportReady: boolean
 }
+/** 全量 + 增量迁移任务状态 */
+interface MigrationStatusResp {
+  phase: string
+  marker: string
+  targetProvider: string
+  targetEndpoint: string
+  targetBucket: string
+  targetRegion: string
+  targetPathStyle: boolean
+  sourceProvider: string
+  cursor: number
+  migrated: number
+  failed: number
+  total: number
+  pending: number
+  dualWriteFailures: number
+  requiresRestart: boolean
+}
 const storageProviders = ref<StorageProviderOption[]>([])
 const storageCurrent = ref('')
 const storageRestart = ref(false)
@@ -467,23 +487,52 @@ const storageForm = ref({
 // 权威判定在服务端（PUT 的 countAll() > 0 → Conflict），此处只做前置提示。
 const attachmentCount = computed(() => Number(health.value?.storageFiles ?? 0))
 const locatorLocked = computed(() => attachmentCount.value > 0)
+const storageEndpoint = ref('')
+const storageBucket = ref('')
+/** 表单里的定位三元组是否偏离当前生效配置（偏离且已有附件 → 必须迁移） */
+const locatorChanged = computed(() => {
+  const f = storageForm.value
+  return f.provider !== storageCurrent.value ||
+    f.endpoint.trim() !== (storageEndpoint.value || '') ||
+    f.bucket.trim() !== (storageBucket.value || '')
+})
 const selectedProvider = computed(
   () => storageProviders.value.find((p) => p.code === storageForm.value.provider) ?? null,
 )
+const migration = ref<MigrationStatusResp | null>(null)
+const migrationBusy = ref(false)
+const migrationPrompt = ref(false)
+const migrationActive = computed(() => {
+  const p = migration.value?.phase ?? ''
+  return p !== '' && p !== 'none' && p !== 'rolledback'
+})
+function migrationPhaseLabel(p: string): string {
+  if (p === 'full') return tr('SystemView.migPhaseFull', '全量迁移中')
+  if (p === 'catchup') return tr('SystemView.migPhaseCatchup', '增量追赶中')
+  if (p === 'ready') return tr('SystemView.migPhaseReady', '可切换')
+  if (p === 'done') return tr('SystemView.migPhaseDone', '已切换')
+  if (p === 'rolledback') return tr('SystemView.migPhaseRolledback', '已回滚')
+  return tr('SystemView.migPhaseNone', '未开始')
+}
 
 async function loadStorage(): Promise<void> {
-  const [list, cfg] = await Promise.all([
+  const [list, cfg, mig] = await Promise.all([
     api<StorageProvidersResp>('/admin/storage/providers'),
     api<StorageConfigResp>('/admin/storage/config'),
+    api<MigrationStatusResp>('/admin/storage/migration'),
   ])
   storageProviders.value = list.providers ?? []
   storageCurrent.value = cfg.provider || list.current
+  storageEndpoint.value = cfg.endpoint ?? ''
+  storageBucket.value = cfg.bucket ?? ''
+  migration.value = mig
   storageRestart.value = Boolean(cfg.requiresRestart || list.requiresRestart)
   storageTransportReady.value = Boolean(cfg.transportReady)
   // 后端只给脱敏值，绝不预填进表单（预填会把 *** 写回配置文件）。
   storageMask.value = { accessKey: cfg.accessKey ?? '', secretKey: cfg.secretKey ?? '' }
   storageForm.value = {
-    provider: cfg.provider || list.current,
+    // 有未生效的已配置值时展示「待生效配置」，避免切换后界面回退到旧平台
+    provider: cfg.configuredProvider || cfg.provider || list.current,
     endpoint: cfg.endpoint ?? '',
     bucket: cfg.bucket ?? '',
     region: cfg.region ?? '',
@@ -497,6 +546,12 @@ async function saveStorage(): Promise<void> {
   const f = storageForm.value
   if (f.provider !== 'local' && (!f.endpoint.trim() || !f.bucket.trim())) {
     toast.warning(tr('SystemView.storageNeedEndpoint', '对象存储平台需要填写 Endpoint 与 Bucket'))
+    return
+  }
+  // 定位三元组变化且库内已有附件：必须走「全量 + 增量」迁移，不能直接保存
+  if (locatorChanged.value && attachmentCount.value > 0) {
+    migrationPrompt.value = true
+    toast.warning(tr('SystemView.migNeeded', '存储定位已变更且库内已有附件，请先执行数据迁移'))
     return
   }
   storageBusy.value = true
@@ -518,12 +573,109 @@ async function saveStorage(): Promise<void> {
   } catch (e) {
     const err = e as Error & { status?: number }
     if (err.status === 409) {
-      toast.error(err.message + ' ' + tr('SystemView.storageConflictHint', '请先完成数据迁移（见 docs/16-对象存储迁移方案.md）后重试。'))
+      toast.error(err.message + ' ' + tr('SystemView.storageConflictHint', '请先在下方执行数据迁移后重试。'))
     } else {
       toast.error(err.message)
     }
   } finally {
     storageBusy.value = false
+  }
+}
+
+/** 准备迁移：目标配置先落 MIGRATION_*，现网配置不动，随后自动跑批。 */
+async function startMigration(): Promise<void> {
+  const f = storageForm.value
+  if (f.provider !== 'local' && (!f.endpoint.trim() || !f.bucket.trim() || !f.accessKey || !f.secretKey)) {
+    toast.warning(tr('SystemView.migNeedCreds', '对象存储迁移需要填写 Endpoint、Bucket 与访问凭据'))
+    return
+  }
+  migrationBusy.value = true
+  try {
+    migration.value = await api<MigrationStatusResp>('/admin/storage/migration/prepare', {
+      method: 'POST',
+      body: {
+        provider: f.provider,
+        endpoint: f.endpoint.trim(),
+        bucket: f.bucket.trim(),
+        region: f.region.trim(),
+        accessKey: f.accessKey,
+        secretKey: f.secretKey,
+        pathStyle: f.pathStyle,
+      },
+    })
+    migrationPrompt.value = false
+    toast.success(tr('SystemView.migPrepared', '迁移任务已创建，正在搬迁数据'))
+    // 把忙碌闸门交给 runMigration，否则它会被本函数的 true 挡住
+    migrationBusy.value = false
+    await runMigration()
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    migrationBusy.value = false
+  }
+}
+
+/** 循环执行迁移批次（全量 → 增量追赶），每批服务端落游标可续跑。 */
+async function runMigration(): Promise<void> {
+  if (migrationBusy.value) return
+  migrationBusy.value = true
+  try {
+    for (let i = 0; i < 200; i++) {
+      const s = await api<MigrationStatusResp>('/admin/storage/migration/run', {
+        method: 'POST', body: { batch: 100 },
+      })
+      migration.value = s
+      if (s.phase !== 'full' && s.phase !== 'catchup') break
+    }
+    const phase = migration.value?.phase
+    if (phase === 'ready') {
+      toast.success(tr('SystemView.migReady', '全量与增量搬迁已完成，请确认切换'))
+    } else if (phase === 'full' || phase === 'catchup') {
+      toast.warning(tr('SystemView.migBatchLimit', '本轮已执行 200 批，可再次点击继续'))
+    }
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    migrationBusy.value = false
+  }
+}
+
+async function cancelMigration(): Promise<void> {
+  migrationBusy.value = true
+  try {
+    migration.value = await api<MigrationStatusResp>('/admin/storage/migration/cancel', { method: 'POST' })
+    toast.success(tr('SystemView.migCancelled', '迁移已取消，源平台数据保持不变'))
+    await loadStorage()
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    migrationBusy.value = false
+  }
+}
+
+async function cutoverMigration(): Promise<void> {
+  migrationBusy.value = true
+  try {
+    migration.value = await api<MigrationStatusResp>('/admin/storage/migration/cutover', { method: 'POST' })
+    toast.success(tr('SystemView.migCutover', '已切换目标平台，请重启后端实例使配置生效'))
+    await loadStorage()
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    migrationBusy.value = false
+  }
+}
+
+async function rollbackMigration(): Promise<void> {
+  migrationBusy.value = true
+  try {
+    migration.value = await api<MigrationStatusResp>('/admin/storage/migration/rollback', { method: 'POST' })
+    toast.success(tr('SystemView.migRolledBack', '已回滚到源平台，请重启后端实例'))
+    await loadStorage()
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    migrationBusy.value = false
   }
 }
 
@@ -782,24 +934,24 @@ function fmtTime(ms: number | string | undefined): string {
           </span>
         </div>
 
-        <p v-if="locatorLocked" class="storage-note storage-note--lock">
-          {{ tr('SystemView.storageLocked').replace('{n}', String(attachmentCount)) }}
+        <p v-if="migrationPrompt || (locatorChanged && locatorLocked && !migrationActive)" class="storage-note storage-note--lock">
+          {{ tr('SystemView.migPrompt', '检测到 平台 / Endpoint / Bucket 变更且库内已有 {n} 个附件。直接保存会让旧 storage_key 在新平台找不到对象；请先在下方执行「全量 + 增量」迁移。').replace('{n}', String(attachmentCount)) }}
         </p>
 
         <div class="deploy__grid">
           <label class="field">
             <span class="field__label">{{ tr('SystemView.storageProvider', '存储平台') }}</span>
-            <select v-model="storageForm.provider" class="field-control" :disabled="locatorLocked">
+            <select v-model="storageForm.provider" class="field-control">
               <option v-for="p in storageProviders" :key="p.code" :value="p.code">{{ p.name }}</option>
             </select>
           </label>
           <label class="field">
             <span class="field__label">{{ tr('SystemView.storageEndpoint', 'Endpoint') }}</span>
-            <input v-model="storageForm.endpoint" class="field-control" type="text" :disabled="locatorLocked" />
+            <input v-model="storageForm.endpoint" class="field-control" type="text" />
           </label>
           <label class="field">
             <span class="field__label">{{ tr('SystemView.storageBucket', 'Bucket') }}</span>
-            <input v-model="storageForm.bucket" class="field-control" type="text" :disabled="locatorLocked" />
+            <input v-model="storageForm.bucket" class="field-control" type="text" />
           </label>
           <label class="field">
             <span class="field__label">{{ tr('SystemView.storageRegion', 'Region') }}</span>
@@ -835,7 +987,35 @@ function fmtTime(ms: number | string | undefined): string {
         <div class="deploy__actions">
           <button class="btn-primary" type="button" :disabled="storageBusy" @click="saveStorage">{{ tr('SystemView.storageSave', '保存') }}</button>
         </div>
+
+        <!-- 全量 + 增量迁移面板 -->
+        <div class="migration-panel">
+          <div class="deploy__title">{{ tr('SystemView.migTitle', '存储数据迁移') }}</div>
+          <p class="hint">{{ tr('SystemView.migDesc', '切换前先把附件密文字节从源平台搬到目标平台：全量搬迁按游标分批进行，随后进入增量追赶（新写入双写到两个平台），确认无剩余后由管理员手动切换；切换后需重启后端。') }}</p>
+
+          <div v-if="migrationActive && migration" class="migration-state">
+            <span class="st st--ok">{{ migrationPhaseLabel(migration.phase) }}</span>
+            <span>{{ tr('SystemView.migSource', '源平台') }}：<code>{{ migration.sourceProvider || '—' }}</code></span>
+            <span>{{ tr('SystemView.migTarget', '目标平台') }}：<code>{{ migration.targetProvider || '—' }}</code></span>
+            <span>{{ tr('SystemView.migProgress', '进度') }}：{{ migration.migrated }}/{{ migration.total }} · {{ tr('SystemView.migPending', '待迁') }} {{ migration.pending }} · {{ tr('SystemView.migFailed', '失败') }} {{ migration.failed }}</span>
+            <span v-if="migration.dualWriteFailures">{{ tr('SystemView.migMirrorFailures', '双写失败') }}：{{ migration.dualWriteFailures }}</span>
+          </div>
+          <p v-else class="hint">{{ tr('SystemView.migIdle', '当前没有迁移任务。修改平台 / Endpoint / Bucket 后，系统会提示开始迁移。') }}</p>
+
+          <div class="deploy__actions">
+            <button v-if="!migrationActive" class="btn-ghost" type="button" :disabled="migrationBusy || !locatorChanged" @click="startMigration">{{ tr('SystemView.migStart', '开始全量迁移') }}</button>
+            <button v-if="migrationActive && (migration?.phase === 'full' || migration?.phase === 'catchup')" class="btn-ghost" type="button" :disabled="migrationBusy" @click="runMigration">{{ tr('SystemView.migContinue', '继续搬迁') }}</button>
+            <button v-if="migration?.phase === 'ready'" class="btn-primary" type="button" :disabled="migrationBusy" @click="cutoverMigration">{{ tr('SystemView.migCutoverBtn', '确认切换') }}</button>
+            <button v-if="migrationActive && migration?.phase !== 'done'" class="btn-ghost" type="button" :disabled="migrationBusy" @click="cancelMigration">{{ tr('SystemView.migCancelBtn', '取消迁移') }}</button>
+            <button v-if="migration?.phase === 'done'" class="btn-ghost" type="button" :disabled="migrationBusy" @click="rollbackMigration">{{ tr('SystemView.migRollbackBtn', '回滚到源平台') }}</button>
+          </div>
+        </div>
       </div>
+    </template>
+
+    <!-- AI 能力配置（docs/20 §6.3） -->
+    <template v-else-if="tab === 'ai'">
+      <AiConfigPanel />
     </template>
   </section>
 
@@ -1111,5 +1291,20 @@ function fmtTime(ms: number | string | undefined): string {
   border-radius: var(--g3-sm, 12px);
   display: grid;
   gap: 4px;
+}
+.migration-panel {
+  margin-top: var(--sp-4);
+  padding: var(--sp-3);
+  border: 1px solid var(--border-color, var(--bg-hover));
+  border-radius: var(--g3-sm, 12px);
+  display: grid;
+  gap: var(--sp-2);
+}
+.migration-state {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--font-size-sm);
+  color: var(--text-secondary);
 }
 </style>

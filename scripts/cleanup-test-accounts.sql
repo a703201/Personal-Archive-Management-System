@@ -18,9 +18,60 @@ DELETE FROM cleanup_targets;
 
 INSERT INTO cleanup_targets (id)
 SELECT id FROM sys_users
- WHERE username ~ '^(e2e|it|t1owner|tenant|bench|tester|apitest|familyuser|gooduser|testadmin|captchaprobe|probe)';
+ WHERE username ~ '^(e2e|it|t1owner|tenant|bench|tester|apitest|familyuser|gooduser|testadmin|captchaprobe|probe|ams_test|test_)';
 
--- 1) 测试主体下的共享链接与条目（无 FK 级联，先于主体删除）
+-- 1) 测试条目下的依赖数据（无 FK 级联，先于条目 / 主体删除）
+DELETE FROM arc_attachment_tags
+ WHERE attachment_id IN (
+       SELECT a.id FROM arc_attachments a
+        JOIN arc_items i ON i.id = a.item_id
+        JOIN arc_subjects s ON s.id = i.subject_id
+       WHERE s.owner_id IN (SELECT id FROM cleanup_targets));
+
+DELETE FROM arc_attachment_versions
+ WHERE attachment_id IN (
+       SELECT a.id FROM arc_attachments a
+        JOIN arc_items i ON i.id = a.item_id
+        JOIN arc_subjects s ON s.id = i.subject_id
+       WHERE s.owner_id IN (SELECT id FROM cleanup_targets));
+
+DELETE FROM arc_attachments
+ WHERE item_id IN (
+       SELECT i.id FROM arc_items i
+        JOIN arc_subjects s ON s.id = i.subject_id
+       WHERE s.owner_id IN (SELECT id FROM cleanup_targets));
+
+DELETE FROM arc_item_fields
+ WHERE item_id IN (
+       SELECT i.id FROM arc_items i
+        JOIN arc_subjects s ON s.id = i.subject_id
+       WHERE s.owner_id IN (SELECT id FROM cleanup_targets));
+
+DELETE FROM arc_item_history
+ WHERE item_id IN (
+       SELECT i.id FROM arc_items i
+        JOIN arc_subjects s ON s.id = i.subject_id
+       WHERE s.owner_id IN (SELECT id FROM cleanup_targets));
+
+DELETE FROM arc_item_tags
+ WHERE item_id IN (
+       SELECT i.id FROM arc_items i
+        JOIN arc_subjects s ON s.id = i.subject_id
+       WHERE s.owner_id IN (SELECT id FROM cleanup_targets));
+
+DELETE FROM arc_item_versions
+ WHERE item_id IN (
+       SELECT i.id FROM arc_items i
+        JOIN arc_subjects s ON s.id = i.subject_id
+       WHERE s.owner_id IN (SELECT id FROM cleanup_targets));
+
+DELETE FROM arc_search_index
+ WHERE item_id IN (
+       SELECT i.id FROM arc_items i
+        JOIN arc_subjects s ON s.id = i.subject_id
+       WHERE s.owner_id IN (SELECT id FROM cleanup_targets));
+
+-- 2) 测试主体下的共享链接与条目（无 FK 级联，先于主体删除）
 DELETE FROM arc_share_links
  WHERE item_id IN (
        SELECT i.id FROM arc_items i
@@ -37,6 +88,7 @@ DELETE FROM sys_user_roles     WHERE user_id  IN (SELECT id FROM cleanup_targets
 DELETE FROM sys_sessions       WHERE user_id  IN (SELECT id FROM cleanup_targets);
 DELETE FROM sys_user_totp      WHERE user_id  IN (SELECT id FROM cleanup_targets);
 DELETE FROM sys_password_reset WHERE user_id  IN (SELECT id FROM cleanup_targets);
+DELETE FROM sys_login_failures WHERE user_ref IN (SELECT CAST(id AS TEXT) FROM cleanup_targets);
 DELETE FROM nft_messages       WHERE user_id  IN (SELECT id FROM cleanup_targets);
 DELETE FROM imp_export_tasks   WHERE user_id  IN (SELECT id FROM cleanup_targets);
 DELETE FROM fam_members        WHERE user_id  IN (SELECT id FROM cleanup_targets);

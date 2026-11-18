@@ -132,6 +132,15 @@ public interface SessionStore {
     func findByRefreshTokenHash(hash: String): ?Session
 
     /**
+     * 查找已被轮换掉的刷新令牌哈希 → 对应用户。
+     * 命中即判定为重放（旧令牌再次使用），必须吊销该用户全部会话。
+     */
+    func findUsedRefreshHash(hash: String): ?String
+
+    /** 轮换时把旧哈希标记为已使用，供后续重放检测。 */
+    func markRefreshHashUsed(hash: String, uid: String): Unit
+
+    /**
      * 吊销某用户的全部会话（全局登出 / 检测到重放时调用）。
      */
     func revokeAllByUser(uid: String): Int64
@@ -325,6 +334,14 @@ public class TokenService {
             case CryptoResult.Err(e) => return CryptoResult.Err(e)
         }
 
+        // 旧令牌已被轮换？命中即重放：吊销该用户全部会话并上报（reuseDetected=true）
+        match (this.sessions.findUsedRefreshHash(hash)) {
+            case Some(uid) =>
+                this.sessions.revokeAllByUser(uid)
+                return CryptoResult.Ok(("", "", true))
+            case None => ()
+        }
+
         // 找到持有该刷新令牌哈希的会话
         let found = this.sessions.findByRefreshTokenHash(hash)
 
@@ -390,7 +407,8 @@ public class TokenService {
             case CryptoResult.Err(e) => return CryptoResult.Err(e)
         }
 
-        // 更新会话：换新哈希 + 刷新活动时间
+        // 更新会话：换新哈希 + 刷新活动时间；旧哈希进重放黑名单
+        this.sessions.markRefreshHashUsed(s.refreshTokenHash, s.uid)
         s.refreshTokenHash = newHash
         s.lastActiveAt = Times.nowMillis()
         this.sessions.save(s)

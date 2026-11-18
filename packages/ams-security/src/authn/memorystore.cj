@@ -19,6 +19,8 @@ import std.sync.*
  * 线程安全：所有写操作加锁。
  */
 public class MemorySessionStore <: SessionStore {
+    /** 已轮换掉的刷新令牌哈希 → uid（重放检测；生产应落库） */
+    private let usedRefreshHashes: HashMap<String, String> = HashMap<String, String>()
     private let sessions: HashMap<String, Session>
     private let lock: Mutex
 
@@ -91,6 +93,25 @@ public class MemorySessionStore <: SessionStore {
                 }
             }
             return None
+        } finally {
+            this.lock.unlock()
+        }
+    }
+
+    /** 已轮换的哈希命中即重放；返回所属用户供上层吊销其全部会话。 */
+    public func findUsedRefreshHash(hash: String): ?String {
+        this.lock.lock()
+        try {
+            return this.usedRefreshHashes.get(hash)
+        } finally {
+            this.lock.unlock()
+        }
+    }
+
+    public func markRefreshHashUsed(hash: String, uid: String): Unit {
+        this.lock.lock()
+        try {
+            this.usedRefreshHashes[hash] = uid
         } finally {
             this.lock.unlock()
         }

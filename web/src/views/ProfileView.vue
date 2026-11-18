@@ -21,6 +21,7 @@ import { useRouter } from 'vue-router'
 import { api, clearToken } from '../api/client'
 import AppSheet from '../components/AppSheet.vue'
 import { useToast } from '../composables/useToast'
+import { useAiCapabilities } from '../composables/useAiCapabilities'
 
 const router = useRouter()
 const toast = useToast()
@@ -264,6 +265,31 @@ async function saveNotifyPrefs(): Promise<void> {
     toast.error((e as Error).message)
   } finally {
     notifyBusy.value = false
+  }
+}
+
+// ---------------------------------------------------------------
+// AI 服务偏好（docs/20 §6.9 · 用户侧唯一恢复开关）
+// ---------------------------------------------------------------
+const { caps: aiCaps, refresh: refreshAi, setOptOut } = useAiCapabilities()
+const aiPrefBusy = ref(false)
+/** true = 使用 AI；false = 不使用（opt-out）。偏好存服务端，跨设备一致（OQ12） */
+const aiUse = computed<boolean>(() => aiCaps.value.aiEnabled && !aiCaps.value.optOut)
+
+async function toggleAiUse(): Promise<void> {
+  aiPrefBusy.value = true
+  try {
+    await setOptOut(aiUse.value) // 当前使用中 → 关闭；当前关闭 → 恢复
+    await refreshAi()
+    toast.success(
+      aiUse.value
+        ? t('aiPref.enabled', '已启用 AI 服务')
+        : t('aiPref.disabled', '已关闭 AI 服务，所有 AI 入口已隐藏')
+    )
+  } catch (e) {
+    toast.error((e as Error).message)
+  } finally {
+    aiPrefBusy.value = false
   }
 }
 
@@ -566,6 +592,28 @@ async function changePassword(): Promise<void> {
         </div>
       </div>
 
+      <!-- AI 服务偏好（用户侧唯一恢复开关，关闭态也保留；docs/20 §6.9.3） -->
+      <h2 class="section-title">{{ t('aiPref.title', 'AI 服务偏好') }}</h2>
+      <div class="card ai-pref">
+        <label class="ai-pref__row">
+          <input
+            type="checkbox"
+            :checked="aiUse"
+            :disabled="aiPrefBusy"
+            @change="toggleAiUse"
+          />
+          <span>
+            <strong>{{ t('aiPref.use', '使用 AI 服务') }}</strong>
+            <small>{{
+              t('aiPref.hint', '关闭后所有 AI 入口与内容将从各页面隐藏；偏好保存在服务端，跨设备一致')
+            }}</small>
+          </span>
+        </label>
+        <p class="ai-pref__state">
+          {{ aiUse ? t('aiPref.on', '当前：已启用') : t('aiPref.off', '当前：未使用 AI 服务') }}
+        </p>
+      </div>
+
       <h2 class="section-title">{{ t('ProfileView.51cb2d', '权限点（') }}{{ me.perms.length }}{{ t('ProfileView.fa354c', '）') }}</h2>
       <div class="card">
         <div v-for="(list, domain) in groupedPerms" :key="domain" class="perm-group">
@@ -591,7 +639,7 @@ async function changePassword(): Promise<void> {
             class="field-control"
             type="email"
             autocomplete="email"
-            ::placeholder="t('ProfileView.9dd0bc', 'me?.email || \'未设置\'')"
+            :placeholder="me?.email || t('ProfileView.72a414', '未设置')"
           />
         </label>
         <label class="field">
@@ -601,7 +649,7 @@ async function changePassword(): Promise<void> {
             class="field-control"
             type="tel"
             autocomplete="tel"
-            ::placeholder="me?.phone || t('ProfileView.72a414', '未设置')"
+            :placeholder="me?.phone || t('ProfileView.72a414', '未设置')"
           />
         </label>
       </div>
@@ -887,6 +935,13 @@ async function changePassword(): Promise<void> {
   margin-top: var(--sp-2);
   color: var(--accent);
 }
+
+/* AI 服务偏好 */
+.ai-pref { display: grid; gap: 10px; }
+.ai-pref__row { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.ai-pref__row span { display: grid; gap: 3px; }
+.ai-pref__row small { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.ai-pref__state { margin: 0; font-size: 12px; color: var(--text-secondary); }
 
 /* 通知偏好 */
 .notify {

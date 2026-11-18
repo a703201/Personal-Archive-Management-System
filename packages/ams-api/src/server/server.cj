@@ -186,7 +186,7 @@ public class ApiServer {
                 // 路径存在但方法不匹配 → 405；否则 404
                 if (this.router.hasPath(path)) {
                     return ApiResponse.error(
-                        AppErrorKind.ValidationFailed,
+                        AppErrorKind.MethodNotAllowed,
                         "请求方法不被允许",
                         req.requestId
                     )

@@ -24,6 +24,9 @@ import std.collection.*
 import std.sync.*
 import stdx.net.http.*
 
+import ams.api.http.*
+import ams.kernel.error.*
+
 /**
  * 支持 ":param" 占位的请求分发器。
  */
@@ -165,12 +168,17 @@ public class ParamDistributor <: HttpRequestDistributor {
 
 /**
  * 404 处理器。
+ *
+ * 统一走 ApiResponse.error 信封（code/message/requestId），
+ * 与 AMS 路由层的 404 形状一致，前端无需为分发器兜底写特例分支。
  */
 public class NotFoundHandler <: HttpRequestHandler {
     public func handle(ctx: HttpContext): Unit {
-        ctx.responseBuilder
-           .status(404)
-           .body("404 Not Found")
-           .build()
+        let resp = ApiResponse.error(AppErrorKind.NotFound, "接口不存在", "")
+        let rb = ctx.responseBuilder.status(UInt16(resp.status))
+        for ((k, v) in resp.headers) {
+            rb.header(k, v)
+        }
+        rb.body(resp.body).build()
     }
 }

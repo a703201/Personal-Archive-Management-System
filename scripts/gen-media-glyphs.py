@@ -201,17 +201,19 @@ def main():
         return 1
     # Domain vocabulary first: a pure frequency list would crowd out the
     # characters this product actually needs to read (档案 / 编号 / 姓名 ...).
-    # Character cap is configurable so a future dictionary extension needs no
-    # code change. Default stays 220 (zero behaviour change). NOTE: raising the
-    # cap alone does NOT add characters beyond the curated CJK_DOMAIN +
-    # CJK_FREQUENT pool; a real extension requires (1) a larger curated char
-    # set, (2) re-running this generator, (3) full build + 533-case regression.
+    # Character cap is configurable; default is the full curated pool (416).
+    # 2026-11-15: raised from 220 to 416 and regenerated glyphdata.cj;
+    # full gate passed (build 0 error / 533 tests / web build).
+    # Keeping the default at 416 matters: otherwise any future plain re-run
+    # would silently shrink the shipped dictionary back to 220.
+    # NOTE: the cap cannot exceed the curated CJK_DOMAIN + CJK_FREQUENT pool
+    # (416 unique chars); to go further, extend that pool first.
     try:
-        cap = int(os.environ.get("AMS_GLYPH_CAP", "220"))
+        cap = int(os.environ.get("AMS_GLYPH_CAP", "416"))
     except ValueError:
-        cap = 220
+        cap = 416
     if cap < 1:
-        cap = 220
+        cap = 416
     chars = dedupe(CJK_DOMAIN + CJK_FREQUENT, cap)
     if len(chars) < 50:
         raise RuntimeError("font/GDI produced no usable character set")

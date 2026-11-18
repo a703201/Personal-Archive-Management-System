@@ -9,6 +9,8 @@
 #   ├── web/          前端 SPA 静态产物（index.html + assets/）
 #   ├── config/       配置模板（不含密钥）
 #   ├── scripts/      启停 / 健康检查
+#   ├── db/migrations/ 数据库迁移 SQL（26 个，保持目录结构随包分发）
+#   ├── deploy/scripts/ 迁移执行脚本 migrate.sh（容器内 init 任务）
 #   ├── docs/         部署说明
 #   ├── LICENSE / NOTICE
 #   ├── VERSION
@@ -226,6 +228,34 @@ else
     chmod +x "$STAGE/bin/$SERVER_DEST" 2>/dev/null || true
 fi
 
+# ---- 3.5 数据库迁移脚本 ----
+# 发布包必须自带迁移 SQL 与执行器：部署方在 init 容器内跑 migrate.sh，
+# 按逐文件台账 _ams_migrations 登记已成功的迁移；缺了这些文件，首次部署
+# 只能得到空库、后续新增迁移也无从补跑（见 deploy/scripts/migrate.sh 顶部注释）。
+# 保持 db/migrations/ 与 deploy/scripts/ 的目录结构，migrate.sh 里写死的
+# /migrations/*.sql 挂载路径由 compose 映射，这里仅保证包内产物齐全。
+echo "[3.5/6] 数据库迁移脚本..."
+mkdir -p "$STAGE/db/migrations" "$STAGE/deploy/scripts"
+MIG_COUNT=0
+for f in db/migrations/*.sql; do
+    [ -f "$f" ] || continue
+    cp "$f" "$STAGE/db/migrations/"
+    MIG_COUNT=$((MIG_COUNT + 1))
+done
+echo "      迁移 SQL：${MIG_COUNT} 个"
+if [ "$MIG_COUNT" -eq 0 ]; then
+    echo "[ERROR] 未找到 db/migrations/*.sql，发布包缺少迁移脚本。"
+    exit 1
+fi
+if [ -f deploy/scripts/migrate.sh ]; then
+    cp deploy/scripts/migrate.sh "$STAGE/deploy/scripts/"
+    chmod +x "$STAGE/deploy/scripts/migrate.sh" 2>/dev/null || true
+    echo "      migrate.sh：已随包分发"
+else
+    echo "[ERROR] 未找到 deploy/scripts/migrate.sh，发布包缺少迁移执行器。"
+    exit 1
+fi
+
 # ---- 4. 配置模板 ----
 echo "[4/6] 配置模板..."
 cat > "$STAGE/config/application.env" <<'ENVEOF'
@@ -261,7 +291,9 @@ AMS_DB_PORT=15432
 AMS_DB_NAME=ams
 AMS_DB_USER=gaussdb
 AMS_DB_PASSWORD=
-AMS_DB_SSLMODE=disable
+# 注：旧模板里那条数据库 SSL 模式的环境变量开关已删除 —— 服务端不读取它，
+#     openGauss 驱动只认连接串里的 sslmode 参数（见 packages/ams-data/src/db/db.cj），
+#     保留只会让人误以为改它就能控制 TLS。
 
 # ---- 令牌签名密钥 ----
 # ⚠️ 必须 ≥ 32 字节；生产**必须**显式设置（默认值仅供本地开发）。
@@ -441,6 +473,8 @@ ${PKG_NAME}/
 ├── web/            前端 SPA（index.html + assets/）
 ├── config/         配置模板（application.env）
 ├── scripts/        启动与健康检查
+├── db/migrations/  数据库迁移 SQL（26 个，按文件名顺序执行）
+├── deploy/scripts/ 迁移执行器 migrate.sh（部署时由 init 容器调用）
 ├── launcher/       桌面启动器（Windows: .ps1/.cmd；Linux: .sh/.desktop）
 └── docs/           变更说明
 \`\`\`
@@ -490,6 +524,17 @@ scripts\\start.cmd        # Windows
 
 > ⚠️ 数据库口令**不要**做 percent-encoding：驱动不解码 \`%XX\`，
 > 编码后会导致认证失败（SQLSTATE 28P01）。
+
+## 3.5 数据库迁移
+
+发布包随附 \`db/migrations/*.sql\`（26 个）与 \`deploy/scripts/migrate.sh\`。
+容器化部署时由 compose 的 init 服务把它们分别挂载到 \`/migrations\` 与
+\`/migrate.sh\` 并执行；脚本按文件名顺序逐一应用，成功一个就在
+\`_ams_migrations\` 台账登记一个，**已登记的不会重复执行**，新增迁移会在
+下次起栈时自动补跑。需要强制重跑全部迁移时给 migrate.sh 传 \`--force\`。
+物理机部署可直接对目标库依次执行这些 SQL（注意 openGauss 不支持
+\`ALTER TABLE ... ADD COLUMN IF NOT EXISTS\`，迁移内用 DO 块 + information_schema
+守卫保证幂等）。
 
 ## 4. 前后端同端口的路由规则
 

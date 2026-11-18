@@ -10,7 +10,7 @@
 #
 # ⚠️ 前提（只需在源码变更后重跑）：
 #   bash deploy/scripts/build-linux-docker.sh   # 产出 build/linux/ 与 web/dist/
-#   该脚本会经由 Dockerfile.prebuilt 自动构建 ams:1.3.2（若镜像已存在则不重建）。
+#   该脚本会经由 Dockerfile.prebuilt 自动构建 ams:1.4.0（若镜像已存在则不重建）。
 #
 # 用法：
 #   cp deploy/compose/.env.example deploy/compose/.env   # 首次必做，按需修改
@@ -81,18 +81,30 @@ if docker network ls --format '{{.Name}}' | grep -qx ams-net; then
 fi
 
 # 起整个栈（db + init + ams）
-docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d $BUILD_FLAG
+# 本脚本用 set -uo pipefail（没有 -e），故必须显式检查 up 的退出码，
+# 否则 compose 失败后脚本仍继续轮询，最终给出误导性的「访问」提示。
+if ! docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d $BUILD_FLAG; then
+  echo "[ERROR] docker compose up 失败，启动中止。" >&2
+  exit 1
+fi
 
 # 等待健康检查
 echo "=== 等待健康检查（/api/health）==="
+HEALTH_OK=0
 for i in $(seq 1 60); do
   code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/api/health" 2>/dev/null)
   if [ "$code" = "200" ]; then
     echo "health OK (HTTP 200) after ${i}s"
+    HEALTH_OK=1
     break
   fi
   sleep 1
 done
+if [ "$HEALTH_OK" != "1" ]; then
+  echo "[ERROR] 60s 内 /api/health 未返回 HTTP 200，健康检查超时，启动失败。" >&2
+  echo "        可用 docker compose -p $PROJECT -f $COMPOSE_FILE ps / logs 排查。" >&2
+  exit 1
+fi
 
 echo ""
 echo "访问："

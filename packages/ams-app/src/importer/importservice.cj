@@ -21,6 +21,7 @@ package ams.app.importer
 import std.collection.*
 
 import ams.app.audit.*
+import ams.app.item.*
 import ams.crypto.provider.*
 import ams.data.repo.*
 import ams.kernel.error.*
@@ -132,6 +133,8 @@ public class ImportService {
     private let fieldDefRepo: ?FieldDefRepo
     /** 扩展字段明细仓储（FR-IMP-005 自定义字段落库用） */
     private let itemFieldRepo: ?ItemFieldRepo
+    /** 敏感字段加密（高敏自定义列绝不明文落库） */
+    private let fieldCipher: ?FieldCipher
 
     private static let BATCH: Int64 = 200
     private static let MAX_ROWS: Int64 = 5000
@@ -154,7 +157,8 @@ public class ImportService {
         crypto!: ?CryptoProvider = None,
         signKey!: String = "",
         fieldDefRepo!: ?FieldDefRepo = None,
-        itemFieldRepo!: ?ItemFieldRepo = None
+        itemFieldRepo!: ?ItemFieldRepo = None,
+        fieldCipher!: ?FieldCipher = None
     ) {
         this.itemRepo = itemRepo
         this.userRepo = userRepo
@@ -166,6 +170,7 @@ public class ImportService {
         this.signKey = signKey
         this.fieldDefRepo = fieldDefRepo
         this.itemFieldRepo = itemFieldRepo
+        this.fieldCipher = fieldCipher
     }
 
     /** 模板 CSV（表头 + 一行示例，示例行以 # 开头便于识别） */
@@ -273,8 +278,8 @@ public class ImportService {
                     done = done + 1
                     // FR-IMP-005：模板映射带来的自定义字段，解析为 field_def 后落 arc_item_fields
                     if (!r.customFields.isEmpty()) {
-                        let unresolved =
-                            this.writeCustomFields(newId, r.category, actorId, r.customFields, defCache)
+                        let unresolved = this.writeCustomFields(
+                            newId, r.subjectId, r.category, actorId, r.customFields, defCache)
                         for (u in unresolved) {
                             errSb.append("${r.line},row," +
                                 "${ImportService.cell(u)} 未在分类 ${r.category} 的字段定义中找到，已忽略\n")
@@ -345,6 +350,7 @@ public class ImportService {
      */
     private func writeCustomFields(
         itemId: Int64,
+        subjectId: Int64,
         category: Int64,
         actorId: Int64,
         custom: HashMap<String, String>,
@@ -364,7 +370,20 @@ public class ImportService {
             var hit = false
             for (fd in defs) {
                 if (fd.fieldKey == key) {
-                    ifr.save(itemId, fd.id, fd.dataType, value)
+                    if (fd.sensitivity >= 2) {
+                        let fc = match (this.fieldCipher) {
+                            case Some(c) => c
+                            case None => throw AppError(AppErrorKind.CryptoFailure,
+                                "导入敏感字段需要加密服务，拒绝明文落库")
+                        }
+                        let sealed = match (fc.encrypt(subjectId, category, fd.fieldKey, value)) {
+                            case CryptoResult.Ok(hex) => hex
+                            case CryptoResult.Err(e) => throw e
+                        }
+                        ifr.saveEncrypted(itemId, fd.id, sealed)
+                    } else {
+                        ifr.save(itemId, fd.id, fd.dataType, value)
+                    }
                     hit = true
                     break
                 }

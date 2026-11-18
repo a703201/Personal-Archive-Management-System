@@ -142,6 +142,7 @@ TOP_ORDER=(
     ams-core
     ams-data
     ams-security
+    ams-ai
     ams-kit
     ams-app
     ams-api

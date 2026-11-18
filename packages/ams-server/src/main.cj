@@ -35,6 +35,8 @@ import ams.api.http.*
 import ams.api.middleware.*
 import ams.api.routes.*
 import ams.api.server.*
+import ams.ai.*
+import ams.app.ai.*
 import ams.app.auth.*
 import ams.app.audit.*
 import ams.app.authz.*
@@ -46,6 +48,7 @@ import ams.app.item.*
 import ams.app.notification.*
 import ams.app.scheduler.*
 import ams.app.search.*
+import ams.app.storage.*
 import ams.app.subject.*
 import ams.crypto.impl.*
 import ams.crypto.key.*
@@ -271,7 +274,7 @@ main(): Int64 {
     // 版本号与 web/package.json、CHANGELOG 保持一致（唯一口径；此前硬编码 0.1.0）
     let envLabel = if (isProductionEnv()) { "production" } else { "dev" }
     log.info("server.boot", None, [
-        ("version", "1.3.2"),
+        ("version", "1.4.0"),
         ("env", envLabel),
         ("httpHost", config.httpHost),
         ("httpPort", "${config.httpPort}"),
@@ -280,6 +283,9 @@ main(): Int64 {
 
     // ---- 5. 数据层 ----
     let db = Database(config.db)
+    // 运行时可变状态统一走 DB：会话 / 验证码 / 分片上传 / 失败计数 / 调度租约
+    // （未配置时相关模块保持内存态，单实例部署零回归）
+    RuntimeStateDb.configure(db)
     if (!db.ping()) {
         log.error("server.db.unavailable", None, [("db", config.db.redactedUrl())])
         return 1
@@ -299,7 +305,7 @@ main(): Int64 {
     // ---- 6. 安全层 ----
     let policy = PasswordPolicy()
     let hasher = PasswordHasher(provider, policy)
-    let sessions = MemorySessionStore()
+    let sessions = DbSessionStore(db)
     let tokenService = TokenService(
         provider,
         TokenConfig(
@@ -376,6 +382,9 @@ main(): Int64 {
     NotifyRoutes(ConfigRepo(db)).register(router)
     // 多语言框架（FR-CFG-009）：公开只读的语言清单出口。
     I18nRoutes().register(router)
+
+    // AI 能力接入（docs/20）：AiRoutes 依赖 attachmentService / fieldDefRepo，
+    // 故在附件域构造完成后再注册（见下方 AiRoutes 注册点）。
     // 首次部署向导（公开、仅初始化前可用）+ 部署配置管理（system:admin）
     SetupRoutes(userRepo, roleRepo, authService, deployStore, spool: mailSpool).register(router)
     DeploymentRoutes(deployStore, mailSpool).register(router)
@@ -424,7 +433,8 @@ main(): Int64 {
         userRepo,
         versionRepo: itemVersionRepo,
         searchService: searchService,
-        tagRepo: TagRepo(db)
+        tagRepo: TagRepo(db),
+        attachmentRepo: AttachmentRepo(db)
     ).register(router)
 
     // ---- 字段定义与扩展字段（FR-ARCH-003 / 004 / 005）----
@@ -436,7 +446,12 @@ main(): Int64 {
     // ② 字段定义 CRUD（ARCH-003）+ 条目扩展字段明细读写（ARCH-004）
     FieldDefRoutes(fieldDefRepo, userRepo).register(router)
     // 扩展字段值参与索引内容，保存后需重建索引；敏感字段按规则落盲索引（FR-SRC-005）
-    ItemFieldRoutes(itemRepo, fieldDefRepo, itemFieldRepo, userRepo, searchService: searchService, blindIndexService: blindIndexService).register(router)
+    // 高敏字段加密：按 (主体, 分类, 字段) 派生 DEK，密文写 value_enc（S-1）
+    let fieldCipher = FieldCipher(provider, kek)
+    let fieldBackfill = FieldBackfillService(itemFieldRepo, itemRepo, fieldCipher)
+    ItemFieldRoutes(itemRepo, fieldDefRepo, itemFieldRepo, userRepo,
+                    searchService: searchService, blindIndexService: blindIndexService,
+                    fieldCipher: fieldCipher, backfill: fieldBackfill).register(router)
 
     // ---- 导出接口（FR-EXP-004 / FR-EXP-007）----
     // 配额由共享 rateLimiter 计量；导出审计经 auditRecorder 落库
@@ -497,7 +512,8 @@ main(): Int64 {
         crypto: provider,
         signKey: exportSignKey,
         fieldDefRepo: fieldDefRepo,
-        itemFieldRepo: itemFieldRepo
+        itemFieldRepo: itemFieldRepo,
+        fieldCipher: fieldCipher
     )
     ImportRoutes(
         importService,
@@ -591,6 +607,8 @@ main(): Int64 {
     let keyManager = KeyManager(provider, { keyId: String => kek })
     let storageRoot = getVariable("AMS_STORAGE_DIR") ?? "./data-attachments"
     let attachmentRepo = AttachmentRepo(db)
+    // 存储迁移期双写开关：未开启迁移时为 None，零开销、零行为变化
+    let dualWrite = StorageDualWrite(deployStore: deployStore)
     let attachmentService = AttachmentService(
         attachmentRepo,
         StorageBackends.make(storageRoot, "attachments"),
@@ -600,8 +618,15 @@ main(): Int64 {
         provider,
         itemRepo: itemRepo,
         userRepo: userRepo,
-        storageProvider: StorageProviders.currentCode()
+        storageProvider: StorageProviders.currentCode(),
+        dualWrite: dualWrite
     )
+    // 存储迁移服务：源后端按当前生效配置构造，目标配置只写 MIGRATION_*，
+    // 不覆盖现网配置；cutover 前重启仍读源平台。
+    let migrationService = StorageMigrationService(
+        deployStore, attachmentRepo,
+        StorageBackends.make(storageRoot, "attachments"),
+        storageRoot, dualWrite)
     AttachmentRoutes(
         attachmentService,
         attachmentRepo,
@@ -609,6 +634,20 @@ main(): Int64 {
         crypto: provider,
         recorder: auditRecorder
     ).register(router)
+
+    // ---- AI 能力接入（docs/20）----
+    // 依赖 attachmentService（解密读明文）与 fieldDefRepo（字段模板），
+    // 故注册点必须在两者构造之后。AiService 只读 deployStore / configRepo。
+    let aiService = AiService(deployStore, configRepo)
+    let aiRecognize = AiRecognizeService(aiService, fieldDefRepo)
+    let aiIntake = AiIntakeService(aiRecognize, attachmentService, attachmentRepo, fieldDefRepo)
+    let aiQuery = AiQueryService(aiService, searchService, userRepo)
+    let aiText = AiTextService(aiService, itemRepo, itemFieldRepo, fieldDefRepo)
+    let aiAdmin = AiAdminService(deployStore, configRepo)
+    AiRoutes(aiService, intake: aiIntake, recognizer: aiRecognize,
+             query: aiQuery, text: aiText, admin: aiAdmin,
+             itemRepo: itemRepo, attachmentRepo: attachmentRepo,
+             userRepo: userRepo).register(router)
 
     // ---- 附件批量导入（FR-IMP-002）：ZIP → 目录名映射到条目 ----
     // 必须放在 attachmentService 之后：它是本功能的核心依赖（逐文件解密/落库）。
@@ -658,7 +697,10 @@ main(): Int64 {
     ).register(router)
 
     // ---- Q2 多厂商存储平台选择（cfg:read / cfg:manage）----
-    StorageAdminRoutes(deployStore, attachmentRepo, recorder: auditRecorder).register(router)
+    StorageAdminRoutes(deployStore, attachmentRepo, recorder: auditRecorder,
+                       migration: migrationService).register(router)
+    // 全量 + 增量迁移：与配置接口共用 cfg:read / cfg:manage 权限模型
+    StorageMigrationRoutes(migrationService, recorder: auditRecorder).register(router)
 
     // ---- 审计查询接口（FR-AUD-003/004）----
     // auditRecorder 已在上面创建（供 AuthService 记录登录/登出）

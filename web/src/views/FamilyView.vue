@@ -739,7 +739,7 @@ onMounted(async () => {
     <!-- ---------- 组详情 ---------- -->
     <AppSheet
       v-model="showDetail"
-      :title="t('FamilyView.f95cbd', 'detail?.name ?? \'家庭组\'')"
+      :title="detail?.name ?? t('FamilyView.f95cbd', '家庭组')"
       size="lg"
       @close="closeDetail"
     >
@@ -928,7 +928,7 @@ onMounted(async () => {
         />
         <p class="field__hint">{{ t('FamilyView.9269c0', '最多 32 个字符。名称仅组内成员可见。') }}</p>
       </div>
-      <p v-if="createError" class="hint hint--error">{{ createError }}</p>
+      <p v-if="createError" class="hint hint--error" aria-live="polite">{{ createError }}</p>
       <template #footer>
         <button class="btn-text" type="button" :disabled="creating" @click="showCreate = false">
           {{ t('common.cancel', '取消') }}

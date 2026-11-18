@@ -29,6 +29,9 @@ public enum AppErrorKind {
     | StorageFailure
     | DatabaseFailure
     | Internal
+    // 新增成员一律追加在末尾：仓颉枚举按声明序编码，
+    // 插在中间会让未重编的静态库把 CryptoFailure 误读成别的成员。
+    | MethodNotAllowed
 }
 
 /**
@@ -41,6 +44,7 @@ public func kindToCode(kind: AppErrorKind): String {
         case AppErrorKind.Unauthorized => "UNAUTHORIZED"
         case AppErrorKind.Forbidden => "FORBIDDEN"
         case AppErrorKind.NotFound => "NOT_FOUND"
+        case AppErrorKind.MethodNotAllowed => "METHOD_NOT_ALLOWED"
         case AppErrorKind.Conflict => "CONFLICT"
         case AppErrorKind.RateLimited => "RATE_LIMITED"
         case AppErrorKind.QuotaExceeded => "QUOTA_EXCEEDED"
@@ -63,6 +67,7 @@ public func kindToHttpStatus(kind: AppErrorKind): Int64 {
         case AppErrorKind.Unauthorized => 401
         case AppErrorKind.Forbidden => 403
         case AppErrorKind.NotFound => 404
+        case AppErrorKind.MethodNotAllowed => 405
         case AppErrorKind.Conflict => 409
         case AppErrorKind.PayloadTooLarge => 413
         case AppErrorKind.UnsupportedMediaType => 415

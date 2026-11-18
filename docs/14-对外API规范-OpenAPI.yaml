@@ -26,6 +26,7 @@ servers:
 security:
   - bearerAuth: []
 tags:
+  - name: ai
   - name: admin
   - name: attachments
   - name: audit
@@ -930,6 +931,33 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/audit/anchor:
+    post:
+      operationId: post_admin_audit_anchor
+      tags: [admin]
+      summary: POST /api/admin/audit/anchor —— 落每日审计链头锚点
+      parameters:
+        - name: externalRef
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -2086,6 +2114,270 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /api/ai/parse-file:
+    post:
+      operationId: post_ai_parse-file
+      tags: [ai]
+      summary: POST /api/ai/parse-file
+      description: 新建档案时一次性文件解析（base64），不落库；返回字段候选含来源与置信度（docs/20 §5.6）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data, fileName, category]
+              properties:
+                data: { type: string, description: 文件内容的 base64 编码 }
+                fileName: { type: string, description: 带扩展名的文件名，支持 jpg/jpeg/png/pdf }
+                category: { type: integer, description: 档案分类，决定字段模板 }
+                subjectId: { type: integer, description: 主体 id（用于主体级字段定义） }
+      responses:
+        '200':
+          description: 字段候选；失败以 reason 码返回，不暴露堆栈
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string }
+                  data:
+                    type: object
+                    properties:
+                      fields:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            code: { type: string }
+                            label: { type: string }
+                            value: { type: string }
+                            confidence: { type: number }
+                            sourcePage: { type: integer }
+                            needsReview: { type: boolean }
+                      engine: { type: string }
+                      reason: { type: string }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/ai/capabilities:
+    get:
+      operationId: get_ai_capabilities
+      tags: [ai]
+      summary: GET /api/ai/capabilities
+      description: AI 能力发现；关闭态由后端统一判定，字段以代码为准（docs/20 §6.9.1）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/ai/config:
+    get:
+      operationId: get_admin_ai_config
+      tags: [ai, admin]
+      summary: GET /api/admin/ai/config
+      description: 读取 AI 配置（API 密钥脱敏为 ***）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+    put:
+      operationId: put_admin_ai_config
+      tags: [ai, admin]
+      summary: PUT /api/admin/ai/config
+      description: 保存 AI provider/模型/端点/密钥与开关；密钥留空或 *** 表示不修改
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/ai/test:
+    post:
+      operationId: post_admin_ai_test
+      tags: [ai, admin]
+      summary: POST /api/admin/ai/test
+      description: AI provider 连通性测试（最小请求，不回显响应正文）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/summary/items/{id}:
+    post:
+      operationId: post_summary_items_id
+      tags: [ai]
+      summary: POST /api/summary/items/{id}
+      description: S 域条目摘要（Grounded，候选返回不自动落库；docs/20 §5.2）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/advice/items/{id}:
+    post:
+      operationId: post_advice_items_id
+      tags: [ai]
+      summary: POST /api/advice/items/{id}
+      description: A 域分类建议（只读候选，采纳走既有编辑接口；docs/20 §5.4）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/search/ask:
+    post:
+      operationId: post_search_ask
+      tags: [ai, search]
+      summary: POST /api/search/ask
+      description: Q 域自然语言查询；NL→白名单条件→现有 SearchService，归属由服务端注入（docs/20 §5.3）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/attachments/{id}/ai-parse:
+    post:
+      operationId: post_attachments_id_ai-parse
+      tags: [ai, attachments]
+      summary: POST /api/attachments/{id}/ai-parse
+      description: V5 附件解析；返回字段候选（来源页/置信度），失败只给原因码（docs/20 §5.6）
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/me/ai-preference:
+    put:
+      operationId: put_me_ai-preference
+      tags: [ai]
+      summary: PUT /api/me/ai-preference
+      description: 用户级 AI 偏好（opt-out）；归属恒取自鉴权上下文，请求体不接受 userId
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
   /api/i18n/locales:
     get:
       operationId: get_i18n_locales
@@ -2872,6 +3164,27 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/items/encrypt-fields:
+    post:
+      operationId: post_admin_items_encrypt_fields
+      tags: [admin]
+      summary: POST /api/admin/items/encrypt-fields —— 历史明文敏感字段加密回填（幂等）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -3697,7 +4010,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/ServerError'
-
+
     post:
       operationId: post_roles
       tags: [roles]
@@ -4450,7 +4763,7 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/ServerError'
-
+
     get:
       operationId: get_users_by_id
       tags: [users]
@@ -4818,6 +5131,182 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/storage/migration:
+    get:
+      operationId: get_admin_storage_migration
+      tags: [admin]
+      summary: GET /api/admin/storage/migration —— 迁移阶段与进度（不含凭据）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/storage/migration/prepare:
+    post:
+      operationId: post_admin_storage_migration_prepare
+      tags: [admin]
+      summary: POST /api/admin/storage/migration/prepare —— 设定目标方案并开启全量+增量迁移
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 已有迁移任务进行中
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/storage/migration/run:
+    post:
+      operationId: post_admin_storage_migration_run
+      tags: [admin]
+      summary: POST /api/admin/storage/migration/run —— 执行一批搬迁（全量/增量追赶）
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 当前阶段不可执行搬迁
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/storage/migration/cancel:
+    post:
+      operationId: post_admin_storage_migration_cancel
+      tags: [admin]
+      summary: POST /api/admin/storage/migration/cancel —— 取消迁移（切换前）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/storage/migration/cutover:
+    post:
+      operationId: post_admin_storage_migration_cutover
+      tags: [admin]
+      summary: POST /api/admin/storage/migration/cutover —— 确认切换（需重启后端）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 未就绪或仍有待迁附件
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/admin/storage/migration/rollback:
+    post:
+      operationId: post_admin_storage_migration_rollback
+      tags: [admin]
+      summary: POST /api/admin/storage/migration/rollback —— 回滚到源平台（需重启后端）
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 没有可回滚的迁移任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiEnvelope'
         '500':
           $ref: '#/components/responses/ServerError'
 

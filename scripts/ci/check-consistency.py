@@ -15,7 +15,7 @@ Checks:
   6. OpenAPI: delegate to scripts/ci/check-openapi.py
   7. version consistency: web/package.json vs server boot log
   8. compose credentials: three mandatory `:?` variables
-  9. workflow YAML parses (when PyYAML is available)
+  9. workflow YAML syntax gate (PyYAML -> ruby -> conservative stdlib lint; never silent SKIP)
   10. every HTTP route declared in code is documented in the OpenAPI spec
 
 Exit 0 = PASS, 1 = FAIL.
@@ -34,7 +34,11 @@ KNOWN_DUP_MIGRATIONS = {"007"}
 #   ams-api/src/middleware/tenantquota.cj（配额闸门）
 #   ams-api/src/routes/tenantregistry.cj（租户注册/引导）
 # 二者都是 ams.api -> ams.data.repo 的正常向下依赖，未引入反向或跨层引用。
-API_REPO_BASELINE = 26
+# 2026-11-18 由 26 上调至 28：AI 能力批次新增 ams-api/src/routes/ai.cj
+#   （读仓库取知识库条目），同日 AI IDOR 修复又在该文件加对象级归属校验；
+#   二者都只是 ams.api -> ams.data.repo 的向下依赖，
+#   未引入反向或跨层引用。仍严格禁止 ams.app/core 向上依赖 ams.api。
+API_REPO_BASELINE = 28
 
 
 def read(path):
@@ -202,25 +206,90 @@ def check_compose():
         ok("compose credentials: 3 mandatory variables, no dev defaults")
 
 
+def _yaml_by_ruby(files):
+    """Full YAML parse via ruby (stdlib Psych) when PyYAML is unavailable.
+    Returns number of failing files, or None when ruby is not installed.
+    """
+    import shutil
+    ruby = shutil.which("ruby")
+    if not ruby:
+        return None
+    script = ("require 'yaml'; "
+              "d = YAML.load_file(ARGV[0]); "
+              "abort('not a mapping with jobs') unless d.is_a?(Hash) && d.key?('jobs')")
+    bad = 0
+    for f in files:
+        p = subprocess.run([ruby, "-e", script, str(f)], cwd=str(ROOT),
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if p.returncode != 0:
+            tail = p.stdout.decode("utf-8", "replace").strip().splitlines()
+            fail("workflow YAML parse error (ruby) in %s: %s" %
+                 (f.name, tail[-1] if tail else "unknown error"))
+            bad += 1
+    return bad
+
+
+def _yaml_lint_stdlib(files):
+    """Conservative stdlib sanity check; catches only unambiguous errors so a
+    valid workflow never false-positives. NOT a full YAML parser - callers must
+    print a prominent WARN that full parsing was skipped.
+    """
+    bad = 0
+    for f in files:
+        text = f.read_text(encoding="utf-8")
+        errs = []
+        if "\t" in text:
+            errs.append("tab character found (YAML forbids tabs)")
+        top_keys = []
+        for line in text.splitlines():
+            if not line or line[0].isspace() or line.lstrip().startswith("#"):
+                continue
+            m = re.match(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*:", line)
+            if m:
+                top_keys.append(m.group(1))
+        if "jobs" not in top_keys:
+            errs.append("missing top-level 'jobs:' key")
+        for e in errs:
+            fail("workflow YAML lint %s: %s" % (f.name, e))
+        if errs:
+            bad += 1
+    return bad
+
+
 def check_workflows():
+    files = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    if not files:
+        fail("no workflow YAML files found under .github/workflows")
+        return
     try:
         import yaml
     except ImportError:
-        print("[SKIP] PyYAML unavailable, workflow YAML parse skipped")
-        return
-    files = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
-    bad = 0
-    for f in files:
-        try:
-            data = yaml.safe_load(f.read_text(encoding="utf-8"))
-            if not isinstance(data, dict) or "jobs" not in data:
-                fail("workflow not a valid mapping with jobs: " + f.name)
+        yaml = None
+    if yaml is not None:
+        bad = 0
+        for f in files:
+            try:
+                data = yaml.safe_load(f.read_text(encoding="utf-8"))
+                if not isinstance(data, dict) or "jobs" not in data:
+                    fail("workflow not a valid mapping with jobs: " + f.name)
+                    bad += 1
+            except Exception as e:
+                fail("workflow YAML parse error in %s: %s" % (f.name, type(e).__name__))
                 bad += 1
-        except Exception as e:
-            fail("workflow YAML parse error in %s: %s" % (f.name, type(e).__name__))
-            bad += 1
-    if not bad:
-        ok("workflow YAML: %d files parsed" % len(files))
+        if not bad:
+            ok("workflow YAML: %d files parsed (PyYAML)" % len(files))
+        return
+    # 绝不静默跳过：依次退到 ruby 全量解析、保守 stdlib lint，并显著警告。
+    print("[WARN] PyYAML unavailable - full workflow YAML parse is NOT performed.")
+    ruby_bad = _yaml_by_ruby(files)
+    if ruby_bad is not None:
+        if not ruby_bad:
+            ok("workflow YAML: %d files parsed (ruby YAML.load_file)" % len(files))
+        return
+    print("[WARN] ruby also unavailable - falling back to conservative stdlib lint only.")
+    print("[WARN] For full YAML validation install: python -m pip install pyyaml")
+    if not _yaml_lint_stdlib(files):
+        ok("workflow YAML (stdlib lint): %d files structurally OK; full parse SKIPPED" % len(files))
 
 
 def main():

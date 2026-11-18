@@ -139,6 +139,59 @@ public class AuditRepo {
     }
 
     /**
+     * 落每日审计链头锚点（FR-AUD-004 外部锚定）。
+     * 同一天重复调用按唯一索引幂等覆盖 external_ref / 时间。
+     */
+    public func saveAnchor(
+        anchorDate: String, hash: Array<Byte>, recordCount: Int64,
+        anchoredBy: Int64, externalRef: String
+    ): Unit {
+        // openGauss 不支持 ON CONFLICT（实测语法错误），用 NOT EXISTS 做幂等
+        let sql = "INSERT INTO aud_chain_anchors " +
+                  "(id, anchor_date, chain_head_hash, record_count, anchored_at, anchored_by, external_ref) " +
+                  "SELECT ?, ?::date, ?, ?, CURRENT_TIMESTAMP, ?, ? " +
+                  "WHERE NOT EXISTS (SELECT 1 FROM aud_chain_anchors WHERE anchor_date = ?::date)"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            st.set(0, Ids.next())
+            st.set(1, anchorDate)
+            st.set(2, hash)
+            st.set(3, recordCount)
+            st.set(4, anchoredBy)
+            st.set(5, externalRef)
+            st.set(6, anchorDate)
+            st.update()
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /** 最近一条链头锚点：(日期, 哈希 hex, 记录数, 外部引用)。 */
+    public func latestAnchor(): Option<(String, String, Int64, String)> {
+        let sql = "SELECT TO_CHAR(anchor_date, 'YYYY-MM-DD') AS d, " +
+                  "encode(chain_head_hash, 'hex') AS h, record_count AS n, " +
+                  "COALESCE(external_ref, '') AS ref " +
+                  "FROM aud_chain_anchors ORDER BY anchor_date DESC LIMIT 1"
+        let c = this.db.connect()
+        try {
+            let st = c.prepareStatement(sql)
+            let rows = readRows(st.query()).all()
+            if (rows.isEmpty()) {
+                return None
+            }
+            let r = rows[0]
+            return Some((r.str("d"), r.str("h"), r.i64("n"), r.str("ref")))
+        } catch (e: Exception) {
+            throw toDbError(e)
+        } finally {
+            c.close()
+        }
+    }
+
+    /**
      * 取指定序号记录的 record_hash（十六进制解码为字节）。
      *
      * 用于「子段校验」：校验 [from, ...) 段时，需要段前一条记录的

@@ -60,6 +60,8 @@ public class ChineseTokenizer {
                     sb.append(chars[j])
                     j = j + 1
                 }
+                // 英文/数字词整体入库。不完整输入（openEule）由搜索层 LIKE 兜底，
+                // 不在索引里发前缀 token —— 避免索引膨胀且存量数据无需重建。
                 ChineseTokenizer.emit(out, seen, ChineseTokenizer.lower(sb.toString()))
                 i = j
             } else if (ChineseTokenizer.isCjkChar(first)) {
@@ -184,6 +186,14 @@ public class ChineseTokenizer {
             return false
         }
         return c[0] >= 0x80u8
+    }
+
+    /** 文本是否含 CJK/非 ASCII 字符（供搜索层决定走 LIKE 兜底）。 */
+    public static func containsCjk(text: String): Bool {
+        for (c in text.toArray().iterator()) {
+            if (c >= 0x80u8) { return true }
+        }
+        return false
     }
 
     /**

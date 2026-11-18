@@ -18,10 +18,16 @@
  */
 import { ref, computed, onMounted } from 'vue'
 import { t as tr } from '../i18n'
-import { api } from '../api/client'
+import { api, getToken } from '../api/client'
+import { shouldUseChunked, uploadChunked } from '../api/chunkedUpload'
 import AppSheet from '../components/AppSheet.vue'
 import AttachmentPanel from '../components/AttachmentPanel.vue'
 import ShareLinkPanel from '../components/ShareLinkPanel.vue'
+import AiFeatureGate from '../components/AiFeatureGate.vue'
+import AiAskPanel from '../components/AiAskPanel.vue'
+import AiIntakePanel from '../components/AiIntakePanel.vue'
+import AiFileImport from '../components/AiFileImport.vue'
+import AiInsightPanel from '../components/AiInsightPanel.vue'
 import DatePicker from '../components/DatePicker.vue'
 import { CATEGORY_DEFS as CATEGORIES, catName, categorySensitivity, sensitivityLabel } from '../composables/useCatalog'
 import { useToast } from '../composables/useToast'
@@ -69,7 +75,7 @@ const SOURCE_LABELS: Record<number, string> = {
   0: tr('viewsArchiveView.2a4a4d', '手动'),
   1: tr('viewsArchiveView.b7d837', 'CSV 导入'),
   2: tr('viewsArchiveView.6e6045', '克隆'),
-  3: 'OCR',
+  3: tr('ArchiveView.bb5ace', 'OCR 识别'),
   4: tr('viewsArchiveView.1e77ab', '附件导入'),
   5: tr('viewsArchiveView.3685ba', '导出包回导'),
 }
@@ -155,6 +161,14 @@ const createdTo = ref('')
 const loading = ref(true)
 const error = ref('')
 
+// Q 域：AI 增强搜索（复用同一个搜索入口，不新增独立搜索按钮）
+const aiSearchOn = ref(false)
+const aiItemIds = ref<number[] | null>(null)
+const aiCond = ref<{ keyword: string; category: number[]; expiresTo: string } | null>(null)
+const aiSearchBusy = ref(false)
+// 新建档案时 AI 导入选中的原图：保存后自动上传为附件
+const pendingAiFile = ref<File | null>(null)
+
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / size)))
 const activeSubject = computed<Subject | null>(
   () => subjects.value.find((s) => s.id === activeSubjectId.value) ?? null,
@@ -184,8 +198,15 @@ async function loadItems(): Promise<void> {
     q.set('page', String(page.value))
     q.set('size', String(size))
     const res = await api<{ items: Item[]; total: number }>(`/items?${q.toString()}`)
-    items.value = res.items ?? []
-    total.value = Number(res.total ?? 0)
+    let list = res.items ?? []
+    // AI 模式命中集：以 AI 返回的 itemIds 为准在主列表内过滤（仍是同一份列表/分页 UI）
+    if (aiItemIds.value) {
+      // 雪花 ID 超 2^53：统一转字符串比较，Number() 会精度丢失导致命中项被过滤掉
+      const set = new Set(aiItemIds.value.map(String))
+      list = list.filter((it) => set.has(String(it.id)))
+    }
+    items.value = list
+    total.value = aiItemIds.value ? list.length : Number(res.total ?? 0)
   } catch (e) {
     error.value = (e as Error).message
     items.value = []
@@ -197,7 +218,34 @@ async function loadItems(): Promise<void> {
 
 async function reload(): Promise<void> {
   page.value = 1
+  aiItemIds.value = null
+  aiCond.value = null
+  if (aiSearchOn.value && keyword.value.trim()) {
+    aiSearchBusy.value = true
+    try {
+      const r = await api<{
+        keyword: string; category: number[]; expiresTo: string; itemIds: number[]; reason: string
+      }>('/search/ask', { method: 'POST', body: { question: keyword.value.trim() } })
+      // 有明确命中 → 主列表按 id 过滤；否则把理解出的条件并入普通搜索
+      if (r.itemIds && r.itemIds.length > 0) {
+        aiItemIds.value = r.itemIds
+        aiCond.value = { keyword: r.keyword, category: r.category, expiresTo: r.expiresTo }
+      } else if (r.keyword) {
+        keyword.value = r.keyword
+      }
+    } catch {
+      // AI 不可用 → 静默回退普通搜索，不阻断用户
+    } finally {
+      aiSearchBusy.value = false
+    }
+  }
   await loadItems()
+}
+
+/** 关闭 AI 增强模式：清空 AI 过滤，回到普通搜索 */
+async function setAiSearch(on: boolean): Promise<void> {
+  aiSearchOn.value = on
+  await reload()
 }
 
 function selectSubject(id: string): void {
@@ -449,6 +497,7 @@ const form = ref({
   expiresAt: '',
   issuer: '',
   remark: '',
+  source: 0, // 0=手动；AI 文件导入建档时自动设为 3（OCR 识别）
 })
 
 const fieldDefs = ref<FieldDef[]>([])
@@ -465,6 +514,7 @@ function resetForm(): void {
     expiresAt: '',
     issuer: '',
     remark: '',
+    source: 0,
   }
   fieldValues.value = {}
   originalValues.value = {}
@@ -489,6 +539,7 @@ async function loadFieldDefs(cat: number): Promise<void> {
 
 async function openCreate(): Promise<void> {
   resetForm()
+  pendingAiFile.value = null
   formMode.value = 'create'
   showForm.value = true
   await loadFieldDefs(form.value.category)
@@ -517,6 +568,7 @@ async function openEdit(it: Item): Promise<void> {
     expiresAt: '',
     issuer: it.issuer ?? '',
     remark: it.remark ?? '',
+    source: Number(it.source ?? 0),
   }
   showForm.value = true
   await loadFieldDefs(form.value.category)
@@ -546,6 +598,54 @@ function changedFields(): Record<string, string> {
   return out
 }
 
+/**
+ * AI 预选原图的后台附件上传。
+ *
+ * 不能放在 save() 的 await 链里：分片上传任一请求挂起会让「保存中…」永远不消失，
+ * 尽管档案本体早已落库。这里独立推进，失败只提示，不回滚已创建的档案。
+ */
+async function uploadPendingAiFile(itemId: string, f: File, subjectId: string): Promise<void> {
+  const toastId = toast.info(tr('aiFileImport.attachUploading', '附件上传中…'), 0)
+  try {
+    const meta = {
+      itemId,
+      subjectId,
+      fileName: f.name,
+      title: f.name.replace(/\.[^.]+$/, ''),
+      category: 10,
+    }
+    if (shouldUseChunked(f)) {
+      await uploadChunked(f, meta)
+    } else {
+      const q = new URLSearchParams({
+        itemId,
+        title: meta.title,
+        fileName: f.name,
+        category: '10',
+      })
+      const ctrl = new AbortController()
+      const timer = window.setTimeout(() => ctrl.abort(), 60000)
+      try {
+        const up = await fetch(`/api/attachments?${q.toString()}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream', Authorization: `Bearer ${getToken()}` },
+          body: f,
+          signal: ctrl.signal,
+          credentials: 'same-origin',
+        })
+        if (!up.ok) throw new Error(`HTTP ${up.status}`)
+      } finally {
+        window.clearTimeout(timer)
+      }
+    }
+    toast.remove(toastId)
+    toast.success(tr('aiFileImport.attachDone', '附件已上传'))
+  } catch {
+    toast.remove(toastId)
+    toast.info(tr('aiFileImport.attachFailed', '附件上传失败，档案已创建，可在详情页手动上传'))
+  }
+}
+
 async function save(): Promise<void> {
   if (!form.value.title.trim()) {
     toast.warning(tr('viewsArchiveView.0eeb5d', '请填写标题'))
@@ -572,6 +672,7 @@ async function save(): Promise<void> {
           expiresAt: form.value.expiresAt,
           issuer: form.value.issuer,
           remark: form.value.remark,
+          source: form.value.source,
         },
       })
       itemId = String(res.id)
@@ -594,9 +695,18 @@ async function save(): Promise<void> {
     if (Object.keys(fields).length > 0) {
       await api(`/items/${itemId}/fields`, { method: 'PUT', body: fields })
     }
+    // 档案本体已落库：先释放「保存中」并关闭表单，AI 原图改为后台上传。
+    // 上传耗时/挂起不再阻塞建档结果（用户实测：大图分片上传时按钮一直转）。
+    const pending = formMode.value === 'create' ? pendingAiFile.value : null
+    const pendingSubject = activeSubjectId.value
+    pendingAiFile.value = null
     toast.success(formMode.value === 'create' ? tr('viewsArchiveView.created', '档案已创建') : tr('viewsArchiveView.06ad0b', '档案已更新'))
     showForm.value = false
+    saving.value = false
     await loadItems()
+    if (pending) {
+      void uploadPendingAiFile(String(itemId), pending, pendingSubject)
+    }
   } catch (e) {
     toast.error((e as Error).message)
   } finally {
@@ -634,6 +744,118 @@ function editFromDetail(): void {
   if (!it) return
   showDetail.value = false
   void openEdit(it)
+}
+
+/**
+ * 采纳 AI 候选字段到编辑表单（docs/20 §5.5 / §5.6）。
+ *
+ * 规则：
+ *   - 先切到编辑态（openEdit 会读回现有值），再写入 → 不覆盖用户已填
+ *   - 仅填空值（form 基础字段 + 扩展字段 fieldValues）
+ *   - 不自动保存：用户仍需点「保存」，走既有编辑接口（P10）
+ */
+/**
+ * 把 AI 候选写入当前表单（仅填空值），详情采纳与新建预填共用。
+ *
+ * 关键：同一个 code 可能同时对应「基础字段」与「分类专属字段」两处
+ * （如 issuer = 基础"签发机构" + 专属"颁发机构"），两处都要尝试填，
+ * 不能命中基础就 continue —— 否则专属必填字段会留空（用户实测反馈）。
+ */
+function applyAiFields(payload: { code: string; label: string; value: string }[]): number {
+  const BASIC_FIELDS: Record<string, keyof typeof form.value> = {
+    title: 'title', issuer: 'issuer', issuer_: 'issuer',
+    issuedDate: 'issuedDate', issue_date: 'issuedDate',
+    expiresAt: 'expiresAt', valid_until: 'expiresAt', expiryDate: 'expiresAt',
+    expire_date: 'expiresAt',
+    remark: 'remark',
+  }
+  const DATE_CODES = new Set(['issuedDate', 'issue_date', 'expiresAt', 'valid_until', 'expiryDate', 'expire_date'])
+
+  let applied = 0
+  for (const c of payload) {
+    let v = (c.value ?? '').trim()
+    if (!v) continue
+    // 模型常返回 "May 13, 2029" 等可读日期；DatePicker/date input 要 yyyy-mm-dd
+    if (DATE_CODES.has(c.code)) v = normalizeDate(v)
+
+    // ① 基础字段
+    const basic = BASIC_FIELDS[c.code]
+    if (basic && !(form.value[basic] as string)) {
+      ;(form.value[basic] as string) = v
+      applied++
+    }
+    // ② 分类专属字段（与基础字段不互斥，同一 code 可同时填两处）
+    if (fieldDefs.value.some((fd) => fd.fieldKey === c.code) && !(fieldValues.value[c.code] ?? '').trim()) {
+      fieldValues.value[c.code] = v
+      applied++
+    }
+  }
+
+  return applied
+}
+
+/** 把模型返回的可读日期归一化为 yyyy-mm-dd；无法识别则原样返回（不编造）。 */
+function normalizeDate(v: string): string {
+  const t = v.trim()
+  // 已是 yyyy-mm-dd
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t
+  // yyyy/mm/dd 或 yyyy年m月d日
+  let m = t.match(/^(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})日?/)
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+  // 英文 "May 13, 2029" / "13 May 2029"
+  const months: Record<string, string> = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+  }
+  m = t.match(/^([A-Za-z]{3,})\s+(\d{1,2}),?\s+(\d{4})$/)
+  if (m && months[m[1].slice(0, 3).toLowerCase()]) {
+    return `${m[3]}-${months[m[1].slice(0, 3).toLowerCase()]}-${m[2].padStart(2, '0')}`
+  }
+  m = t.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$/)
+  if (m && months[m[2].slice(0, 3).toLowerCase()]) {
+    return `${m[3]}-${months[m[2].slice(0, 3).toLowerCase()]}-${m[1].padStart(2, '0')}`
+  }
+  // "Not specified" / 空 / 无法解析 → 返回空串（不塞进日期框）
+  return ''
+}
+
+async function handleAiAdopt(
+  payload: { code: string; label: string; value: string }[]
+): Promise<void> {
+  const it = detailItem.value
+  if (!it || payload.length === 0) return
+  showDetail.value = false
+  await openEdit(it)
+  const applied = applyAiFields(payload)
+  if (applied > 0) {
+    toast.success(tr('aiIntake.applied', '已填入 {n} 个字段，请核对后保存').replace('{n}', String(applied)))
+  } else {
+    toast.info(tr('aiIntake.noApply', '字段已有值或不在当前模板中，未做覆盖'))
+  }
+}
+
+/** 新建档案时采纳 AI 预填：表单已打开，直接写当前表单（不覆盖、不自动保存） */
+function handleCreateAiAdopt(payload: { code: string; label: string; value: string }[]): void {
+  // 从文件 AI 识别建档 → 来源标记为 3（OCR 识别），便于按来源筛选
+  form.value.source = 3
+  const applied = applyAiFields(payload)
+  if (applied > 0) {
+    toast.success(tr('aiIntake.applied', '已填入 {n} 个字段，请核对后保存').replace('{n}', String(applied)))
+  } else {
+    toast.info(tr('aiIntake.noApply', '字段已有值或不在当前模板中，未做覆盖'))
+  }
+}
+
+/** 采纳 AI 分类建议：切到编辑态并设置分类（不自动保存，P10） */
+async function handleAdoptCategory(code: number): Promise<void> {
+  const it = detailItem.value
+  if (!it || code < 1 || code > 11) return
+  showDetail.value = false
+  await openEdit(it)
+  form.value.category = code
+  form.value.sensitivity = catSensitivity(code)
+  await loadFieldDefs(code)
+  toast.success(tr('aiInsight.categorySet', '分类已设为建议值，请核对后保存'))
 }
 
 // ---------------------------------------------------------------
@@ -752,7 +974,7 @@ function inputType(t: number | string): string {
       <div>
         <h1 class="page-title">{{ tr('ArchiveView.3ca928', '档案') }}</h1>
         <p class="page-sub">
-          {{ tr('ArchiveView.totalCount', '共 {n} 条', { n: total }) }}
+          {{ tr('viewsArchiveView.totalCount', `共 ${total} 条`, { n: total }) }}
           <template v-if="activeSubject"> {{ tr('ArchiveView.2eaeb7', '· 当前主体') }} {{ activeSubject.name }}</template>
         </p>
       </div>
@@ -826,9 +1048,33 @@ function inputType(t: number | string): string {
           @change="reload"
         />
       </div>
-      <button class="btn-ghost" type="button" @click="reload">{{ tr('ArchiveView.711363', '搜索') }}</button>
+      <button class="btn-ghost" type="button" :disabled="aiSearchBusy" @click="reload">
+        {{ aiSearchBusy ? tr('aiAsk.busy', '搜索中…') : tr('ArchiveView.711363', '搜索') }}
+      </button>
+      <!-- AI 增强搜索：融合进原搜索框，只是一个模式开关，不是独立按钮/入口 -->
+      <AiFeatureGate domain="query">
+        <label class="ai-search-toggle" :title="tr('aiAsk.toggleHint', '开启后可用自然语言搜索，理解条件由 AI 解析')">
+          <input type="checkbox" :checked="aiSearchOn" @change="setAiSearch(($event.target as HTMLInputElement).checked)" />
+          <span>{{ tr('aiAsk.toggle', 'AI 增强') }}</span>
+        </label>
+      </AiFeatureGate>
       <button class="btn-text" type="button" @click="openRecycle">{{ tr('ArchiveView.64ea87', '回收站') }}</button>
     </div>
+
+    <!-- Q 域：AI 理解条件（复用同一搜索入口，不是独立搜索区；关闭态整块不渲染） -->
+    <AiFeatureGate v-if="aiCond" domain="query">
+      <p class="ai-search-cond">
+        <span>{{ tr('aiAsk.understood', '理解条件') }}：</span>
+        <code v-if="aiCond.keyword">{{ aiCond.keyword }}</code>
+        <code v-if="aiCond.category.length">{{ aiCond.category.map((c) => catName(c)).join('、') }}</code>
+        <code v-if="aiCond.expiresTo">{{ tr('aiAsk.expiresBefore', '有效期至') }} {{ aiCond.expiresTo }}</code>
+      </p>
+    </AiFeatureGate>
+
+    <!-- Q 域问答式搜索：自然语言问题 → 解析条件与命中条目（关闭态整块不渲染） -->
+    <AiFeatureGate domain="query">
+      <AiAskPanel />
+    </AiFeatureGate>
 
     <p v-if="error" class="hint hint--error">{{ error }}</p>
     <div v-else-if="loading" class="list" aria-hidden="true">
@@ -987,6 +1233,18 @@ function inputType(t: number | string): string {
           </select>
         </label>
 
+        <!-- AI 文件导入预填（docs/20 §5.6）：新建时选本地文件 → 解析 → 候选预填，关闭态整块移除 -->
+        <div v-if="formMode === 'create'" class="field--full">
+          <AiFeatureGate domain="vision">
+            <AiFileImport
+              :category="form.category"
+              :subject-id="activeSubjectId"
+              @adopt="handleCreateAiAdopt"
+              @file-selected="pendingAiFile = $event"
+            />
+          </AiFeatureGate>
+        </div>
+
         <label class="field">
           <span class="field__label">{{ tr('ArchiveView.c8165b', '敏感度') }}</span>
           <select v-model.number="form.sensitivity" class="field-control">
@@ -1086,10 +1344,30 @@ function inputType(t: number | string): string {
         </dl>
 
         <!-- 附件（上传 / 预览水印 / 版本对比 / 批量操作） -->
-        <AttachmentPanel v-if="detailItem" :item-id="Number(detailItem.id)" />
+        <AttachmentPanel v-if="detailItem" :item-id="detailItem.id" />
+
+        <!-- AI 录入辅助（docs/20 §5.6）：关闭态整块不渲染 -->
+        <AiFeatureGate v-if="detailItem" domain="vision">
+          <AiIntakePanel
+            :item-id="detailItem.id"
+            @adopt="handleAiAdopt"
+          />
+        </AiFeatureGate>
+
+        <!-- S 档案总结 / A 智能建议（docs/20 §5.2 / §5.4） -->
+        <AiFeatureGate v-if="detailItem" domain="summary">
+          <AiInsightPanel :item-id="detailItem.id" domain="summary" />
+        </AiFeatureGate>
+        <AiFeatureGate v-if="detailItem" domain="advice">
+          <AiInsightPanel
+            :item-id="detailItem.id"
+            domain="advice"
+            @adopt-category="handleAdoptCategory"
+          />
+        </AiFeatureGate>
 
         <!-- 共享链接（FR-ACL-011 / FR-ACL-012） -->
-        <ShareLinkPanel v-if="detailItem" :item-id="Number(detailItem.id)" />
+        <ShareLinkPanel v-if="detailItem" :item-id="detailItem.id" />
       </template>
       <div class="sheet-actions">
         <button class="btn-ghost" type="button" @click="showDetail = false">{{ tr('ArchiveView.6c14bd', '关闭') }}</button>
@@ -1310,6 +1588,21 @@ function inputType(t: number | string): string {
 }
 .toolbar__dash {
   color: var(--text-soft);
+}
+/* AI 增强搜索：融入原工具栏的小开关，不是独立搜索面板 */
+.ai-search-toggle {
+  display: inline-flex; align-items: center; gap: var(--sp-1);
+  font-size: var(--font-size-sm); color: var(--text-secondary);
+  padding: 0 var(--sp-2); cursor: pointer; white-space: nowrap;
+}
+.ai-search-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
+.ai-search-cond {
+  display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center;
+  margin: 0 0 var(--sp-3); font-size: var(--font-size-sm); color: var(--text-secondary);
+}
+.ai-search-cond code {
+  background: var(--bg-hover); color: var(--text-primary);
+  padding: 2px 8px; border-radius: var(--g3-sm, 6px);
 }
 
 /* 列表 */
